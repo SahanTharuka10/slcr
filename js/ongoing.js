@@ -53,17 +53,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Stage 1: Render Local Cache Immediately (Fast Load)
     renderOngoing(); 
     
-    // Stage 2: Synchronize with Cloud (Background)
+    // Stage 2: Synchronize with Cloud immediately so cross-device matches appear after refresh.
     if (typeof syncCloudData === 'function') {
-        await syncCloudData({ silent: true }); 
+        await syncCloudData({ forceRefresh: true, silent: true }); 
     }
     
     // Stage 3: Render Final Results after sync
     renderOngoing();
+    startAutoRefresh();
 });
 
 function startAutoRefresh() {
-  // Manual polling removed. syncCloudData now handles live refreshes.
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(() => {
+        if (typeof syncCloudData === 'function') {
+            syncCloudData({ forceRefresh: true, silent: true });
+        }
+    }, 5000);
 }
 
 function refreshAll() {

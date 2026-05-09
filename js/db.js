@@ -1448,8 +1448,10 @@ async function syncCloudData(options = {}) {
     if (window._isEditingRoster && !options.forceRefresh) return;
 
 
-    // Don't hammer a sleeping server — wait for it to wake first
-    if (!_serverAwake && !options.forceRefresh) return;
+    // Silent background syncs should still try once; Socket.IO/wake flags can lag behind page load.
+    if (!_serverAwake && !options.forceRefresh) {
+        wakeUpServer(1).catch(() => {});
+    }
 
     _isSyncingCloud = true;
     const NOW = Date.now();
@@ -1661,9 +1663,13 @@ wakeUpServer().then(awake => {
     }
 });
 
-// Polled background sync (only when server is confirmed awake)
+// Polled background sync. Fetch polling is the reliability fallback for cross-device updates.
 const _isOverlayTab  = window.location.pathname.includes('overlay.html');
 const _isPublicTab   = window.location.pathname.includes('ongoing-matches.html');
 const _isContributor = window.location.pathname.includes('score-match.html') || window.location.pathname.includes('admin.html');
 const _pollIntervalMs = _isOverlayTab ? 3000 : (_isPublicTab ? 4000 : (_isContributor ? 3000 : 12000));
-setInterval(() => { if (_serverAwake) syncCloudData({ silent: true }); }, _pollIntervalMs);
+setInterval(() => {
+    if (BACKEND_BASE_URL || (window.CricproCloud && (window.CricproCloud.hasFirebaseConfig() || window.CricproCloud.hasSupabaseConfig()))) {
+        syncCloudData({ forceRefresh: _isPublicTab || _isContributor, silent: true });
+    }
+}, _pollIntervalMs);
