@@ -20,5 +20,5 @@ window.CRICPRO_CLOUD_CONFIG = {
     },
 
     // Optional Express backend fallback. Set to "" for Vercel + Firebase/Supabase only.
-    backendUrl: ""
+    backendUrl: "https://slcr.onrender.com"
 };
