@@ -743,10 +743,18 @@ app.post('/api/matches/:id/report', async (req, res) => {
   if (!data || !data.id) return res.status(400).json({ error: 'Missing report id' });
   try {
     await ensureDB();
-    await MatchReport.upsert({ ...data, matchId: req.params.id });
+    const report = {
+      id: data.id,
+      matchId: data.matchId || req.params.id,
+      data,
+      generatedAt: data.generatedAt || Date.now(),
+      version: data.version || '1.0'
+    };
+    await MatchReport.upsert(report);
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to save match report' });
+    console.error('Failed to save match report:', e);
+    res.status(500).json({ error: 'Failed to save match report', details: e.message });
   }
 });
 
