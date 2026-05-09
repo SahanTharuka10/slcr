@@ -1070,6 +1070,19 @@ function syncToCloudServices(type, data) {
     }
 }
 
+function getStoredTournamentScoringToken(tournamentId) {
+    if (!tournamentId) return null;
+    try {
+        const authMap = JSON.parse(localStorage.getItem('cricpro_scoring_auth') || '{}');
+        const auth = authMap[tournamentId];
+        if (!auth || !auth.token || !auth.exp || auth.exp < Date.now()) return null;
+        if (auth.token === 'local-token' || auth.token === 'local-creator' || auth.token === 'cloud-verified') return null;
+        return auth.token;
+    } catch (_) {
+        return null;
+    }
+}
+
 function syncToDB(type, data) {
     syncToCloudServices(type, data);
     if (!BACKEND_BASE_URL) return;
@@ -1109,6 +1122,9 @@ function syncToDB(type, data) {
 
     console.log(`📡 Syncing ${type} to: ${BACKEND_BASE_URL + endpoint}`);
     let token = localStorage.getItem('cricpro_token');
+    if (!token && type === 'match' && syncPayload && syncPayload.tournamentId) {
+        token = getStoredTournamentScoringToken(syncPayload.tournamentId);
+    }
     const expiry = parseInt(localStorage.getItem('cricpro_token_expiry') || '0');
     if (expiry && Date.now() > expiry) {
         console.warn('Sync token expired (local expiration). Clearing it.');
@@ -1119,7 +1135,7 @@ function syncToDB(type, data) {
 
     // Security check: Only skip if NOT on localhost AND the tournament is explicitly locked AND we have no valid token.
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isScoringPage = window.location.pathname.includes('score-match.html');
+    const isScoringPage = window.location.pathname.includes('score-match');
     
     if (!isLocal && !isScoringPage && type === 'match' && syncPayload && syncPayload.tournamentId && !token) {
         const tournament = (DB && DB.getTournament) ? DB.getTournament(syncPayload.tournamentId) : null;
