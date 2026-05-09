@@ -8,10 +8,23 @@ const BROADCAST_KEYS = {
     DATA: 'cricpro_broadcast_data'
 };
 
+function getCurrentBroadcastMatch() {
+    if (window.currentMatch) return window.currentMatch;
+    if (typeof currentMatch !== 'undefined' && currentMatch) return currentMatch;
+    return null;
+}
+
+function getCurrentBroadcastTournament() {
+    if (window.currentTournament) return window.currentTournament;
+    if (typeof currentTournament !== 'undefined' && currentTournament) return currentTournament;
+    return null;
+}
+
 function getBroadcastMatchSnapshot() {
-    if (typeof currentMatch === 'undefined' || !currentMatch) return null;
+    const m = getCurrentBroadcastMatch();
+    if (!m) return null;
     try {
-        const copy = JSON.parse(JSON.stringify(currentMatch));
+        const copy = JSON.parse(JSON.stringify(m));
         delete copy.history;
         delete copy.redoStack;
         delete copy._isSyncing;
@@ -25,9 +38,9 @@ function getBroadcastMatchSnapshot() {
 const Broadcast = {
     _buildBroadcastData(cmd, data = {}) {
         if (data && Object.keys(data).length > 0) return data;
-        if (typeof currentMatch === 'undefined' || !currentMatch) return data;
+        const m = getCurrentBroadcastMatch();
+        if (!m) return data;
 
-        const m = currentMatch;
         const inn = m.innings?.[m.currentInnings || 0];
         if (!inn) return data;
 
@@ -95,9 +108,11 @@ const Broadcast = {
         data = this._buildBroadcastData(cmd, data);
         const matchSnapshot = getBroadcastMatchSnapshot();
         if (matchSnapshot && !data.match) data = { ...data, match: matchSnapshot };
-        const scopeTournamentId = (typeof currentMatch !== 'undefined' && currentMatch && currentMatch.tournamentId) ||
-            (typeof currentTournament !== 'undefined' && currentTournament && currentTournament.id) || null;
-        const scopeMatchId = (typeof currentMatch !== 'undefined' && currentMatch && currentMatch.id) || null;
+        const activeMatch = getCurrentBroadcastMatch();
+        const activeTournament = getCurrentBroadcastTournament();
+        const scopeTournamentId = (activeMatch && activeMatch.tournamentId) ||
+            (activeTournament && activeTournament.id) || null;
+        const scopeMatchId = (activeMatch && activeMatch.id) || null;
         const payload = {
             cmd,
             data,
@@ -145,17 +160,18 @@ const Broadcast = {
      * Trigger the "Runs Needed" motion graphic
      */
     showRunsNeeded() {
-        if (!currentMatch) return;
-        const inn0 = currentMatch.innings[0];
-        const inn1 = currentMatch.innings[1];
-        if (currentMatch.currentInnings !== 1 || !inn0 || !inn1) {
+        const m = getCurrentBroadcastMatch();
+        if (!m) return showToast('No active match', 'error');
+        const inn0 = m.innings?.[0];
+        const inn1 = m.innings?.[1];
+        if (m.currentInnings !== 1 || !inn0 || !inn1) {
             showToast('Only available in 2nd Innings!', 'error');
             return;
         }
 
         const target = inn0.runs + 1;
         const runsNeeded = target - inn1.runs;
-        const ballsRemaining = (currentMatch.overs * currentMatch.ballsPerOver) - inn1.balls;
+        const ballsRemaining = ((m.overs || 0) * (m.ballsPerOver || 6)) - inn1.balls;
 
         this.send('SHOW_RUNS_BALLS', {
             runs: runsNeeded,
@@ -198,8 +214,9 @@ const Broadcast = {
      * Show Current Run Rate graphic
      */
     showCRR() {
-        if (!currentMatch) return;
-        const inn = currentMatch.innings?.[currentMatch.currentInnings || 0];
+        const m = getCurrentBroadcastMatch();
+        if (!m) return showToast('No active match', 'error');
+        const inn = m.innings?.[m.currentInnings || 0];
         const crr = inn ? formatCRR(inn.runs || 0, inn.balls || 0) : '0.00';
         this.send('SHOW_CRR', { crr });
         showToast('📈 CRR Published!', 'success');
@@ -220,9 +237,9 @@ const Broadcast = {
      * Show Striker Profile
      */
     broadcastStrikerProfile() {
-        if (!window.currentMatch || !window.DB) return showToast('No active match', 'error');
-        const m = window.currentMatch;
-        const inn = m.innings[m.currentInnings];
+        const m = getCurrentBroadcastMatch();
+        if (!m || !window.DB) return showToast('No active match', 'error');
+        const inn = m.innings?.[m.currentInnings || 0];
         if (!inn || !inn.currentBatsmenIdx) return showToast('No innings active', 'error');
         const strikerIdx = inn.currentBatsmenIdx[inn.strikerIdx];
         const striker = inn.batsmen[strikerIdx];
@@ -233,6 +250,7 @@ const Broadcast = {
             playerName: striker.name,
             playerRuns: striker.runs,
             playerBalls: striker.balls,
+            playerSixes: striker.sixes || 0,
             playerPhoto: photo
         });
         showToast('⚡ Striker Profile Published!', 'success');
@@ -242,9 +260,9 @@ const Broadcast = {
      * Show Non-Striker Profile
      */
     broadcastNonStrikerProfile() {
-        if (!window.currentMatch || !window.DB) return showToast('No active match', 'error');
-        const m = window.currentMatch;
-        const inn = m.innings[m.currentInnings];
+        const m = getCurrentBroadcastMatch();
+        if (!m || !window.DB) return showToast('No active match', 'error');
+        const inn = m.innings?.[m.currentInnings || 0];
         if (!inn || !inn.currentBatsmenIdx) return showToast('No innings active', 'error');
         const nonStrikerIdx = inn.currentBatsmenIdx[inn.strikerIdx === 0 ? 1 : 0];
         const nonStriker = inn.batsmen[nonStrikerIdx];
@@ -255,6 +273,7 @@ const Broadcast = {
             playerName: nonStriker.name,
             playerRuns: nonStriker.runs,
             playerBalls: nonStriker.balls,
+            playerSixes: nonStriker.sixes || 0,
             playerPhoto: photo
         });
         showToast('🛡️ Non-Striker Profile Published!', 'success');
@@ -264,9 +283,9 @@ const Broadcast = {
      * Show Both Batters
      */
     broadcastCurrentBatters() {
-        if (!window.currentMatch || !window.DB) return showToast('No active match', 'error');
-        const m = window.currentMatch;
-        const inn = m.innings[m.currentInnings];
+        const m = getCurrentBroadcastMatch();
+        if (!m || !window.DB) return showToast('No active match', 'error');
+        const inn = m.innings?.[m.currentInnings || 0];
         if (!inn || !inn.currentBatsmenIdx) return showToast('No innings active', 'error');
         const b1 = inn.batsmen[inn.currentBatsmenIdx[0]];
         const b2 = inn.batsmen[inn.currentBatsmenIdx[1]];
@@ -292,9 +311,9 @@ const Broadcast = {
      * Show Partnership
      */
     broadcastPartnership() {
-        if (!window.currentMatch || !window.DB) return showToast('No active match', 'error');
-        const m = window.currentMatch;
-        const inn = m.innings[m.currentInnings];
+        const m = getCurrentBroadcastMatch();
+        if (!m || !window.DB) return showToast('No active match', 'error');
+        const inn = m.innings?.[m.currentInnings || 0];
         if (!inn || !inn.partnerships || inn.partnerships.length === 0) return showToast('No partnership data', 'error');
         
         const currentPartnership = inn.partnerships[inn.partnerships.length - 1];
@@ -318,9 +337,9 @@ const Broadcast = {
      * Show Bowler Profile
      */
     broadcastBowlerProfile() {
-        if (!window.currentMatch || !window.DB) return showToast('No active match', 'error');
-        const m = window.currentMatch;
-        const inn = m.innings[m.currentInnings];
+        const m = getCurrentBroadcastMatch();
+        if (!m || !window.DB) return showToast('No active match', 'error');
+        const inn = m.innings?.[m.currentInnings || 0];
         if (!inn || inn.currentBowlerIdx == null) return showToast('No bowler active', 'error');
         const bowler = inn.bowlers[inn.currentBowlerIdx];
         if (!bowler) return showToast('No bowler found', 'error');
@@ -340,14 +359,14 @@ const Broadcast = {
      * Show Team Card (squad card with player photos)
      */
     broadcastTeamCard(teamIdx) {
-        if (!window.currentMatch || !window.DB) return showToast('No active match', 'error');
-        const m = window.currentMatch;
+        const m = getCurrentBroadcastMatch();
+        if (!m || !window.DB) return showToast('No active match', 'error');
         const teamName = teamIdx === 0 ? m.team1 : m.team2;
         if (!teamName) return showToast('Team not found', 'error');
 
         // Try to get squad from tournament or match
         let players = [];
-        const tourn = window.currentTournament;
+        const tourn = getCurrentBroadcastTournament();
         if (tourn && tourn.teams) {
             const teamObj = tourn.teams.find(t => t.name === teamName);
             if (teamObj && teamObj.players) {

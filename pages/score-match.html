@@ -770,12 +770,12 @@
                     <div class="card" style="border: 1px solid rgba(124,77,255,0.2); background: rgba(124,77,255,0.03);">
                         <div class="card-head" style="font-size:11px; margin-bottom:12px; color:#b388ff">🎬 CINEMATIC PRODUCTIONS</div>
                         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                            <button class="btn btn-primary" style="background:#2962ff; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastStrikerProfile()">
+                            <button class="btn btn-primary" style="background:#2962ff; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastStrikerProfile === 'function') broadcastStrikerProfile(); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastStrikerProfile();">
                                 <div style="font-size:18px">⚡</div>
                                 <div style="font-size:11px; font-weight:900">STRIKER</div>
                                 <div id="bm-label-striker" style="font-size:8px; opacity:0.6; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
                             </button>
-                            <button class="btn btn-primary" style="background:#e53935; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastNonStrikerProfile()">
+                            <button class="btn btn-primary" style="background:#e53935; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastNonStrikerProfile === 'function') broadcastNonStrikerProfile(); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastNonStrikerProfile();">
                                 <div style="font-size:18px">🏃</div>
                                 <div style="font-size:11px; font-weight:900">NON-STR</div>
                                 <div id="bm-label-nonstriker" style="font-size:8px; opacity:0.6; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
@@ -795,22 +795,22 @@
                                 <div style="font-size:11px; font-weight:900">BOWLER</div>
                                 <div id="bm-label-bowler" style="font-size:8px; opacity:0.6; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastTeamCard(0)">
+                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastTeamCard === 'function') broadcastTeamCard(0); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastTeamCard(0);">
                                 <div style="font-size:18px">📋</div>
                                 <div style="font-size:11px; font-weight:900" id="btn-team1-label">TEAM A</div>
                                 <div style="font-size:8px; opacity:0.6">SQUAD CARD</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastTeamCard(1)">
+                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastTeamCard === 'function') broadcastTeamCard(1); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastTeamCard(1);">
                                 <div style="font-size:18px">📋</div>
                                 <div style="font-size:11px; font-weight:900" id="btn-team2-label">TEAM B</div>
                                 <div style="font-size:8px; opacity:0.6">SQUAD CARD</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(41,98,255,0.08); border-color:rgba(41,98,255,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.showScorecard()">
+                            <button class="btn btn-ghost" style="background:rgba(41,98,255,0.08); border-color:rgba(41,98,255,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof Broadcast !== 'undefined') Broadcast.showScorecard(); else if(typeof sendBroadcast === 'function') sendBroadcast('SHOW_SCORECARD');">
                                 <div style="font-size:18px">📊</div>
                                 <div style="font-size:11px; font-weight:900">SCORECARD</div>
                                 <div style="font-size:8px; opacity:0.6">TOGGLE</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(255,143,0,0.08); border-color:rgba(255,143,0,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.showSummary()">
+                            <button class="btn btn-ghost" style="background:rgba(255,143,0,0.08); border-color:rgba(255,143,0,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof Broadcast !== 'undefined') Broadcast.showSummary(); else if(typeof sendBroadcast === 'function') sendBroadcast('SHOW_SUMMARY');">
                                 <div style="font-size:18px">🏆</div>
                                 <div style="font-size:11px; font-weight:900">SUMMARY</div>
                                 <div style="font-size:8px; opacity:0.6">TOGGLE</div>
