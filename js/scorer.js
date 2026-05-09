@@ -3951,7 +3951,7 @@ function broadcastTeamCard(teamIdx) {
             seen.add(p.name);
             players.push({ name: p.name, role: p.role || 'Player', photo: playerPhotoSrc(p) });
         };
-        m.innings.forEach(inn => {
+        m.innings.filter(Boolean).forEach(inn => {
             if (inn.battingTeam === teamName) (inn.batsmen || []).forEach(add);
             if (inn.bowlingTeam === teamName) (inn.bowlers || []).forEach(add);
         });
