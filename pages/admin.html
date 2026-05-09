@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Panel – SLCRICKPRO | Manage Tournaments & Players</title>
+    <meta name="description" content="Official SLCRICKPRO Admin Panel for managing cricket tournament requests, match schedules, and player records." />
+    <meta name="keywords" content="slcrickpro admin, softball cricket admin, cricket admin, tournament management, manage cricket matches, verify cricket players" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/css/main.css" />
+    <style>
+        .admin-section {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        .request-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--c-border);
+            border-radius: var(--r-sm);
+            padding: 20px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .req-info h3 {
+            margin-bottom: 6px;
+            font-size: 18px;
+            color: var(--c-amber);
+        }
+
+        .req-info p {
+            font-size: 14px;
+            color: var(--c-muted);
+        }
+
+        .req-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .product-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--c-border);
+            border-radius: var(--r-sm);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .product-card img {
+            max-width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: var(--r-sm);
+            margin-bottom: 12px;
+            background: #000;
+        }
+
+        .product-card h4 {
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .admin-section {
+                padding: 20px 15px;
+            }
+            .request-card {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            .admin-tabs {
+                flex-wrap: wrap !important;
+                gap: 6px !important;
+                border-bottom: none !important;
+            }
+            .admin-tabs .btn {
+                flex: 1 1 40%;
+                font-size: 11px !important;
+                padding: 8px !important;
+            }
+            .tab-players > div:first-child {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            #admin-player-search {
+                width: 100% !important;
+            }
+                /* --- Mobile UI Fixes for Admin --- */
+            @media (max-width: 768px) {
+                .admin-content {
+                    padding: 12px !important;
+                }
+                .data-table-container {
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                    margin: 0 -12px;
+                    padding: 0 12px;
+                }
+                .data-table {
+                    min-width: 600px; /* Force table to be wide enough to scroll */
+                }
+                .request-card {
+                    padding: 15px !important;
+                }
+                .req-actions {
+                    flex-direction: row;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                }
+                .admin-tabs {
+                    padding-bottom: 5px; /* Add some space for the scrollbar */
+                }
+            }
+        }
+    </style>
+</head>
+
+<body class="page-wrapper">
+  <script id="prevent-fouc">if(localStorage.getItem('theme') !== 'dark') document.body.classList.add('light-mode');</script>
+    <div class="bg-canvas">
+        <div class="bg-orb orb1"></div>
+        <div class="bg-orb orb3"></div>
+    </div>
+
+    <div class="sub-header" style="justify-content: flex-start; gap: 20px;">
+        <a href="/" class="back-btn">
+            <svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Back
+        </a>
+        <div class="logo">
+          <div class="logo-icon">🏏</div>
+          <div class="logo-text-animated">
+            <span class="logo-name-animated">SLCRICK<span class="pro">PRO</span></span>
+          </div>
+        </div>
+        <div class="header-info" style="display:flex; align-items:center; gap:10px">
+            <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()"
+                style="width:32px; height:32px; font-size:14px">☀️</button>
+        </div>
+    </div>
+
+    <div id="admin-login-section" class="admin-section" style="max-width:400px;text-align:center;padding-top:80px">
+        <h2 style="font-size:22px;font-weight:800;margin-bottom:8px">Admin Panel</h2>
+        <p style="color:var(--c-muted);margin-bottom:28px">Enter your admin PIN to access the dashboard</p>
+
+        <div class="form-group" style="text-align:left">
+            <label class="form-label">Username</label>
+            <input type="text" class="form-input" id="admin-username" placeholder="e.g. STgamage" autocomplete="username" />
+        </div>
+        <div class="form-group" style="text-align:left">
+            <label class="form-label">Admin PIN / Password</label>
+            <input type="password" class="form-input" id="admin-password" placeholder="Enter admin PIN"
+                   autocomplete="current-password"
+                   onkeydown="if(event.key==='Enter') loginAdmin()" />
+        </div>
+
+        <button class="btn btn-primary btn-full" onclick="loginAdmin()">Login</button>
+        <p id="login-hint" style="margin-top:14px; font-size:12px; color:var(--c-muted); display:none">PIN: slcrickpro@2026</p>
+    </div>
+
+    <div id="admin-content-section" class="admin-section" style="display:none">
+
+        <div class="admin-tabs"
+            style="display:flex; gap:8px; margin-bottom: 24px; border-bottom: 1px solid var(--c-border); padding-bottom: 12px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;">
+            <button class="btn btn-primary btn-sm" onclick="switchAdminTab('requests')"
+                id="btn-tab-requests" style="flex: 0 0 auto; white-space: nowrap;">Inbox</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('matches')" id="btn-tab-matches" style="flex: 0 0 auto; white-space: nowrap;">System
+                Matches</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('tournaments')" id="btn-tab-tournaments" style="flex: 0 0 auto; white-space: nowrap;">Tournaments</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('players')" id="btn-tab-players" style="flex: 0 0 auto; white-space: nowrap;">Players</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('store')" id="btn-tab-store" style="flex: 0 0 auto; white-space: nowrap;">Store</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('posts')" id="btn-tab-posts" style="flex: 0 0 auto; white-space: nowrap;">➕ Posts</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('feedback')" id="btn-tab-feedback" style="flex: 0 0 auto; white-space: nowrap;">💬 Chat</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('match-entry')" id="btn-tab-match-entry" style="flex: 0 0 auto; white-space: nowrap;">Input</button>
+            <button class="btn btn-ghost btn-sm" onclick="logoutAdmin()" style="margin-left:auto; flex: 0 0 auto; white-space: nowrap; border-color: rgba(255,109,0,0.3); color: #ff6d3b;">Logout</button>
+        </div>
+
+        <!-- Requests Tab -->
+        <div id="tab-requests" class="admin-panel active">
+            <h3 class="section-hd" style="margin-bottom:8px">Tournament Requests</h3>
+            <p style="color:var(--c-muted);margin-bottom:24px">Review and approve requests</p>
+            <div id="requests-list"></div>
+        </div>
+
+        <!-- Players Tab -->
+        <div id="tab-players" class="admin-panel" style="display:none">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+                <div>
+                    <h3 class="section-hd" style="margin-bottom:8px">Player Management</h3>
+                    <p style="color:var(--c-muted);margin-bottom:0;">View and delete players from the system.</p>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <button class="btn btn-green" onclick="openAddPlayer()">➕ Register Player</button>
+                    <input type="text" class="form-input" id="admin-player-search" placeholder="🔍 Search players..." style="width:250px" oninput="renderPlayersAdmin()" />
+                </div>
+            </div>
+            <div id="admin-players-list"></div>
+        </div>
+
+        <!-- Matches Tab -->
+        <div id="tab-matches" class="admin-panel" style="display:none">
+            <h3 class="section-hd" style="margin-bottom:8px">Manage Matches</h3>
+            <p style="color:var(--c-muted);margin-bottom:24px">Force-remove ongoing matches from the system.</p>
+            <div id="matches-list"></div>
+        </div>
+
+        <!-- Tournaments Tab -->
+        <div id="tab-tournaments" class="admin-panel" style="display:none">
+            <h3 class="section-hd" style="margin-bottom:8px">Manage Tournaments</h3>
+            <p style="color:var(--c-muted);margin-bottom:24px">End or remove tournaments from the website.</p>
+            <div id="tournaments-list"></div>
+        </div>
+
+        <!-- Store Tab -->
+        <div id="tab-store" class="admin-panel" style="display:none">
+            <h3 class="section-hd" style="margin-bottom:8px">Customer Orders</h3>
+            <p style="color:var(--c-muted);margin-bottom:24px">Recent orders placed via the store.</p>
+            <div id="admin-orders-list" style="margin-bottom:40px; border-bottom:1px solid var(--c-border); padding-bottom:40px"></div>
+
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+                <div>
+                    <h3 class="section-hd" style="margin-bottom:8px">Maintenance & Store</h3>
+                    <p style="color:var(--c-muted);margin-bottom:0;">Rebuild database stats or manage store
+                        products.</p>
+                </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+                    <button class="btn btn-amber btn-sm" onclick="reSyncAllStats()">🔄 Re-sync All Stats</button>
+                    <button class="btn btn-green" onclick="openAddProduct()">➕ Add Product</button>
+                </div>
+            </div>
+            <div id="store-list"
+                style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;"></div>
+
+        </div>
+
+        <!-- Posts Tab -->
+        <div id="tab-posts" class="admin-panel" style="display:none">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px">
+                <div>
+                    <h3 class="section-hd" style="margin-bottom:8px">Manage Posts</h3>
+                    <p style="color:var(--c-muted);margin-bottom:0">Review pending posts or create official announcements.</p>
+                </div>
+                <button class="btn btn-green" onclick="openAdminCreatePost()">➕ Add Official Post</button>
+            </div>
+            <div id="admin-posts-list"></div>
+        </div>
+
+        <!-- Feedback Tab -->
+        <div id="tab-feedback" class="admin-panel" style="display:none">
+            <h3 class="section-hd" style="margin-bottom:8px">Suggestions & Complaints</h3>
+            <p style="color:var(--c-muted);margin-bottom:24px">View feedback submitted by users.</p>
+            <div id="admin-feedback-list"></div>
+        </div>
+
+        <!-- Match Entry Tab -->
+        <div id="tab-match-entry" class="admin-panel" style="display:none">
+            <h3 class="section-hd" style="margin-bottom:8px">Official Match Input</h3>
+            <p style="color:var(--c-muted);margin-bottom:24px">Manually enter full match results to update system rankings.</p>
+            
+            <div class="card" style="margin-bottom:24px">
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Team 1</label>
+                        <select class="form-select" id="ame-t1"></select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Team 2</label>
+                        <select class="form-select" id="ame-t2"></select>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Match Name / Round</label>
+                        <input type="text" class="form-input" id="ame-name" placeholder="e.g. Final, League Match" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Total Overs</label>
+                        <input type="number" class="form-input" id="ame-overs" value="20" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2" style="gap:24px">
+                <!-- Innings 1 -->
+                <div class="card">
+                    <div class="card-head" style="color:var(--c-amber)">Innings 1</div>
+                    <div class="form-group">
+                        <label class="form-label">Batting Team</label>
+                        <select class="form-select" id="ame-inn1-bat" onchange="updateAMETeams(1)"></select>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Score</label>
+                            <input type="number" class="form-input" id="ame-inn1-runs" value="0" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Wickets</label>
+                            <input type="number" class="form-input" id="ame-inn1-wkts" value="0" />
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Completed Overs</label>
+                            <input type="number" class="form-input" id="ame-inn1-ovPlayed" value="20" min="0" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Balls in Final Over (0-5)</label>
+                            <input type="number" class="form-input" id="ame-inn1-ovBalls" value="0" min="0" max="5" />
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group" style="padding-top:30px">
+                             <label class="radio-card" style="padding:8px">
+                                <input type="checkbox" id="ame-inn1-ao" /> All Out?
+                             </label>
+                        </div>
+                    </div>
+                </div>
+                <!-- Innings 2 -->
+                <div class="card">
+                    <div class="card-head" style="color:var(--c-amber)">Innings 2</div>
+                    <div class="form-group">
+                        <label class="form-label">Batting Team</label>
+                        <p id="ame-inn2-bat-name" style="padding:10px; background:rgba(255,255,255,0.05); border-radius:4px">--</p>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Score</label>
+                            <input type="number" class="form-input" id="ame-inn2-runs" value="0" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Wickets</label>
+                            <input type="number" class="form-input" id="ame-inn2-wkts" value="0" />
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Completed Overs</label>
+                            <input type="number" class="form-input" id="ame-inn2-ovPlayed" value="20" min="0" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Balls in Final Over (0-5)</label>
+                            <input type="number" class="form-input" id="ame-inn2-ovBalls" value="0" min="0" max="5" />
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group" style="padding-top:30px">
+                             <label class="radio-card" style="padding:8px">
+                                <input type="checkbox" id="ame-inn2-ao" /> All Out?
+                             </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2" style="gap:24px; margin-top:24px">
+                <div class="card">
+                    <div class="card-head" style="color:var(--c-amber)">Team 1 Player Data</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+                        <label class="form-label" style="margin:0">Batters (max 5)</label>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="addAMEPlayerRow('team1', 'bat')">+ Add Batter</button>
+                    </div>
+                    <div id="ame-team1-batters"></div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin:16px 0 8px">
+                        <label class="form-label" style="margin:0">Bowlers (max 5)</label>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="addAMEPlayerRow('team1', 'bowl')">+ Add Bowler</button>
+                    </div>
+                    <div id="ame-team1-bowlers"></div>
+                </div>
+                <div class="card">
+                    <div class="card-head" style="color:var(--c-amber)">Team 2 Player Data</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+                        <label class="form-label" style="margin:0">Batters (max 5)</label>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="addAMEPlayerRow('team2', 'bat')">+ Add Batter</button>
+                    </div>
+                    <div id="ame-team2-batters"></div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin:16px 0 8px">
+                        <label class="form-label" style="margin:0">Bowlers (max 5)</label>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="addAMEPlayerRow('team2', 'bowl')">+ Add Bowler</button>
+                    </div>
+                    <div id="ame-team2-bowlers"></div>
+                </div>
+            </div>
+
+            <div style="margin-top:24px">
+                <button class="btn btn-primary btn-full" onclick="saveOfficialMatchAdmin()">🚀 Save & Update Rankings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Add Modal -->
+    <div class="modal-overlay" id="modal-add-product" style="display:none">
+        <div class="modal-box">
+            <div class="modal-title">Add Store Item</div>
+
+            <div class="form-group">
+                <label class="form-label">Name</label>
+                <input type="text" class="form-input" id="add-prod-name" placeholder="e.g. Cricket Ball" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Price (LKR)</label>
+                <input type="number" class="form-input" id="add-prod-price" placeholder="e.g. 500" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Stock</label>
+                <input type="number" class="form-input" id="add-prod-stock" placeholder="e.g. 10" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Category</label>
+                <select class="form-input" id="add-prod-category">
+                    <option value="bat">🏏 Bats</option>
+                    <option value="ball">🎾 Balls</option>
+                    <option value="gear">🛡️ Gear</option>
+                    <option value="equipment">🗂️ Stumps / Equipment</option>
+                    <option value="bag">🎒 Bags</option>
+                    <option value="shoes">👟 Shoes</option>
+                    <option value="service">⭐ Services</option>
+                    <option value="misc">📦 Misc</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Fallback Emoji</label>
+                <input type="text" class="form-input" id="add-prod-emoji" placeholder="e.g. 🏏" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Image URL or Upload</label>
+                <input type="text" class="form-input" id="add-prod-img" placeholder="https://example.com/image.jpg" />
+                <input type="file" id="add-prod-file" accept="image/*" style="margin-top:8px"
+                    onchange="encodeProductImage(this, 'add-prod-img')" />
+                <div style="font-size: 12px; color: var(--c-muted); margin-top: 4px;">Leave blank to use default
+                    fallback emoji.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description / Details</label>
+                <textarea class="form-input" id="add-prod-desc" rows="3" placeholder="Product details..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeModal('modal-add-product')">Cancel</button>
+                <button class="btn btn-green" onclick="saveNewProduct()">Add Product</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Edit Modal -->
+    <div class="modal-overlay" id="modal-edit-product" style="display:none">
+        <div class="modal-box">
+            <div class="modal-title">Edit Store Item</div>
+            <input type="hidden" id="edit-prod-id" />
+
+            <div class="form-group">
+                <label class="form-label">Name</label>
+                <input type="text" class="form-input" id="edit-prod-name" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Price (LKR)</label>
+                <input type="number" class="form-input" id="edit-prod-price" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Stock</label>
+                <input type="number" class="form-input" id="edit-prod-stock" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Image URL or Upload</label>
+                <input type="text" class="form-input" id="edit-prod-img" placeholder="https://example.com/image.jpg" />
+                <input type="file" id="edit-prod-file" accept="image/*" style="margin-top:8px"
+                    onchange="encodeProductImage(this, 'edit-prod-img')" />
+                <div style="font-size: 12px; color: var(--c-muted); margin-top: 4px;">Leave blank to use default
+                    fallback emoji.</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeModal('modal-edit-product')">Cancel</button>
+                <button class="btn btn-green" onclick="saveProductEdit()">Save Product</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Player Add Modal -->
+    <div class="modal-overlay" id="modal-add-player" style="display:none">
+        <div class="modal-box">
+            <div class="modal-title">Register New Player</div>
+
+            <div class="form-group">
+                <label class="form-label">Full Name</label>
+                <input type="text" class="form-input" id="add-player-name" placeholder="e.g. Kumar Sangakkara" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Role</label>
+                <select class="form-input" id="add-player-role">
+                    <option value="batsman">🏏 Batsman</option>
+                    <option value="bowler">⚾ Bowler</option>
+                    <option value="allrounder">⭐ All-Rounder</option>
+                    <option value="wicketkeeper">🧤 Wicketkeeper</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Player Photo (Optional)</label>
+                <input type="hidden" id="add-player-photo" />
+                <input type="file" id="add-player-file" accept="image/*" style="margin-top:8px"
+                    onchange="encodePlayerImage(this, 'add-player-photo')" />
+                <div style="font-size: 12px; color: var(--c-muted); margin-top: 4px;">Choose a square photo for best TV Overlay results.</div>
+                <img id="add-player-preview" src="" style="width:100px; height:100px; object-fit:cover; border-radius:50%; margin-top:10px; display:none; border:2px solid var(--c-primary)" />
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeModal('modal-add-player')">Cancel</button>
+                <button class="btn btn-green" onclick="saveNewPlayer()">Register Player</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Player Edit Modal -->
+    <div class="modal-overlay" id="modal-edit-player" style="display:none">
+        <div class="modal-box">
+            <div class="modal-title">Edit Player Info</div>
+            <input type="hidden" id="edit-player-id" />
+
+            <div class="form-group">
+                <label class="form-label">Full Name</label>
+                <input type="text" class="form-input" id="edit-player-name" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Role</label>
+                <select class="form-input" id="edit-player-role">
+                    <option value="batsman">🏏 Batsman</option>
+                    <option value="bowler">⚾ Bowler</option>
+                    <option value="allrounder">⭐ All-Rounder</option>
+                    <option value="wicketkeeper">🧤 Wicketkeeper</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Player Photo (Optional)</label>
+                <input type="hidden" id="edit-player-photo" />
+                <input type="file" id="edit-player-file" accept="image/*" style="margin-top:8px"
+                    onchange="encodePlayerImage(this, 'edit-player-photo')" />
+                <img id="edit-player-preview" src="" style="width:100px; height:100px; object-fit:cover; border-radius:50%; margin-top:10px; border:2px solid var(--c-primary)" />
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeModal('modal-edit-player')">Cancel</button>
+                <button class="btn btn-green" onclick="savePlayerEditAdmin()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Post Modal -->
+    <div class="modal-overlay" id="modal-admin-post" style="display:none">
+        <div class="modal-box">
+            <div class="modal-title">Create Community Post</div>
+            <div class="form-group">
+                <label class="form-label">Post Title</label>
+                <input type="text" id="admin-post-title" class="form-input" placeholder="e.g. Tournament Update">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description / Message</label>
+                <textarea id="admin-post-content" class="form-input" rows="5" placeholder="Write something for the community..."></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Attach Image (Optional)</label>
+                <input type="hidden" id="admin-post-image-data" />
+                <input type="file" class="form-input" accept="image/*" onchange="encodePostImage(this)">
+                <img id="admin-post-preview" src="" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-top:10px; display:none" />
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeModal('modal-admin-post')">Cancel</button>
+                <button class="btn btn-primary" onclick="submitAdminPost()">Publish Post</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/js/cloud-config.js"></script>
+    <script src="/js/cloud-services.js"></script>
+    <script src="/js/db.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/admin-match-input.js"></script>
+</body>
+
+</html>

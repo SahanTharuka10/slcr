@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <!-- SEO ENHANCEMENTS -->
+  <title>SLCRICKPRO | Professional Live Cricket Scoring & NRR Generator</title>
+  <meta name="description" content="SLCRICKPRO - The most advanced live cricket scoring platform in Sri Lanka. Manage tournaments, generate NRR standings, and track player stats in real-time." />
+  <meta name="keywords" content="slcrickpro, cricket scoring, slcrickpro live, nrr generator, cricket tournament management, sri lanka cricket scoring, live matches" />
+  <meta name="author" content="SLCRICKPRO Team" />
+  <meta name="robots" content="index, follow" />
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  
+  <!-- Open Graph / Social SEO -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.slcrickpro.live" />
+  <meta property="og:title" content="SLCRICKPRO – Live Cricket Portal" />
+  <meta property="og:description" content="Real-time ball-by-ball cricket scores, professional tournament management, and player rankings. The complete hub for competitive cricket stats." />
+  <meta property="og:image" content="https://www.slcrickpro.live/assets/icon.png" />
+  
+  <!-- Twitter Cards -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="SLCRICKPRO – Professional Cricket Stats" />
+  <meta name="twitter:description" content="Professional-grade cricket scoring and management. Ball-by-ball updates and live standings." />
+
+  <!-- Structured Data (JSON-LD) -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SportsWebSite",
+      "name": "SLCRICKPRO",
+      "url": "https://www.slcrickpro.live",
+      "description": "Professional cricket scoring and management platform.",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://www.slcrickpro.live/api/search?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/main.css" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="assets/icon.png" />
+</head>
+
+<body>
+  <script id="prevent-fouc">if(localStorage.getItem('theme') !== 'dark') document.body.classList.add('light-mode');</script>
+  <!-- SVG ICON SPRITE (Official Icons) -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+    <symbol id="icon-ball" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20"/><path d="M2 12a14.5 14.5 0 0 0 20 0"/></symbol>
+    <symbol id="icon-live" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></symbol>
+    <symbol id="icon-score" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/><path d="m15 5 3 3"/><path d="m7 16-4 4"/></symbol>
+    <symbol id="icon-ranking" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></symbol>
+    <symbol id="icon-store" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></symbol>
+    <symbol id="icon-register" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></symbol>
+    <symbol id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="icon-leather-bowler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M11 2.1a10 10 0 0 0 0 19.8"/><path d="M12 2v20"/><path d="M13 2.1a10 10 0 0 1 0 19.8"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+  </svg>
+
+  <!-- Animated Background -->
+  <div class="bg-canvas">
+    <div class="bg-orb orb1"></div>
+    <div class="bg-orb orb2"></div>
+    <div class="bg-orb orb3"></div>
+    <div class="bg-orb orb4"></div>
+    <div class="cricket-field-lines"></div>
+  </div>
+
+  <!-- Particles -->
+  <div class="particles" id="particles"></div>
+
+  <!-- Header -->
+  <header class="main-header">
+    <div class="header-inner">
+      <div class="logo">
+        <div class="logo-icon">🏏</div>
+        <div class="logo-text-animated">
+          <span class="logo-name-animated">SLCRICK<span class="pro">PRO</span></span>
+          <span class="logo-tag-animated">Sri Lanka Soft Ball Managment Platform</span>
+        </div>
+      </div>
+      <div class="header-info">
+        <div class="header-actions">
+          <a href="pages/admin.html" class="header-btn-sm admin-btn-glow" title="Admin Panel">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Admin</span>
+          </a>
+          <button class="header-btn-sm chat-btn-glow" title="Feedback & Chat" onclick="openFeedbackModal()">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Chat</span>
+          </button>
+          <a href="pages/posts.html" class="header-btn-sm posts-btn-glow" title="Community Posts">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 16V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z"/><path d="M12 18v4l4-4"/><path d="M2 12h5"/></svg>
+            <span>Posts</span>
+          </a>
+          <!-- LOCALHOST SHORTCUT -->
+          <a href="http://localhost:3000" class="header-btn-sm" style="background:#00e676; border:none; color:#000; font-weight:900" title="Launch Localhost">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Localhost</span>
+          </a>
+        </div>
+        <div class="header-meta">
+          <div class="live-badge">
+            <span class="live-dot"></span>
+            <span>LIVE</span>
+          </div>
+          <div class="live-clock" id="live-clock">00:00:00</div>
+          <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Switch Day/Dark Mode">
+            <svg class="svg-theme-icon moon-icon"><use href="#icon-moon"></use></svg>
+            <svg class="svg-theme-icon sun-icon"><use href="#icon-sun"></use></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Top Live Scoring Panel -->
+  <div class="top-live-panel" id="top-live-panel" style="display: none;">
+    <div class="live-cards-container" id="live-cards-container">
+      <!-- Cards will be injected here via JS -->
+    </div>
+  </div>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-content">
+      <div class="hero-badge">🏆 Cricket Management System</div>
+      <h1 class="hero-title">
+        Manage Every <span class="gradient-text">Cricket</span><br />
+        Moment in Real-Time
+      </h1>
+      <p class="hero-sub">Ball-by-ball scoring · Live tournaments · Player registry · Rankings</p>
+    </div>
+  </section>
+
+  <!-- Main Navigation Cards -->
+  <main class="main-nav">
+    <div class="nav-grid">
+
+      <!-- 1. Ongoing Matches -->
+      <a href="pages/ongoing-matches.html" class="nav-card card-ongoing">
+        <div class="card-glow"></div>
+        <div class="card-number">01</div>
+        <div class="card-icon-wrap">
+          <div class="card-icon">
+            <svg class="svg-icon"><use href="#icon-live"></use></svg>
+          </div>
+        </div>
+        <div class="card-content">
+          <h2 class="card-title">Ongoing Matches</h2>
+          <p class="card-desc">Live scores, ball-by-ball updates and tournament standings</p>
+        </div>
+        <div class="card-footer">
+          <span class="live-indicator">
+            <span class="pulse-dot"></span>Live Now
+          </span>
+          <span class="card-arrow">→</span>
+        </div>
+        <div class="card-bg-emoji">
+          <svg class="svg-bg-icon"><use href="#icon-live"></use></svg>
+        </div>
+      </a>
+
+      <!-- 2. Score New Match -->
+      <a href="pages/score-match.html" class="nav-card card-score">
+        <div class="card-glow"></div>
+        <div class="card-number">02</div>
+        <div class="card-icon-wrap">
+          <div class="card-icon">
+             <svg class="svg-icon"><use href="#icon-score"></use></svg>
+          </div>
+        </div>
+        <div class="card-content">
+          <h2 class="card-title">Score New Match</h2>
+          <p class="card-desc">Start tournament or single match scoring with live publish</p>
+        </div>
+        <div class="card-footer">
+          <span class="card-tag">Tournament & Single</span>
+          <span class="card-arrow">→</span>
+        </div>
+        <div class="card-bg-emoji">
+          <svg class="svg-bg-icon"><use href="#icon-score"></use></svg>
+        </div>
+      </a>
+
+      <!-- 3. Player & Team Ranking -->
+      <a href="pages/ranking.html" class="nav-card card-ranking">
+        <div class="card-glow"></div>
+        <div class="card-number">03</div>
+        <div class="card-icon-wrap">
+          <div class="card-icon">
+            <svg class="svg-icon"><use href="#icon-ranking"></use></svg>
+          </div>
+        </div>
+        <div class="card-content">
+          <h2 class="card-title">Player &amp; Team Ranking</h2>
+          <p class="card-desc">Leaderboards, batting, bowling stats and team standings</p>
+        </div>
+        <div class="card-footer">
+          <span class="card-tag">Updated Live</span>
+          <span class="card-arrow">→</span>
+        </div>
+        <div class="card-bg-emoji">
+           <svg class="svg-bg-icon"><use href="#icon-ranking"></use></svg>
+        </div>
+      </a>
+
+      <!-- 4. Crick Store -->
+      <a href="pages/crick-store.html" class="nav-card card-store">
+        <div class="card-glow"></div>
+        <div class="card-number">04</div>
+        <div class="card-icon-wrap">
+          <div class="card-icon">
+            <svg class="svg-icon"><use href="#icon-store"></use></svg>
+          </div>
+        </div>
+        <div class="card-content">
+          <h2 class="card-title">Crick Store</h2>
+          <p class="card-desc">Equipment, jerseys, gear and cricket merchandise</p>
+        </div>
+        <div class="card-footer">
+          <span class="card-tag">Shop Now</span>
+          <span class="card-arrow">→</span>
+        </div>
+        <div class="card-bg-emoji">
+          <svg class="svg-bg-icon"><use href="#icon-store"></use></svg>
+        </div>
+      </a>
+
+      <!-- 5. Player Registration -->
+      <a href="pages/player-registration.html" class="nav-card card-register">
+        <div class="card-glow"></div>
+        <div class="card-number">05</div>
+        <div class="card-icon-wrap">
+          <div class="card-icon">
+            <svg class="svg-icon"><use href="#icon-register"></use></svg>
+          </div>
+        </div>
+        <div class="card-content">
+          <h2 class="card-title">Player Registration</h2>
+          <p class="card-desc">Register players &amp; teams, issue Player IDs and manage database</p>
+        </div>
+        <div class="card-footer">
+          <span class="card-tag">Issue Player ID</span>
+          <span class="card-arrow">→</span>
+        </div>
+        <div class="card-bg-emoji">
+          <svg class="svg-bg-icon"><use href="#icon-register"></use></svg>
+        </div>
+      </a>
+
+      <!-- 6. Broadcast Station (NEW) -->
+      <a href="pages/score-match.html?tab=hotkeys" class="nav-card card-broadcast">
+        <div class="card-glow" style="background: radial-gradient(600px circle at var(--x) var(--y), rgba(124, 77, 255, 0.15), transparent 40%);"></div>
+        <div class="card-number">06</div>
+        <div class="card-icon-wrap">
+          <div class="card-icon" style="background: linear-gradient(135deg, #7c4dff 0%, #ff1744 100%);">
+            <svg style="width:24px;height:24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
+        </div>
+        <div class="card-content">
+          <h2 class="card-title">Broadcast Station</h2>
+          <p class="card-desc">Professional live stream control, OBS overlays and real-time previews</p>
+        </div>
+        <div class="card-footer">
+          <span class="card-tag">OBS & VMIX Ready</span>
+          <span class="card-arrow">→</span>
+        </div>
+        <div class="card-bg-emoji">
+          <svg style="width:100px;height:100px;opacity:0.05" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+      </a>
+
+    </div>
+  </main>
+
+
+  <!-- Footer -->
+  <footer class="main-footer" style="padding: 20px; opacity: 0.8; text-align: center;">
+    <p style="font-size: 11px; color: var(--c-muted);">© 2026 SLCRICKPRO · Official Cricket Management System</p>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Feedback Modal -->
+  <div class="modal-overlay" id="modal-feedback" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
+      <div class="modal-box" style="background:#0f172a; border:1px solid rgba(255,255,255,0.1); padding:28px; border-radius:16px; max-width:400px; width:92%; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+          <h3 style="margin-bottom:12px; font-size:20px; font-weight:800; color:#fff;">Suggestions & Complaints</h3>
+          <p style="font-size:13px; color:rgba(255,255,255,0.6); margin-bottom:20px; line-height:1.5;">Have a suggestion or found a bug? Send us a quick message.</p>
+          <div style="margin-bottom:20px;">
+              <textarea id="user-feedback-msg" rows="4" style="width:100%; padding:12px; border-radius:10px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#fff; font-family:inherit; resize:none;" placeholder="Write your message here..."></textarea>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <button class="header-btn-sm" onclick="document.getElementById('modal-feedback').style.display='none'" style="background:rgba(255,255,255,0.05); border:none; height:40px; padding:0 16px;">Cancel</button>
+              <button class="header-btn-sm admin-btn-glow" style="border:none; height:40px; padding:0 24px;" onclick="submitFeedback()">Send Message</button>
+          </div>
+      </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="js/cloud-config.js"></script>
+  <script src="js/cloud-services.js"></script>
+  <script src="js/db.js"></script>
+  <script>
+    function openFeedbackModal() {
+        document.getElementById('user-feedback-msg').value = '';
+        document.getElementById('modal-feedback').style.display = 'flex';
+    }
+    async function submitFeedback() {
+        const msg = document.getElementById('user-feedback-msg').value.trim();
+        if(!msg) { showToast('Please write something', 'error'); return; }
+        try {
+            const res = await fetch(DB.getCloudURL() + '/sync/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id:'fb_'+Date.now(), message:msg, status:'unread', createdAt:Date.now() })
+            });
+            if(res.ok) {
+                showToast('✅ Feedback sent! Thank you.', 'success');
+                document.getElementById('modal-feedback').style.display = 'none';
+            } else { showToast('Sync failed', 'error'); }
+        } catch(e) { showToast('Network connection issue', 'error'); }
+    }
+  </script>
+  <script src="js/home.js"></script>
+</body>
+
+</html>

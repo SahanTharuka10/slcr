@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Community Posts – SLCRICKPRO</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/main.css">
+    <style>
+        :root {
+            --post-gap: 24px;
+        }
+
+        .posts-page-wrap {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Header ── */
+        .posts-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 32px;
+            background: rgba(255,255,255,0.03);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .posts-header-left { display: flex; align-items: center; gap: 16px; }
+        .posts-back-btn {
+            display: flex; align-items: center; gap: 6px;
+            color: var(--c-muted);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .posts-back-btn:hover { color: var(--c-text); }
+        .posts-back-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; }
+        .posts-logo { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; }
+        .posts-logo span { color: var(--c-primary); }
+        .posts-refresh-btn {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--c-text);
+            border-radius: 8px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .posts-refresh-btn:hover { background: rgba(255,255,255,0.12); }
+        .posts-refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        /* ── Live pill ── */
+        .live-pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(16,185,129,0.12);
+            border: 1px solid rgba(16,185,129,0.3);
+            color: #10b981;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .live-dot {
+            width: 7px; height: 7px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.7); }
+        }
+
+        /* ── Feed container ── */
+        .posts-feed {
+            flex: 1;
+            max-width: 720px;
+            width: 100%;
+            margin: 40px auto 60px;
+            padding: 0 20px;
+        }
+
+        /* ── Post cards ── */
+        .post-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: var(--post-gap);
+            transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+            animation: fadeIn 0.4s ease both;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .post-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(var(--c-primary-rgb, 99,102,241), 0.35);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+        }
+        .post-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .post-author-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(168,85,247,0.1));
+            border: 1px solid rgba(99,102,241,0.25);
+            border-radius: 20px;
+            padding: 5px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #a5b4fc;
+        }
+        .post-date { font-size: 12px; color: var(--c-muted); }
+        .post-title {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--c-text);
+            margin-bottom: 14px;
+            line-height: 1.3;
+        }
+        .post-image {
+            width: 100%;
+            max-height: 420px;
+            object-fit: cover;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            border: 1px solid rgba(255,255,255,0.08);
+            display: block;
+        }
+        .post-body {
+            font-size: 15px;
+            line-height: 1.75;
+            color: rgba(255,255,255,0.75);
+            white-space: pre-wrap;
+        }
+        .post-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+            margin: 16px 0;
+        }
+
+        /* ── Empty / Loading states ── */
+        .feed-state {
+            text-align: center;
+            padding: 80px 20px;
+        }
+        .feed-state-icon { font-size: 56px; margin-bottom: 20px; }
+        .feed-state-title { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+        .feed-state-sub { font-size: 14px; color: var(--c-muted); }
+
+        /* ── Loading skeleton ── */
+        .skeleton-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: var(--post-gap);
+        }
+        .skeleton-line {
+            background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .skel-h1 { height: 14px; width: 120px; }
+        .skel-h2 { height: 22px; width: 70%; margin-top: 4px; }
+        .skel-p1 { height: 14px; width: 100%; }
+        .skel-p2 { height: 14px; width: 85%; }
+        .skel-p3 { height: 14px; width: 60%; }
+
+        @media (max-width: 768px) {
+            .posts-header {
+                padding: 12px 16px;
+            }
+            .posts-logo {
+                font-size: 16px;
+            }
+            .posts-feed {
+                margin: 20px auto;
+                padding: 0 12px;
+            }
+            .post-card {
+                padding: 16px;
+            }
+            .post-title {
+                font-size: 17px;
+            }
+            .posts-refresh-btn span {
+                display: none;
+            }
+            .posts-refresh-btn {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body class="page-wrapper posts-page-wrap">
+  <script id="prevent-fouc">if(localStorage.getItem('theme') !== 'dark') document.body.classList.add('light-mode');</script>
+    <div class="bg-canvas"></div>
+
+    <!-- Header -->
+    <header class="posts-header">
+        <div class="posts-header-left">
+            <a href="/" class="posts-back-btn">
+                <svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back
+            </a>
+            <div class="posts-logo">SLCRICK<span>PRO</span> News</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span class="live-pill" id="live-pill" style="display:none">
+                <span class="live-dot"></span> LIVE SYNC
+            </span>
+            <button class="posts-refresh-btn" title="Suggestions & Complaints" onclick="openFeedbackModal()" style="padding: 8px; border-radius: 50%;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </button>
+            <button class="posts-refresh-btn" title="Admin Login" onclick="openAdminLoginModal()" style="padding: 8px; border-radius: 50%;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 11c2.21 0 4-1.79 4-4S14.21 3 12 3 8 4.79 8 7s1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v3h16v-3c0-2.66-5.33-4-8-4z"/></svg>
+            </button>
+            <button class="posts-refresh-btn" onclick="openSubmitPostModal()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                <span>Submit Your Post</span>
+            </button>
+            <button class="posts-refresh-btn" id="refresh-btn" onclick="loadPosts()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+                <span>Refresh</span>
+            </button>
+            <button class="theme-toggle" onclick="toggleTheme()">☀️</button>
+        </div>
+    </header>
+
+    <!-- Feed -->
+    <main class="posts-feed" id="posts-feed">
+        <!-- Loading skeletons shown first -->
+        <div id="posts-list">
+            <div class="skeleton-card">
+                <div class="skeleton-line skel-h1"></div>
+                <div class="skeleton-line skel-h2"></div>
+                <div style="margin-top:20px">
+                    <div class="skeleton-line skel-p1"></div>
+                    <div class="skeleton-line skel-p2"></div>
+                    <div class="skeleton-line skel-p3"></div>
+                </div>
+            </div>
+            <div class="skeleton-card">
+                <div class="skeleton-line skel-h1"></div>
+                <div class="skeleton-line skel-h2"></div>
+                <div style="margin-top:20px">
+                    <div class="skeleton-line skel-p1"></div>
+                    <div class="skeleton-line skel-p2"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- Submit Post Modal -->
+    <div class="modal-overlay" id="modal-submit-post" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; align-items:center; justify-content:center;">
+        <div class="modal-box" style="background:var(--c-bg); border:1px solid var(--c-border); padding:24px; border-radius:12px; max-width:400px; width:90%;">
+            <h3 style="margin-bottom:16px;">Submit Your Post</h3>
+            <p style="font-size:12px; color:var(--c-muted); margin-bottom:16px;">Your post will be submitted to the admin for review. It will appear on the feed once approved.</p>
+            <div style="margin-bottom:12px;">
+                <label style="display:block; margin-bottom:4px; font-size:13px;">Title</label>
+                <input type="text" id="user-post-title" class="form-input" style="width:100%; padding:8px; border-radius:6px; background:transparent; border:1px solid var(--c-border); color:var(--c-text);" placeholder="Enter title" />
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="display:block; margin-bottom:4px; font-size:13px;">Description</label>
+                <textarea id="user-post-desc" class="form-input" rows="4" style="width:100%; padding:8px; border-radius:6px; background:transparent; border:1px solid var(--c-border); color:var(--c-text);" placeholder="Enter description"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:4px; font-size:13px;">Image (optional)</label>
+                <input type="file" id="user-post-image" accept="image/*" style="width:100%; color:var(--c-text);" onchange="previewUserPostImage(event)" />
+                <img id="user-post-image-preview" src="" alt="Image preview" style="display:none; width:100%; margin-top:12px; border-radius:12px; object-fit:cover; max-height:220px;" />
+                <div style="margin-top:8px; font-size:12px; color:var(--c-muted);">This post will be submitted for admin review. Only approved posts appear in the feed.</div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="posts-refresh-btn" onclick="document.getElementById('modal-submit-post').style.display='none'">Cancel</button>
+                <button class="posts-refresh-btn" style="background:var(--c-primary); color:#fff; border:none;" onclick="submitUserPost()">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Login Modal -->
+    <div class="modal-overlay" id="modal-admin-login" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; align-items:center; justify-content:center;">
+        <div class="modal-box" style="background:var(--c-bg); border:1px solid var(--c-border); padding:24px; border-radius:12px; max-width:380px; width:90%;">
+            <h3 style="margin-bottom:16px;">Admin Login</h3>
+            <p style="font-size:12px; color:var(--c-muted); margin-bottom:16px;">Enter the admin PIN to access the dashboard and approve posts.</p>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:4px; font-size:13px;">Admin PIN</label>
+                <input type="password" id="admin-login-pin" class="form-input" style="width:100%; padding:8px; border-radius:6px; background:transparent; border:1px solid var(--c-border); color:var(--c-text);" placeholder="Enter PIN" />
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="posts-refresh-btn" onclick="document.getElementById('modal-admin-login').style.display='none'">Cancel</button>
+                <button class="posts-refresh-btn" style="background:var(--c-primary); color:#fff; border:none;" onclick="submitAdminLogin()">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div class="modal-overlay" id="modal-feedback" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; align-items:center; justify-content:center;">
+        <div class="modal-box" style="background:var(--c-bg); border:1px solid var(--c-border); padding:24px; border-radius:12px; max-width:400px; width:90%;">
+            <h3 style="margin-bottom:16px;">Suggestions & Complaints</h3>
+            <p style="font-size:12px; color:var(--c-muted); margin-bottom:16px;">Have any suggestions or complaints? Let the admins know.</p>
+            <div style="margin-bottom:16px;">
+                <label style="display:block; margin-bottom:4px; font-size:13px;">Message</label>
+                <textarea id="user-feedback-msg" class="form-input" rows="4" style="width:100%; padding:8px; border-radius:6px; background:transparent; border:1px solid var(--c-border); color:var(--c-text);" placeholder="Write your message here..."></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="posts-refresh-btn" onclick="document.getElementById('modal-feedback').style.display='none'">Cancel</button>
+                <button class="posts-refresh-btn" style="background:var(--c-primary); color:#fff; border:none;" onclick="submitFeedback()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Socket.io BEFORE db.js so db.js can use it -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/js/cloud-config.js"></script>
+    <script src="/js/cloud-services.js"></script>
+    <script src="/js/db.js"></script>
+    <script>
+        const POSTS_URL_API = BACKEND_BASE_URL + '/sync/posts?status=approved';
+        let retryTimer = null;
+
+        function openSubmitPostModal() {
+            document.getElementById('user-post-title').value = '';
+            document.getElementById('user-post-desc').value = '';
+            document.getElementById('user-post-image').value = '';
+            const preview = document.getElementById('user-post-image-preview');
+            preview.src = '';
+            preview.style.display = 'none';
+            document.getElementById('modal-submit-post').style.display = 'flex';
+        }
+
+        async function submitUserPost() {
+            const title = document.getElementById('user-post-title').value.trim();
+            const content = document.getElementById('user-post-desc').value.trim();
+            const imageInput = document.getElementById('user-post-image');
+            if (!title || !content) {
+                showToast('Please fill all fields', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('id', 'post_' + Date.now());
+            formData.append('title', title);
+            formData.append('content', content);
+            formData.append('status', 'pending');
+            formData.append('author', 'User');
+            formData.append('createdAt', Date.now());
+            if (imageInput.files && imageInput.files[0]) {
+                formData.append('image', imageInput.files[0]);
+            }
+
+            try {
+                const res = await fetch(BACKEND_BASE_URL + '/sync/post', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (res.ok) {
+                    showToast('Your post has been submitted and is pending admin approval.', 'success');
+                    document.getElementById('modal-submit-post').style.display = 'none';
+                    document.getElementById('user-post-title').value = '';
+                    document.getElementById('user-post-desc').value = '';
+                    document.getElementById('user-post-image').value = '';
+                    const preview = document.getElementById('user-post-image-preview');
+                    preview.src = '';
+                    preview.style.display = 'none';
+                } else {
+                    showToast('Failed to submit post', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('Network error', 'error');
+            }
+        }
+
+        function openFeedbackModal() {
+            document.getElementById('user-feedback-msg').value = '';
+            document.getElementById('modal-feedback').style.display = 'flex';
+        }
+
+        async function previewUserPostImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const preview = document.getElementById('user-post-image-preview');
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function openAdminLoginModal() {
+            document.getElementById('admin-login-pin').value = '';
+            document.getElementById('modal-admin-login').style.display = 'flex';
+        }
+
+        async function submitAdminLogin() {
+            const pin = document.getElementById('admin-login-pin').value.trim();
+            if (!pin) {
+                showToast('Enter admin PIN', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(BACKEND_BASE_URL + '/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: 'admin', password: pin, pin })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    showToast('✅ Admin login successful. Welcome!', 'success');
+                    document.getElementById('modal-admin-login').style.display = 'none';
+                    window.location.href = '/pages/admin.html';
+                } else {
+                    showToast(data.message || 'Invalid admin PIN', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('Network error during login', 'error');
+            }
+        }
+
+        async function submitFeedback() {
+            const message = document.getElementById('user-feedback-msg').value.trim();
+            if(!message) {
+                showToast('Message cannot be empty', 'error');
+                return;
+            }
+            try {
+                const res = await fetch(BACKEND_BASE_URL + '/sync/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: 'fb_' + Date.now(),
+                        message,
+                        status: 'unread',
+                        createdAt: Date.now()
+                    })
+                });
+                if(res.ok) {
+                    showToast('Feedback sent to admins!', 'success');
+                    document.getElementById('modal-feedback').style.display = 'none';
+                } else {
+                    showToast('Failed to send', 'error');
+                }
+            } catch(e) {
+                console.error(e);
+                showToast('Network error', 'error');
+            }
+        }
+
+        /* ─────────────────────────────────────
+           Load posts from DB and render
+        ───────────────────────────────────── */
+        async function loadPosts(silent = false) {
+            const list   = document.getElementById('posts-list');
+            const btn    = document.getElementById('refresh-btn');
+
+            // Spin the refresh icon
+            btn.classList.add('spinning');
+
+            try {
+                const resp = await fetch(POSTS_URL_API, { cache: 'no-store' });
+
+                if (!resp.ok) throw new Error('Server returned ' + resp.status);
+
+                const posts = await resp.json();
+
+                if (!Array.isArray(posts) || posts.length === 0) {
+                    list.innerHTML = `
+                        <div class="feed-state">
+                            <div class="feed-state-icon">📭</div>
+                            <div class="feed-state-title">No Posts Yet</div>
+                            <p class="feed-state-sub">Official updates from the admin will appear here. Check back soon!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Sort newest first
+                posts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+                list.innerHTML = posts.map((p, i) => `
+                    <article class="post-card" style="animation-delay:${i * 60}ms">
+                        <div class="post-meta">
+                            <span class="post-author-badge">🛡️ &nbsp;Admin</span>
+                            <span class="post-date">${timeSince(p.createdAt)}</span>
+                        </div>
+                        <div class="post-divider"></div>
+                        <h2 class="post-title">${escapeHTML(p.title || 'Official Update')}</h2>
+                        ${p.image ? `<img class="post-image" src="${p.image}" alt="Post image" loading="lazy" />` : ''}
+                        <p class="post-body">${escapeHTML(p.content || '')}</p>
+                    </article>
+                `).join('');
+
+                if (!silent) showToast('✅ Feed refreshed', 'success');
+
+            } catch (err) {
+                console.error('Failed to load posts:', err);
+                list.innerHTML = `
+                    <div class="feed-state">
+                        <div class="feed-state-icon">⚠️</div>
+                        <div class="feed-state-title">Could Not Load Posts</div>
+                        <p class="feed-state-sub">Check your internet connection and try again.</p>
+                    </div>
+                `;
+                if (!silent) showToast('⚠️ Could not reach the server', 'error');
+            } finally {
+                btn.classList.remove('spinning');
+            }
+        }
+
+        /* ─────────────────────────────────────
+           Real-time updates via Socket.io
+        ───────────────────────────────────── */
+        function setupRealTimeSync() {
+            // db.js already creates the global `socket` – just listen on it
+            const sock = window._cricproSocket || window.socket;
+
+            if (!sock) {
+                // db.js did not get a chance to init (e.g. no io loaded yet), retry
+                console.warn('Socket not ready yet, retrying in 1s…');
+                clearTimeout(retryTimer);
+                retryTimer = setTimeout(setupRealTimeSync, 1000);
+                return;
+            }
+
+            sock.on('connect', () => {
+                document.getElementById('live-pill').style.display = 'inline-flex';
+                console.log('📡 [Posts] Real-time sync active');
+            });
+
+            sock.on('disconnect', () => {
+                document.getElementById('live-pill').style.display = 'none';
+            });
+
+            sock.on('globalUpdate', (data) => {
+                if (data && (data.type === 'post' || data.type === 'post_deleted')) {
+                    console.log('📨 Post update received — refreshing feed');
+                    loadPosts(true); // silent refresh (no toast)
+                }
+            });
+
+            // If socket is already connected, show the pill immediately
+            if (sock.connected) {
+                document.getElementById('live-pill').style.display = 'inline-flex';
+            }
+        }
+
+        /* ─────────────────────────────────────
+           Boot
+        ───────────────────────────────────── */
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPosts(true);   // initial load (silent)
+            setupRealTimeSync();
+
+            // Periodic fallback polling every 30 seconds
+            setInterval(() => loadPosts(true), 30000);
+        });
+    </script>
+</body>
+</html>
+

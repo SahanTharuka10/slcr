@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live TV Overlay</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/overlay.css" />
+    <link rel="stylesheet" href="../css/tv-performance.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        /* CRITICAL: Force transparent background — never let any CSS make this white */
+        html, body {
+            background: transparent !important;
+            background-color: transparent !important;
+        }
+        /* Prevent light-mode class (set by other pages) from affecting overlay */
+        body.light-mode {
+            background: transparent !important;
+            background-color: transparent !important;
+            color: inherit;
+        }
+        .tv-controls {
+            position: fixed;
+            bottom: 15px;
+            left: 20px;
+            z-index: 10000;
+        }
+        .btn-tv-main {
+            background: #e61b4d;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(230,27,77,0.4);
+            transition: transform 0.2s;
+            font-family: inherit;
+        }
+        .btn-tv-main:hover { transform: scale(1.05); }
+        .shortcut-menu {
+            position: fixed;
+            bottom: 60px;
+            left: 20px;
+            background: rgba(0,0,0,0.9);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            z-index: 10000;
+            backdrop-filter: blur(10px);
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .shortcut-menu .btn-tv {
+            background: transparent;
+            color: #fff;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.2s;
+            font-family: inherit;
+            white-space: nowrap;
+        }
+        .shortcut-menu .btn-tv:hover { background: rgba(255,255,255,0.1); }
+        .overlay-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 9998;
+            display: none;
+        }
+        .side-player-popup {
+            position: fixed;
+            right: 50px;
+            bottom: 120px;
+            width: 320px;
+            background: linear-gradient(135deg, #1b1642 0%, #292265 100%);
+            color: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 9997;
+            display: none;
+            border: 2px solid #e61b4d;
+            font-family: 'Outfit', sans-serif;
+            animation: slideInRight 0.3s ease forwards;
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .player-row-clickable {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .player-row-clickable:hover {
+            background: rgba(0,0,0,0.1);
+        }
+
+        /* BROADCAST OVERLAYS */
+        .broadcast-overlay {
+            position: fixed;
+            z-index: 11000;
+            display: none;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        /* Runs Needed Cinematic Artwork */
+        .runs-balls-overlay {
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            z-index: 12000;
+        }
+        .rb-artwork-inner {
+            position: relative;
+            width: 800px;
+            height: 220px;
+            background: linear-gradient(135deg, rgba(26, 35, 126, 0.85) 0%, rgba(123, 31, 162, 0.85) 100%);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+            border: 2px solid rgba(255,255,255,0.15);
+            overflow: hidden;
+            transform: scale(0.8);
+        }
+        .rb-artwork-inner::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 1px, transparent 2px);
+            pointer-events: none;
+        }
+        .rb-content { text-align: center; color: #fff; position: relative; z-index: 2; }
+        .rb-title { 
+            font-size: 24px; font-weight: 900; letter-spacing: 12px; margin-bottom: 5px; 
+            color: #ffd600; text-shadow: 0 0 20px rgba(255,214,0,0.5);
+        }
+        .rb-main { font-size: 80px; font-weight: 900; line-height: 1; display: flex; align-items: baseline; gap: 20px; }
+        .rb-main span { color: #fff; text-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .rb-main b { font-size: 32px; font-weight: 600; text-transform: uppercase; color: rgba(255,255,255,0.6); }
+        .rb-footer { font-size: 14px; font-weight: 700; margin-top: 15px; opacity: 0.5; letter-spacing: 4px; }
+        
+        .rb-decor {
+            position: absolute; top: -50px; right: -50px; width: 200px; height: 300px;
+            background: rgba(255,255,255,0.05); transform: rotate(15deg);
+        }
+
+        /* Current Run Rate Graphic */
+        .crr-overlay {
+            bottom: 40px;
+            right: 40px;
+            width: 220px;
+            height: 90px;
+            background: linear-gradient(135deg, rgba(0, 200, 83, 0.8) 0%, rgba(0, 230, 118, 0.8) 100%);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            box-shadow: 0 10px 30px rgba(0, 200, 83, 0.3);
+            border: 2px solid rgba(255,255,255,0.2);
+            transform: translateX(300px); /* For GSAP */
+        }
+        .crr-label { font-size: 14px; font-weight: 800; opacity: 0.8; letter-spacing: 2px; }
+        .crr-val { font-size: 36px; font-weight: 900; }
+
+        .next-match-overlay {
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transform: scale(1.1);
+        }
+        .nm-artwork {
+            width: 1000px;
+            height: 500px;
+            background: linear-gradient(45deg, rgba(27, 22, 66, 0.9) 0%, rgba(41, 34, 101, 0.9) 100%);
+            backdrop-filter: blur(25px);
+            border-radius: 40px;
+            border: 3px solid rgba(230, 27, 77, 0.5);
+            box-shadow: 0 50px 150px rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .nm-glow { position: absolute; top:-50%; left:-50%; width:200%; height:200%; background: radial-gradient(circle, rgba(230,27,77,0.1) 0%, transparent 70%); animation: rotate 10s linear infinite; }
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        .nm-tag { background: #e61b4d; color: #fff; padding: 10px 40px; border-radius: 40px; font-size: 20px; font-weight: 900; letter-spacing: 5px; margin-bottom: 60px; z-index: 2; }
+        .nm-teams { display: flex; align-items: center; gap: 60px; z-index: 2; }
+        .nm-team { font-size: 72px; font-weight: 900; color: #fff; text-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+        .nm-vs-circle { width: 100px; height: 100px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #e61b4d; font-size: 40px; font-weight: 900; font-style: italic; box-shadow: 0 0 30px rgba(255,255,255,0.4); }
+        .nm-footer { margin-top: 60px; color: #aaa; font-size: 14px; letter-spacing: 4px; z-index: 2; font-weight: 600; }
+
+        /* Full Scorecard (Balanced Columns) */
+        .full-scorecard-overlay {
+            top: 20px; left: 20px; right: 20px; bottom: 20px;
+            background: rgba(15, 23, 42, 0.85); 
+            color: #fff;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(20px);
+            box-shadow: 0 40px 100px rgba(0,0,0,0.8);
+        }
+        .fs-header { text-align: center; margin-bottom: 20px; background: #1b1642; color: #fff; padding: 15px; border-radius: 12px; }
+        .fs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; flex: 1; min-height: 0; }
+        .fs-column { display: flex; flex-direction: column; gap: 15px; }
+
+        /* Summary Sheet (Proper Sheet Look) */
+        .summary-overlay {
+            top: 40px; left: 40px; right: 40px; bottom: 40px;
+            background: #fff;
+            background-image: radial-gradient(#ddd 1px, transparent 1px);
+            background-size: 20px 20px;
+            color: #111;
+            border: 20px solid #1b1642;
+            padding: 40px;
+            box-shadow: 0 50px 150px rgba(0,0,0,1);
+        }
+        .sm-header { border-bottom: 5px double #1b1642; padding-bottom: 20px; margin-bottom: 30px; text-align: center; }
+        .sm-title { font-size: 48px; font-weight: 900; color: #1b1642; margin: 0; }
+        .sm-subtitle { font-size: 18px; color: #e61b4d; font-weight: 800; letter-spacing: 3px; }
+    
+        /* --- MODE 2: MODERN SCORECARD WITH LOGOS --- */
+        .overlay-container.mode-2 {
+            bottom: 40px; left: 50%; right: auto;
+            transform: translateX(-50%);
+            display: flex; gap: 15px; align-items: stretch;
+            background: transparent; box-shadow: none; padding: 0; border-radius: 0;
+            backdrop-filter: none;
+        }
+        .m2-team-score {
+            display: flex; background: rgba(15, 23, 42, 0.95);
+            border-radius: 12px; overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 2px solid rgba(255,255,255,0.1);
+        }
+        .m2-logo-box {
+            width: 70px; display: flex; align-items: center; justify-content: center;
+            background: #e61b4d; color: #fff; font-weight: 900; font-size: 20px;
+        }
+        .m2-team-names {
+            padding: 10px 20px; display: flex; flex-direction: column; justify-content: center;
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+        .m2-team-names .name { font-size: 22px; font-weight: 900; color: #fff; letter-spacing: 1px; }
+        .m2-team-names .vs { font-size: 11px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 2px; }
+        
+        .m2-score-box {
+            padding: 10px 25px; display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: #0f172a;
+        }
+        .m2-score-box .score { font-size: 32px; font-weight: 950; color: #fbbf24; line-height: 1; }
+        .m2-score-box .overs { font-size: 14px; font-weight: 800; color: #fff; opacity: 0.8; margin-top: 4px; }
+
+        .m2-player-box {
+            display: flex; background: rgba(30, 41, 59, 0.9);
+            border-radius: 12px; padding: 6px 16px 6px 6px; align-items: center; gap: 12px;
+            border: 1px solid rgba(255,255,255,0.05); transition: all 0.3s;
+        }
+        .m2-player-box.active {
+            background: rgba(15, 23, 42, 0.95); border-color: #38bdf8;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+        }
+        .m2-player-photo img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: #334155; }
+        .m2-player-info { display: flex; flex-direction: column; }
+        .m2-player-info .p-name { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 2px; }
+        .m2-player-info .p-score { font-size: 18px; font-weight: 900; color: #fff; }
+        .m2-player-info .p-score span { font-size: 12px; color: #94a3b8; font-weight: 700; margin-left: 6px; }
+
+        .m2-info-pill {
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(15, 23, 42, 0.9); border-radius: 12px; padding: 0 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .m2-info-pill .label { font-size: 10px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; }
+        .m2-info-pill .value { font-size: 16px; font-weight: 900; color: #fff; }
+
+        .m2-bowler-box {
+            display: flex; background: rgba(30, 41, 59, 0.9);
+            border-radius: 12px; padding: 6px 16px 6px 6px; align-items: center; gap: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .m2-bowler-box .m2-player-info .p-score { color: #fbbf24; }
+
+        .m2-dots-section {
+            display: flex; align-items: center; background: rgba(15, 23, 42, 0.9);
+            padding: 0 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+        }
+        .m2-dots-row { display: flex; gap: 6px; }
+        .m2-dots-row .dot {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: rgba(255,255,255,0.1); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: 900;
+        }
+        .m2-dots-row .dot.b { background: #38bdf8; color: #fff; box-shadow: 0 0 10px #38bdf8; }
+        .m2-dots-row .dot.w { background: #e32459; color: #fff; box-shadow: 0 0 10px #e32459; }
+
+        .m2-logo-box.right-logo { background: #38bdf8; border-radius: 0 10px 10px 0; }
+        .m2-team-score.right-side { border-radius: 12px; flex-direction: row-reverse; }
+        .m2-team-score.right-side .m2-team-names { border-right: none; border-left: 1px solid rgba(255,255,255,0.1); text-align: right; }
+
+        /* --- MODE 3: MANUAL DETAILED BAR --- */
+        .overlay-container.mode-3 {
+            bottom: 40px; left: 50%; right: auto; transform: translateX(-50%);
+            width: 1400px; max-width: 95vw;
+            background: linear-gradient(90deg, rgba(15,23,42,0.95), rgba(30,41,59,0.95));
+            border-radius: 16px; padding: 0; border: 2px solid rgba(255,255,255,0.1);
+            display: grid; grid-template-columns: 250px 1fr 300px; align-items: stretch;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6); overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+        .m3-left {
+            background: linear-gradient(135deg, #e61b4d, #ff4081);
+            padding: 15px 25px; display: flex; flex-direction: column; justify-content: center;
+            position: relative; overflow: hidden;
+        }
+        .m3-left::after { content: ''; position: absolute; top:0; right:0; bottom:0; width: 40px; background: linear-gradient(90deg, transparent, rgba(0,0,0,0.2)); }
+        .m3-score { font-size: 42px; font-weight: 950; color: #fff; line-height: 1; margin-bottom: 4px; display:flex; align-items:baseline; gap:8px; }
+        .m3-score small { font-size: 20px; font-weight: 800; opacity: 0.9; }
+        .m3-teams { font-size: 16px; font-weight: 800; color: rgba(255,255,255,0.9); letter-spacing: 1px; text-transform: uppercase; }
+        
+        .m3-center { padding: 15px 30px; display: flex; flex-direction: column; justify-content: space-around; }
+        .m3-row { display: flex; align-items: center; gap: 15px; }
+        .m3-row .lbl { font-size: 12px; font-weight: 800; color: #94a3b8; letter-spacing: 1px; }
+        .m3-row .val { font-size: 18px; font-weight: 800; color: #e2e8f0; margin-right: 15px; }
+        .m3-row .val.highlight { color: #fbbf24; font-weight: 950; font-size: 20px; }
+        
+        .m3-right {
+            background: rgba(0,0,0,0.3); padding: 15px 20px;
+            display: flex; flex-direction: column; justify-content: center; align-items: flex-end;
+            border-left: 1px solid rgba(255,255,255,0.05);
+        }
+        .m3-right-title { font-size: 10px; font-weight: 800; color: #94a3b8; letter-spacing: 2px; margin-bottom: 8px; text-transform: uppercase; }
+        .m3-recent { display: flex; gap: 6px; }
+        .m3-recent span {
+            display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.1); border-radius: 50%; font-size: 14px; font-weight: 900; color: #fff;
+        }
+        .m3-recent span.w { background: #e32459; box-shadow: 0 0 10px rgba(227,36,89,0.5); }
+        .m3-recent span.b { background: #38bdf8; box-shadow: 0 0 10px rgba(56,189,248,0.5); }
+
+    </style>
+</head>
+
+<body>
+  <!-- NOTE: No FOUC theme script here — overlay MUST stay transparent for OBS/chroma key -->
+    <button id="copy-obs-link" onclick="copyObsLink()" style="position:fixed; top:15px; right:15px; background:rgba(30, 30, 30, 0.9); color:#fff; border:1px solid rgba(255,255,255,0.2); padding:8px 16px; border-radius:8px; font-size:13px; font-weight:800; cursor:pointer; z-index:99999; box-shadow:0 4px 12px rgba(0,0,0,0.5); font-family:'Outfit', sans-serif; transition: opacity 0.3s, transform 0.2s; opacity:0.8;" onmouseenter="this.style.opacity='1'; this.style.transform='scale(1.05)'" onmouseleave="this.style.opacity='0.8'; this.style.transform='scale(1)'">🔗 Copy OBS URL</button>
+    <script>
+        function copyObsLink() {
+            let url = new URL(window.location.href);
+            url.searchParams.delete('preview');
+            if (!url.searchParams.get('match') && !url.searchParams.get('tournament')) {
+                if (matchId) url.searchParams.set('match', matchId);
+                else if (tournId) url.searchParams.set('tournament', tournId);
+            }
+            navigator.clipboard.writeText(url.toString()).then(() => {
+                const btn = document.getElementById('copy-obs-link');
+                btn.innerHTML = '✅ URL Copied (Safe for OBS)';
+                btn.style.background = 'rgba(0, 200, 83, 0.9)';
+                setTimeout(() => { 
+                    btn.innerHTML = '🔗 Copy OBS URL'; 
+                    btn.style.background = 'rgba(30, 30, 30, 0.9)';
+                }, 2000);
+            });
+        }
+        // Auto-hide if loaded inside OBS browser source
+        document.addEventListener("DOMContentLoaded", () => {
+            if (navigator.userAgent.toLowerCase().includes('obs')) {
+                document.getElementById('copy-obs-link').style.display = 'none';
+            }
+        });
+    </script>
+    <div id="side-player-popup" class="side-player-popup"></div>
+    <div id="overlay-popup" class="overlay-popup"></div>
+    <div id="overlay-container" class="overlay-container">
+        <!-- Inner overlay injected by JS -->
+    </div>
+
+
+    <!-- BROADCAST OVERLAYS -->
+    <div id="broadcast-runs-balls" class="broadcast-overlay runs-balls-overlay">
+        <div class="rb-artwork-inner" id="rb-inner">
+            <div class="rb-decor"></div>
+            <div class="rb-content">
+                <div class="rb-title" id="rb-title-anim">RUNS NEEDED</div>
+                <div class="rb-main">
+                    <span id="rb-runs">0</span>
+                    <b>from</b>
+                    <span id="rb-balls">0</span>
+                    <b>balls</b>
+                </div>
+                <div class="rb-footer">SLCRICKPRO LIVE BROADCAST PRODUCTION</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="broadcast-next-match" class="broadcast-overlay next-match-overlay">
+        <div class="nm-artwork">
+            <div class="nm-glow"></div>
+            <div class="nm-tag">COMING UP NEXT</div>
+            <div class="nm-teams">
+                <div class="nm-team" id="nm-team-a">TEAM ALPHA</div>
+                <div class="nm-vs-circle">VS</div>
+                <div class="nm-team" id="nm-team-b">TEAM BETA</div>
+            </div>
+            <div class="nm-footer">SLCRICKPRO LIVE BROADCAST PRODUCTION</div>
+        </div>
+    </div>
+
+    <!-- NEW CRR GRAPHIC -->
+    <div id="broadcast-crr" class="broadcast-overlay crr-overlay">
+        <div class="crr-label">CURRENT RR</div>
+        <div class="crr-val" id="crr-val">0.00</div>
+    </div>
+
+    <!-- Milestone Overlay -->
+    <div id="milestone-overlay" class="broadcast-overlay">
+        <div class="ms-title">MILESTONE REACHED</div>
+        <div id="ms-val" class="ms-val">50</div>
+        <div id="ms-sub" class="ms-sub">RUNS OFF 30 BALLS</div>
+    </div>
+
+    <div id="broadcast-full-scorecard" class="broadcast-overlay full-scorecard-overlay">
+        <div id="fs-content" style="height:100%; display:flex; flex-direction:column">
+            <!-- Balanaced Scorecard Injected -->
+        </div>
+    </div>
+
+    <div id="broadcast-summary" class="broadcast-overlay summary-overlay">
+        <div id="sm-content">
+            <!-- Proper Summary Sheet Injected -->
+        </div>
+    </div>
+
+    <script src="../js/cloud-config.js"></script>
+    <script src="../js/cloud-services.js"></script>
+    <script src="../js/db.js?v=2.1"></script>
+    <script src="../js/overlay.js?v=2.1"></script>
+</body>
+
+</html>

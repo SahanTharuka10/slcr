@@ -1,0 +1,15 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "liveMatches": {
+      ".indexOn": ["lastUpdated", "cloudUpdatedAt", "status"]
+    },
+    "matches": {
+      ".indexOn": ["lastUpdated", "cloudUpdatedAt", "status"]
+    },
+    "broadcastCommands": {
+      ".indexOn": ["timestamp"]
+    }
+  }
+}
