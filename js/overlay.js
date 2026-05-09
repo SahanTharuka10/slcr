@@ -37,6 +37,9 @@ let latestSocketScoreTime = 0;
 let isScorebarVisible = true;
 let currentOverlayMode = 4; // Default to Mode 4 (Scorebar 2)
 let currentSubMode = 1;
+let lastScorecardToggleAt = 0;
+let lastSummaryToggleAt = 0;
+const OVERLAY_TOGGLE_DEDUPE_MS = 1500;
 
 if (typeof OVERLAY_DEFAULT_PLAYER_PHOTO === 'undefined') {
     var OVERLAY_DEFAULT_PLAYER_PHOTO = '../assets/default-player.svg';
@@ -573,11 +576,15 @@ function getActiveOverlayMatch(mId) {
 function toggleBroadcastScorecard(mId) {
     const el = document.getElementById('broadcast-full-scorecard');
     if (!el) return;
+    const now = Date.now();
     if (el.style.display === 'flex') {
+        if (now - lastScorecardToggleAt < OVERLAY_TOGGLE_DEDUPE_MS) return;
+        lastScorecardToggleAt = now;
         gsap.to(el, { opacity: 0, scale: 0.95, duration: 0.5, onComplete: () => el.style.display = 'none' });
     } else {
         const m = getActiveOverlayMatch(mId);
         if (m) {
+            lastScorecardToggleAt = now;
             renderFullScorecardOverlay(m);
             el.style.display = 'flex';
             gsap.fromTo(el, { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'expo.out' });
@@ -741,9 +748,13 @@ function showGuestGraphic(data) {
 function toggleBroadcastSummary(tId) {
     const el = document.getElementById('broadcast-summary');
     if (!el) return;
+    const now = Date.now();
     if (el.style.display === 'block' || el.style.display === 'flex') {
+        if (now - lastSummaryToggleAt < OVERLAY_TOGGLE_DEDUPE_MS) return;
+        lastSummaryToggleAt = now;
         gsap.to(el, { opacity: 0, y: 100, duration: 0.5, onComplete: () => el.style.display = 'none' });
     } else {
+        lastSummaryToggleAt = now;
         renderBroadcastSummaryOverlay(getActiveOverlayMatch(matchId), tId);
         el.style.display = 'flex';
         el.style.alignItems = 'center';
