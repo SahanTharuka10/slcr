@@ -1083,6 +1083,25 @@ function getStoredTournamentScoringToken(tournamentId) {
     }
 }
 
+function requestTournamentScoringToken(tournamentId, password) {
+    if (!BACKEND_BASE_URL || !tournamentId || !password) return Promise.resolve(null);
+    return fetch(BACKEND_BASE_URL + '/api/handshake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: tournamentId, type: 'tournament', password })
+    })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+        if (d && d.ok && d.token) {
+            localStorage.setItem('cricpro_token', d.token);
+            if (d.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + d.expiresInMs).toString());
+            return d.token;
+        }
+        return null;
+    })
+    .catch(() => null);
+}
+
 function isScorerOrAdminPage() {
     const path = window.location.pathname || '';
     return path.includes('score-match') || path.includes('admin');
@@ -1154,21 +1173,10 @@ function syncToDB(type, data) {
         const storedPassword = localStorage.getItem(`tourn_pw_${syncPayload.tournamentId}`);
         if (storedPassword) {
             data._authRetry = true;
-            fetch(BACKEND_BASE_URL + '/api/handshake', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: syncPayload.tournamentId, type: 'tournament', password: storedPassword })
-            })
-            .then(r => r.ok ? r.json() : null)
-            .then(d => {
+            requestTournamentScoringToken(syncPayload.tournamentId, storedPassword).then(newToken => {
                 data._isSyncing = false;
-                if (d && d.ok && d.token) {
-                    localStorage.setItem('cricpro_token', d.token);
-                    if (d.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + d.expiresInMs).toString());
-                    syncToDB(type, data);
-                }
-            })
-            .catch(() => { data._isSyncing = false; });
+                if (newToken) syncToDB(type, data);
+            });
             return;
         }
     }
@@ -1204,6 +1212,18 @@ function syncToDB(type, data) {
             console.warn('Scoring token expired or invalid (401). Clearing local token.');
             localStorage.removeItem('cricpro_token');
             localStorage.removeItem('cricpro_token_expiry');
+            if (type === 'match' && syncPayload && syncPayload.tournamentId && !data._authRetry401) {
+                const storedPassword = localStorage.getItem(`tourn_pw_${syncPayload.tournamentId}`);
+                if (storedPassword) {
+                    data._authRetry401 = true;
+                    const newToken = await requestTournamentScoringToken(syncPayload.tournamentId, storedPassword);
+                    if (newToken) {
+                        data._isSyncing = false;
+                        syncToDB(type, data);
+                        return null;
+                    }
+                }
+            }
             showToast('🔐 Scoring token expired, please re-open tournament and unlock again', 'error');
             return null;
         }
