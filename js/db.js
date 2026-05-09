@@ -1133,6 +1133,29 @@ function syncToDB(type, data) {
         localStorage.removeItem('cricpro_token_expiry');
     }
 
+    if (!token && type === 'match' && syncPayload && syncPayload.tournamentId && !data._authRetry) {
+        const storedPassword = localStorage.getItem(`tourn_pw_${syncPayload.tournamentId}`);
+        if (storedPassword) {
+            data._authRetry = true;
+            fetch(BACKEND_BASE_URL + '/api/handshake', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: syncPayload.tournamentId, type: 'tournament', password: storedPassword })
+            })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => {
+                data._isSyncing = false;
+                if (d && d.ok && d.token) {
+                    localStorage.setItem('cricpro_token', d.token);
+                    if (d.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + d.expiresInMs).toString());
+                    syncToDB(type, data);
+                }
+            })
+            .catch(() => { data._isSyncing = false; });
+            return;
+        }
+    }
+
     // Security check: Only skip if NOT on localhost AND the tournament is explicitly locked AND we have no valid token.
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const isScoringPage = window.location.pathname.includes('score-match');

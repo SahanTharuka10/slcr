@@ -913,7 +913,7 @@ async function loginToMatch() {
 
         showToast('🔐 Verifying password...', 'default');
 
-        const response = await fetch(baseUrl + '/verify-password', {
+        const response = await fetch(baseUrl + '/api/handshake', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id, type, password: pw.trim() })
@@ -927,7 +927,7 @@ async function loginToMatch() {
         }
         const result = await response.json();
 
-        if (result.verified) {
+        if (result.ok) {
             showToast('✅ Access Granted!', 'success');
             
             // Record this grant locally
@@ -939,6 +939,10 @@ async function loginToMatch() {
                 // Store password for future local auth attempt
                 localStorage.setItem(`tourn_pw_${id}`, pw);
                 setTournamentAuthorized(id, result.token || 'cloud-verified', 1000 * 60 * 60 * 24);
+                if (result.token) {
+                    localStorage.setItem('cricpro_token', result.token);
+                    if (result.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + result.expiresInMs).toString());
+                }
                 if (currentTournament) {
                     openTournamentHub(currentTournament.id);
                     currentTournament = null;
