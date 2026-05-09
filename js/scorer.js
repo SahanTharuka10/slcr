@@ -1361,15 +1361,28 @@ function editPlayerName(role, idx) {
 }
 
 // ========== RENDER SCORING UI ==========
+function cleanTeamLabel(value, fallback) {
+    const text = (value == null ? '' : String(value)).trim();
+    if (!text || text.toLowerCase() === 'undefined' || text.toLowerCase() === 'null') {
+        return fallback;
+    }
+    return text;
+}
+
 function renderScoring() {
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
     if (!inn) return;
 
+    const battingFallback = cleanTeamLabel(m.battingFirst, cleanTeamLabel(m.team1, 'Batting Team'));
+    const bowlingFallback = cleanTeamLabel(m.fieldingFirst, cleanTeamLabel(m.team2, 'Bowling Team'));
+    inn.battingTeam = cleanTeamLabel(inn.battingTeam, battingFallback);
+    inn.bowlingTeam = cleanTeamLabel(inn.bowlingTeam, bowlingFallback);
+
     // Banner
-    document.getElementById('sb-batting-team').textContent = inn.battingTeam || 'Team';
-    document.getElementById('sb-bowling-team').textContent = inn.bowlingTeam || 'Team';
+    document.getElementById('sb-batting-team').textContent = inn.battingTeam;
+    document.getElementById('sb-bowling-team').textContent = inn.bowlingTeam;
     document.getElementById('sb-score').textContent = `${inn.runs}/${inn.wickets}`;
     document.getElementById('sb-overs').textContent = `${formatOvers(inn.balls, m.ballsPerOver)} ov`;
     document.getElementById('sb-crr').textContent = formatCRR(inn.runs, inn.balls);
