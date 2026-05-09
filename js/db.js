@@ -1083,6 +1083,23 @@ function getStoredTournamentScoringToken(tournamentId) {
     }
 }
 
+function isScorerOrAdminPage() {
+    const path = window.location.pathname || '';
+    return path.includes('score-match') || path.includes('admin');
+}
+
+function canPushLocalMatchToCloud(match) {
+    if (!match || !match.id) return false;
+    if (!match.tournamentId) return true;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return true;
+    if (isScorerOrAdminPage()) return true;
+    if (localStorage.getItem('cricpro_token') || getStoredTournamentScoringToken(match.tournamentId)) return true;
+    if (localStorage.getItem(`tourn_pw_${match.tournamentId}`)) return true;
+
+    const tournament = (DB && DB.getTournament) ? DB.getTournament(match.tournamentId) : null;
+    return !(tournament && (tournament.scoringPassword || tournament.password || tournament.isLocked));
+}
+
 function syncToDB(type, data) {
     syncToCloudServices(type, data);
     if (!BACKEND_BASE_URL) return;
@@ -1158,7 +1175,7 @@ function syncToDB(type, data) {
 
     // Security check: Only skip if NOT on localhost AND the tournament is explicitly locked AND we have no valid token.
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isScoringPage = window.location.pathname.includes('score-match');
+    const isScoringPage = isScorerOrAdminPage();
     
     if (!isLocal && !isScoringPage && type === 'match' && syncPayload && syncPayload.tournamentId && !token) {
         const tournament = (DB && DB.getTournament) ? DB.getTournament(syncPayload.tournamentId) : null;
@@ -1619,8 +1636,10 @@ async function syncCloudData(options = {}) {
                     
                     matchMap.set(lm.id, lm);
                     anyUpdated = true;
-                    console.log(`🔄 Sync: Pushing match ${lm.id} to cloud`);
-                    try { syncToDB('match', { ...lm, _isSyncing: false, _isBackgroundSync: true }); } catch(e) {}
+                    if (canPushLocalMatchToCloud(lm)) {
+                        console.log(`🔄 Sync: Pushing match ${lm.id} to cloud`);
+                        try { syncToDB('match', { ...lm, _isSyncing: false, _isBackgroundSync: true }); } catch(e) {}
+                    }
                 }
             });
 

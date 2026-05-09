@@ -892,6 +892,7 @@ async function loginToMatch() {
         const localT = DB.getTournament(tournamentId);
         const localPw = localT?.scoringPassword || localT?.password;
         if (localPw && pw === localPw) {
+            localStorage.setItem(`tourn_pw_${tournamentId}`, pw);
             setTournamentAuthorized(tournamentId, 'local-token', 1000 * 60 * 60 * 24);
             showToast('✅ Access Granted!', 'success');
             if (currentTournament && !currentMatch) {
