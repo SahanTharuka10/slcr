@@ -91,7 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Backend & Socket ──────────────────────────────────
     const baseUrl = window.BACKEND_BASE_URL || (typeof DB !== 'undefined' ? DB.getCloudURL() : "");
     const socket = baseUrl ? (window._cricproSocket || (typeof io !== 'undefined' ? io(baseUrl, { 
-        transports: ['polling', 'websocket'],
+        transports: ['websocket'],
+        upgrade: false,
         closeOnBeforeunload: false
     }) : null)) : null;
 

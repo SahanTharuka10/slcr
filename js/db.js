@@ -931,7 +931,8 @@ if (BACKEND_BASE_URL && typeof io !== 'undefined') {
         if (!awake) return;
         socket = io(BACKEND_BASE_URL, {
             path: '/socket.io',
-            transports: ['websocket', 'polling'], // prefer websocket first for speed
+            transports: ['websocket'],
+            upgrade: false,
             reconnectionAttempts: 15,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 8000,
