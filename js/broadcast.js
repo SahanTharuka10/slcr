@@ -8,6 +8,20 @@ const BROADCAST_KEYS = {
     DATA: 'cricpro_broadcast_data'
 };
 
+function getBroadcastMatchSnapshot() {
+    if (typeof currentMatch === 'undefined' || !currentMatch) return null;
+    try {
+        const copy = JSON.parse(JSON.stringify(currentMatch));
+        delete copy.history;
+        delete copy.redoStack;
+        delete copy._isSyncing;
+        delete copy._isBackgroundSync;
+        return copy;
+    } catch (_) {
+        return null;
+    }
+}
+
 const Broadcast = {
     _buildBroadcastData(cmd, data = {}) {
         if (data && Object.keys(data).length > 0) return data;
@@ -79,6 +93,8 @@ const Broadcast = {
      */
     send(cmd, data = {}) {
         data = this._buildBroadcastData(cmd, data);
+        const matchSnapshot = getBroadcastMatchSnapshot();
+        if (matchSnapshot && !data.match) data = { ...data, match: matchSnapshot };
         const scopeTournamentId = (typeof currentMatch !== 'undefined' && currentMatch && currentMatch.tournamentId) ||
             (typeof currentTournament !== 'undefined' && currentTournament && currentTournament.id) || null;
         const scopeMatchId = (typeof currentMatch !== 'undefined' && currentMatch && currentMatch.id) || null;
@@ -183,8 +199,9 @@ const Broadcast = {
      */
     showCRR() {
         if (!currentMatch) return;
-        const target = (currentMatch.innings[1]?.runs / (currentMatch.innings[1]?.balls / 6)) || 0;
-        this.send('SHOW_CRR', { crr: target.toFixed(2) });
+        const inn = currentMatch.innings?.[currentMatch.currentInnings || 0];
+        const crr = inn ? formatCRR(inn.runs || 0, inn.balls || 0) : '0.00';
+        this.send('SHOW_CRR', { crr });
         showToast('📈 CRR Published!', 'success');
     },
 

@@ -3875,11 +3875,29 @@ function escapeHTML(str) {
 }
 
 // ========== BROADCASTS ==========
+function getBroadcastMatchSnapshot() {
+    if (!currentMatch) return null;
+    try {
+        const copy = JSON.parse(JSON.stringify(currentMatch));
+        delete copy.history;
+        delete copy.redoStack;
+        delete copy._isSyncing;
+        delete copy._isBackgroundSync;
+        return copy;
+    } catch (_) {
+        return null;
+    }
+}
+
 function sendBroadcast(cmd, data) {
     if (!currentMatch) return;
+    const matchSnapshot = getBroadcastMatchSnapshot();
+    const broadcastData = matchSnapshot && !(data && data.match)
+        ? { ...(data || {}), match: matchSnapshot }
+        : (data || {});
     const payload = {
         cmd,
-        data,
+        data: broadcastData,
         matchId: currentMatch.id,
         tournamentId: currentMatch.tournamentId,
         timestamp: Date.now()
@@ -3914,19 +3932,33 @@ function broadcastTeamCard(teamIdx) {
     if (!m) return;
     const teamName = teamIdx === 0 ? m.team1 : m.team2;
     const t = m.tournamentId ? DB.getTournament(m.tournamentId) : m;
-    const rosterIds = (t && t.rosters) ? (t.rosters[teamName] || []) : [];
+    const rosterIds = (t && t.rosters) ? (t.rosters[teamName] || t.rosters[teamIdx] || []) : [];
     
-    const players = rosterIds.slice(0, 11).map(pid => {
-        const p = DB.getPlayerById(pid);
-        if (!p) return null;
+    let players = rosterIds.slice(0, 15).map(pid => {
+        const p = typeof pid === 'string' ? (DB.getPlayerById(pid) || { name: pid }) : pid;
+        if (!p || !p.name) return null;
         return {
             name: p.name,
             role: p.role || 'Player',
             photo: playerPhotoSrc(p)
         };
     }).filter(Boolean);
+
+    if (players.length === 0 && Array.isArray(m.innings)) {
+        const seen = new Set();
+        const add = (p) => {
+            if (!p || !p.name || seen.has(p.name)) return;
+            seen.add(p.name);
+            players.push({ name: p.name, role: p.role || 'Player', photo: playerPhotoSrc(p) });
+        };
+        m.innings.forEach(inn => {
+            if (inn.battingTeam === teamName) (inn.batsmen || []).forEach(add);
+            if (inn.bowlingTeam === teamName) (inn.bowlers || []).forEach(add);
+        });
+        players = players.slice(0, 15);
+    }
     
-    sendBroadcast('SHOW_TEAM_CARD', { teamName, players });
+    sendBroadcast('SHOW_TEAM_CARD', { teamName, teamLogo: DB.getTeamPhoto(teamName, m.tournamentId) || '', players });
 }
 
 function broadcastNextMatch() {
@@ -4496,6 +4528,10 @@ function renderBroadcastController(match) {
                         <button class="b-btn b-btn-black" onclick="broadcastTeamCard(0)">
                             <div class="b-btn-title">👕 ${getShortName(match.team1)}</div>
                             <div class="b-btn-sub">S+K</div>
+                        </button>
+                        <button class="b-btn b-btn-black" onclick="broadcastTeamCard(1)">
+                            <div class="b-btn-title">👕 ${getShortName(match.team2)}</div>
+                            <div class="b-btn-sub">S+J</div>
                         </button>
                     </div>
                 </div>

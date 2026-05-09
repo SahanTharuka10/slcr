@@ -217,6 +217,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function handleBroadcastCommand(cmd, data = {}) {
     if (!cmd) return;
+    if (data && data.match) {
+        matchId = data.match.id || matchId;
+        latestSocketScore = { fullMatch: data.match };
+        if (typeof DB !== 'undefined' && DB.saveMatch) DB.saveMatch(data.match, true);
+        renderOverlay();
+    }
     const requiresGsap = [
         'SHOW_RUNS_BALLS', 'SHOW_NEXT_MATCH', 'SHOW_SCORECARD', 'SHOW_SUMMARY',
         'SHOW_CRR', 'SET_SCOREBAR_VISIBILITY', 'SET_OVERLAY_MODE', 'SET_OVERLAY_SUBMODE',
@@ -279,7 +285,7 @@ function handleBroadcastCommand(cmd, data = {}) {
                         currentBowlerIdx: 0
                     }];
                 }
-                if (typeof DB !== 'undefined' && DB.saveMatch) DB.saveMatch(latestSocketScore.fullMatch);
+                if (typeof DB !== 'undefined' && DB.saveMatch) DB.saveMatch(latestSocketScore.fullMatch, true);
                 renderOverlay();
             }
             break;
@@ -534,13 +540,19 @@ function _renderOverlayMode4(m) {
     }
 }
 
+function getActiveOverlayMatch(mId) {
+    return (typeof DB !== 'undefined' && DB.getMatch ? DB.getMatch(mId || matchId) : null) ||
+        (latestSocketScore && latestSocketScore.fullMatch) ||
+        null;
+}
+
 function toggleBroadcastScorecard(mId) {
     const el = document.getElementById('broadcast-full-scorecard');
     if (!el) return;
     if (el.style.display === 'flex') {
         gsap.to(el, { opacity: 0, scale: 0.95, duration: 0.5, onComplete: () => el.style.display = 'none' });
     } else {
-        const m = DB.getMatch(mId || matchId);
+        const m = getActiveOverlayMatch(mId);
         if (m) {
             renderFullScorecardOverlay(m);
             el.style.display = 'flex';
@@ -607,7 +619,7 @@ function showTeamCardGraphic(data) {
     el.style.right = '40px'; el.style.top = '50%'; el.style.transform = 'translateY(-50%)';
     el.style.left = 'auto';
 
-    const players = data.players || [];
+    const players = (data.players && data.players.length ? data.players : buildTeamCardPlayers(data.match, data.teamName));
     const playersHtml = players.map(p => `
         <div style="display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
             <img src="${p.photo || OVERLAY_DEFAULT_PLAYER_PHOTO}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:2px solid rgba(0,230,118,0.4);flex-shrink:0;" onerror="this.src='${OVERLAY_DEFAULT_PLAYER_PHOTO}'">
@@ -633,6 +645,33 @@ function showTeamCardGraphic(data) {
     document.body.appendChild(el);
     gsap.fromTo(el, { x: 400, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8, ease: 'expo.out' });
     // Stays until STOP ALL
+}
+
+function buildTeamCardPlayers(m, teamName) {
+    if (!m || !teamName) return [];
+    const seen = new Set();
+    const addPlayer = (list, p) => {
+        if (!p) return;
+        const name = typeof p === 'string' ? p : p.name;
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        list.push({
+            name,
+            role: (typeof p === 'object' && p.role) ? p.role : 'Player',
+            photo: (typeof p === 'object' && p.photo) ? p.photo : OVERLAY_DEFAULT_PLAYER_PHOTO
+        });
+    };
+
+    const players = [];
+    const roster = m.rosters && (m.rosters[teamName] || m.rosters[m.team1 === teamName ? 0 : 1]);
+    if (Array.isArray(roster)) roster.forEach(p => addPlayer(players, p));
+
+    (m.innings || []).forEach(inn => {
+        if (inn.battingTeam === teamName) (inn.batsmen || []).forEach(p => addPlayer(players, p));
+        if (inn.bowlingTeam === teamName) (inn.bowlers || []).forEach(p => addPlayer(players, p));
+    });
+
+    return players.slice(0, 15);
 }
 
 function showGuestGraphic(data) {
@@ -666,9 +705,42 @@ function toggleBroadcastSummary(tId) {
     if (el.style.display === 'block') {
         gsap.to(el, { opacity: 0, y: 100, duration: 0.5, onComplete: () => el.style.display = 'none' });
     } else {
+        renderBroadcastSummaryOverlay(getActiveOverlayMatch(matchId), tId);
         el.style.display = 'block';
         gsap.fromTo(el, { opacity: 0, y: 100 }, { opacity: 1, y: 0, duration: 0.6 });
     }
+}
+
+function renderBroadcastSummaryOverlay(m, tId) {
+    const el = document.getElementById('sm-content');
+    if (!el) return;
+    if (!m) {
+        el.innerHTML = `<div style="padding:30px;color:white;font-weight:900;">NO MATCH DATA</div>`;
+        return;
+    }
+
+    const inningsHtml = (m.innings || []).filter(Boolean).map((inn, idx) => {
+        const topBats = (inn.batsmen || []).slice().sort((a, b) => (b.runs || 0) - (a.runs || 0)).slice(0, 3);
+        const topBowls = (inn.bowlers || []).slice().sort((a, b) => (b.wickets || 0) - (a.wickets || 0) || (a.runs || 0) - (b.runs || 0)).slice(0, 3);
+        return `
+            <div style="background:rgba(255,255,255,0.06);border-radius:16px;padding:18px;margin-top:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:10px;margin-bottom:12px;">
+                    <div style="font-size:14px;color:#00e676;font-weight:900;letter-spacing:2px;">INNINGS ${idx + 1}</div>
+                    <div style="font-size:28px;color:#fff;font-weight:950;">${(inn.battingTeam || 'TEAM').toUpperCase()} ${inn.runs || 0}/${inn.wickets || 0} <span style="font-size:16px;opacity:.65;">(${formatOvers(inn.balls || 0)})</span></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+                    <div>${topBats.map(b => `<div style="display:flex;justify-content:space-between;color:white;font-weight:800;padding:5px 0;"><span>${(b.name || 'BATTER').toUpperCase()}</span><span>${b.runs || 0} (${b.balls || 0})</span></div>`).join('') || '<div style="color:#aaa;">No batting data</div>'}</div>
+                    <div>${topBowls.map(b => `<div style="display:flex;justify-content:space-between;color:white;font-weight:800;padding:5px 0;"><span>${(b.name || 'BOWLER').toUpperCase()}</span><span>${b.wickets || 0}/${b.runs || 0}</span></div>`).join('') || '<div style="color:#aaa;">No bowling data</div>'}</div>
+                </div>
+            </div>`;
+    }).join('');
+
+    el.innerHTML = `
+        <div style="background:rgba(10,15,35,0.96);border:2px solid rgba(0,230,118,.35);border-radius:24px;padding:28px;width:900px;color:white;box-shadow:0 30px 80px rgba(0,0,0,.55);">
+            <div style="font-size:13px;color:#00e676;letter-spacing:4px;font-weight:950;">MATCH SUMMARY</div>
+            <div style="font-size:42px;font-weight:950;line-height:1.1;margin-top:6px;">${(m.team1 || 'TEAM A').toUpperCase()} VS ${(m.team2 || 'TEAM B').toUpperCase()}</div>
+            ${inningsHtml || '<div style="margin-top:20px;color:#aaa;">No innings data available</div>'}
+        </div>`;
 }
 
 function showRunsBallsGraphic(data) {
@@ -706,6 +778,10 @@ function showNextMatchGraphic(data) {
 }
 
 function showCRRGraphic(data) {
+    if ((!data || !data.crr) && data && data.match) {
+        const inn = data.match.innings?.[data.match.currentInnings || 0];
+        if (inn) data.crr = formatCRR(inn.runs || 0, inn.balls || 0);
+    }
     const el = document.createElement('div');
     el.className = 'broadcast-overlay';
     el.style.display = 'flex';
