@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cricpro-v18';
+const CACHE_NAME = 'cricpro-v19';
 const ASSETS = [
   '/',
   '/index.html',

@@ -44,6 +44,9 @@ function getBroadcastMatchSnapshot() {
     const m = getCurrentBroadcastMatch();
     if (!m) return null;
     try {
+        if (typeof prepareMatchForPersistence === 'function') {
+            return prepareMatchForPersistence(m);
+        }
         const copy = JSON.parse(JSON.stringify(m));
         delete copy.history;
         delete copy.redoStack;

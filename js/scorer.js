@@ -3929,9 +3929,16 @@ function escapeHTML(str) {
 }
 
 // ========== BROADCASTS ==========
+function cloneBroadcastProfile(profile) {
+    return profile && typeof profile === 'object' ? { ...profile } : {};
+}
+
 function getBroadcastMatchSnapshot() {
     if (!currentMatch) return null;
     try {
+        if (typeof prepareMatchForPersistence === 'function') {
+            return prepareMatchForPersistence(currentMatch);
+        }
         const copy = JSON.parse(JSON.stringify(currentMatch));
         delete copy.history;
         delete copy.redoStack;
@@ -4033,7 +4040,7 @@ function broadcastCurrentBatters() {
     
     const profiles = batters.map((bName, index) => {
         const batterRecord = inn.batsmen.find(x => x.name === bName) || { runs:0, balls:0, fours:0, sixes:0 };
-        let p = resolvePlayerProfileForBatter(inn, bName) || batterRecord || {};
+        let p = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, bName) || batterRecord);
         
         // Priority 1: Specific inline button
         if (window[`__photo_batter${index+1}`]) {
@@ -4068,7 +4075,7 @@ function broadcastStrikerProfile() {
     if (!strikerName) return;
     
     const stats = inn.batsmen.find(x => x.name === strikerName) || { runs:0, balls:0, fours:0, sixes:0 };
-    let p = resolvePlayerProfileForBatter(inn, strikerName) || stats || {};
+    let p = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, strikerName) || stats);
     
     if (window.__photo_striker) {
         p.photo = window.__photo_striker;
@@ -4099,7 +4106,7 @@ function broadcastNonStrikerProfile() {
     const nonStrikerName = (inn.strikerIdx === 0) ? b1 : b0;
     if (!nonStrikerName) return;
     const stats = inn.batsmen.find(x => x.name === nonStrikerName) || { runs:0, balls:0, fours:0, sixes:0 };
-    let p = resolvePlayerProfileForBatter(inn, nonStrikerName) || stats || {};
+    let p = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, nonStrikerName) || stats);
     if (window.__photo_nonstriker) p.photo = window.__photo_nonstriker;
     sendBroadcast('SHOW_NON_STRIKER_PROFILE', {
         playerName: nonStrikerName,
@@ -4139,7 +4146,7 @@ function broadcastBowlerProfile() {
         }
     }
     
-    if (!p) p = bowler || {};
+    p = cloneBroadcastProfile(p || bowler);
     if (window.__photo_bowler) {
         p.photo = window.__photo_bowler;
         // Retain for multiple re-broadcasts
@@ -4162,7 +4169,7 @@ function triggerVisualBigEvent(type) {
     if (!inn) return;
 
     const strikerName = getStrikerBatterName(inn);
-    const strikerProfile = resolvePlayerProfileForBatter(inn, strikerName) || {};
+    const strikerProfile = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, strikerName));
     if (window.__photo_striker) strikerProfile.photo = window.__photo_striker;
 
     const strikerStats = inn.batsmen.find(x => x.name === strikerName) || { runs: 0, balls: 0 };
@@ -4191,8 +4198,8 @@ function broadcastPartnership() {
 
     const names = getOnCreaseBatterNames(inn); // [idx0, idx1]
     const p = inn.currentPartnership || { runs: 0, balls: 0 };
-    let p1Profile = resolvePlayerProfileForBatter(inn, names[0]) || {};
-    let p2Profile = resolvePlayerProfileForBatter(inn, names[1]) || {};
+    let p1Profile = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, names[0]));
+    let p2Profile = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, names[1]));
 
     // Apply inline overrides if present
     if (window.__photo_partner1) { 

@@ -45,6 +45,43 @@ const DB_KEYS = {
 };
 
 const MATCH_HISTORY_STORAGE_LIMIT = 30;
+const LOCAL_MATCH_CACHE_LIMIT = 80;
+const LOCAL_COMPLETED_MATCH_CACHE_LIMIT = 30;
+
+function stripEmbeddedMediaForStorage(value) {
+    if (!value || typeof value !== 'object') return value;
+    Object.keys(value).forEach(key => {
+        const item = value[key];
+        if (typeof item === 'string') {
+            if (item.startsWith('data:')) value[key] = '';
+            return;
+        }
+        if (item && typeof item === 'object') stripEmbeddedMediaForStorage(item);
+    });
+    return value;
+}
+
+function compactMatchesForQuota(matches) {
+    if (!Array.isArray(matches)) return matches;
+    const sorted = matches
+        .filter(m => m && m.id)
+        .slice()
+        .sort((a, b) => (b.lastUpdated || b.createdAt || 0) - (a.lastUpdated || a.createdAt || 0));
+    const active = sorted.filter(m => !['completed', 'finished'].includes(String(m.status || '').toLowerCase()));
+    const completed = sorted.filter(m => ['completed', 'finished'].includes(String(m.status || '').toLowerCase()));
+    return [...active, ...completed.slice(0, LOCAL_COMPLETED_MATCH_CACHE_LIMIT)]
+        .slice(0, LOCAL_MATCH_CACHE_LIMIT)
+        .sort((a, b) => (a.createdAt || a.lastUpdated || 0) - (b.createdAt || b.lastUpdated || 0));
+}
+
+function isQuotaExceededError(error) {
+    return error && (
+        error.name === 'QuotaExceededError' ||
+        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        error.code === 22 ||
+        error.code === 1014
+    );
+}
 
 function prepareMatchForPersistence(match) {
     if (!match || typeof match !== 'object') return match;
@@ -59,7 +96,7 @@ function prepareMatchForPersistence(match) {
     if (Array.isArray(copy.redoStack) && copy.redoStack.length > MATCH_HISTORY_STORAGE_LIMIT) {
         copy.redoStack = copy.redoStack.slice(-MATCH_HISTORY_STORAGE_LIMIT);
     }
-    return copy;
+    return stripEmbeddedMediaForStorage(copy);
 }
 
 function prepareMatchesForPersistence(matches) {
@@ -239,7 +276,21 @@ const DB = {
             const str = JSON.stringify(safeVal);
             const enc = btoa(encodeURIComponent(str));
             localStorage.setItem(key, 'SECURE_' + enc);
-        } catch(e) { console.error("Storage err", e); }
+        } catch(e) {
+            if (key === DB_KEYS.MATCHES && isQuotaExceededError(e)) {
+                try {
+                    const compacted = compactMatchesForQuota(prepareMatchesForPersistence(val));
+                    const compactedStr = JSON.stringify(compacted);
+                    const compactedEnc = btoa(encodeURIComponent(compactedStr));
+                    localStorage.setItem(key, 'SECURE_' + compactedEnc);
+                    console.warn(`Storage quota reached. Kept ${compacted.length} recent matches in local cache.`);
+                    return;
+                } catch (retryErr) {
+                    console.error("Storage quota retry failed", retryErr);
+                }
+            }
+            console.error("Storage err", e);
+        }
     },
     _secureGet(key, def) {
         const raw = localStorage.getItem(key);
