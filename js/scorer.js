@@ -94,6 +94,34 @@ function playerPhotoSrc(p) {
     return DEFAULT_PLAYER_PHOTO;
 }
 
+function isRealTeamName(value) {
+    const v = String(value || '').trim();
+    return !!v && !['tbd', 'team a', 'team b', 'team 1', 'team 2', 'undefined', 'null'].includes(v.toLowerCase());
+}
+
+function getBroadcastTeamNames(m) {
+    if (!m) return ['TEAM A', 'TEAM B'];
+    const teams = [];
+    const add = (name) => {
+        const v = String(name || '').trim();
+        if (isRealTeamName(v) && !teams.includes(v)) teams.push(v);
+    };
+
+    add(m.team1);
+    add(m.team2);
+    (m.innings || []).filter(Boolean).forEach(inn => {
+        add(inn.battingTeam);
+        add(inn.bowlingTeam);
+    });
+    add(m.battingFirst);
+    add(m.fieldingFirst);
+
+    return [
+        teams[0] || m.team1 || 'TEAM A',
+        teams[1] || m.team2 || 'TEAM B'
+    ];
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const mId = urlParams.get('matchId');
@@ -3919,7 +3947,8 @@ function sendBroadcast(cmd, data) {
 function broadcastTeamRoster(teamIdx) {
     const m = currentMatch;
     if (!m) return;
-    const teamName = teamIdx === 0 ? m.team1 : m.team2;
+    const teams = getBroadcastTeamNames(m);
+    const teamName = teams[teamIdx] || (teamIdx === 0 ? m.team1 : m.team2);
     const t = m.tournamentId ? DB.getTournament(m.tournamentId) : m;
     const rosterIds = (t && t.rosters) ? (t.rosters[teamName] || []) : [];
     
@@ -3930,7 +3959,8 @@ function broadcastTeamRoster(teamIdx) {
 function broadcastTeamCard(teamIdx) {
     const m = currentMatch;
     if (!m) return;
-    const teamName = teamIdx === 0 ? m.team1 : m.team2;
+    const teams = getBroadcastTeamNames(m);
+    const teamName = teams[teamIdx] || (teamIdx === 0 ? m.team1 : m.team2);
     const t = m.tournamentId ? DB.getTournament(m.tournamentId) : m;
     const rosterIds = (t && t.rosters) ? (t.rosters[teamName] || t.rosters[teamIdx] || []) : [];
     

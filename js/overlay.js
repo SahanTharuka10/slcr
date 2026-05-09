@@ -65,6 +65,29 @@ function formatCRR(runs, balls) {
     return ( (runs / balls) * 6 ).toFixed(2);
 }
 
+function isOverlayRealTeamName(value) {
+    const v = String(value || '').trim();
+    return !!v && !['tbd', 'team a', 'team b', 'team 1', 'team 2', 'undefined', 'null'].includes(v.toLowerCase());
+}
+
+function getOverlayTeamNames(m) {
+    if (!m) return ['TEAM A', 'TEAM B'];
+    const teams = [];
+    const add = (name) => {
+        const v = String(name || '').trim();
+        if (isOverlayRealTeamName(v) && !teams.includes(v)) teams.push(v);
+    };
+    add(m.team1);
+    add(m.team2);
+    (m.innings || []).filter(Boolean).forEach(inn => {
+        add(inn.battingTeam);
+        add(inn.bowlingTeam);
+    });
+    add(m.battingFirst);
+    add(m.fieldingFirst);
+    return [teams[0] || m.team1 || 'TEAM A', teams[1] || m.team2 || 'TEAM B'];
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // ── Previews & Scale ──────────────────────────────────
     const isPreview = new URLSearchParams(window.location.search).get('preview');
@@ -565,47 +588,61 @@ function toggleBroadcastScorecard(mId) {
 function renderFullScorecardOverlay(m) {
     const el = document.getElementById('fs-content');
     if (!el) return;
-    
-    const inn = m.innings[m.currentInnings] || m.innings[0];
-    if (!inn) return;
+    const innings = (m.innings || []).filter(Boolean);
+    if (!innings.length) return;
+    const teams = getOverlayTeamNames(m);
 
-    let batsHtml = (inn.batsmen || []).map(b => `
-        <div style="display:grid; grid-template-columns: 1fr 60px 60px; padding:12px 20px; border-bottom:1px solid rgba(255,255,255,0.05); font-weight:700;">
-            <div style="color:#fff;">${b.name.toUpperCase()} <small style="color:#aaa; font-weight:400; margin-left:10px;">${b.outDesc || 'not out'}</small></div>
-            <div style="text-align:right; color:#ffd700;">${b.runs}</div>
-            <div style="text-align:right; opacity:0.6;">${b.balls}</div>
-        </div>
-    `).join('');
+    const inningsHtml = innings.map((inn, idx) => {
+        const batsHtml = (inn.batsmen || []).map(b => `
+            <div style="display:grid;grid-template-columns:1fr 60px 60px 60px 60px;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);font-weight:800;font-size:14px;">
+                <div style="color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(b.name || 'BATTER').toUpperCase()}</div>
+                <div style="text-align:right;color:#ffd700;">${b.runs || 0}</div>
+                <div style="text-align:right;opacity:.7;">${b.balls || 0}</div>
+                <div style="text-align:right;opacity:.7;">${b.fours || 0}</div>
+                <div style="text-align:right;opacity:.7;">${b.sixes || 0}</div>
+            </div>
+        `).join('');
 
-    let bowlHtml = (inn.bowlers || []).map(b => `
-        <div style="display:grid; grid-template-columns: 1fr 60px 60px 60px; padding:12px 20px; border-bottom:1px solid rgba(255,255,255,0.05); font-weight:700; opacity:0.9;">
-            <div style="color:#fff;">${b.name.toUpperCase()}</div>
-            <div style="text-align:right;">${formatOvers(b.balls)}</div>
-            <div style="text-align:right; color:#38bdf8;">${b.runs}</div>
-            <div style="text-align:right; color:#ff1744;">${b.wickets}</div>
-        </div>
-    `).join('');
+        const bowlHtml = (inn.bowlers || []).map(b => `
+            <div style="display:grid;grid-template-columns:1fr 60px 60px 60px;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);font-weight:800;font-size:14px;">
+                <div style="color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(b.name || 'BOWLER').toUpperCase()}</div>
+                <div style="text-align:right;">${formatOvers(b.balls || 0, m.ballsPerOver || 6)}</div>
+                <div style="text-align:right;color:#38bdf8;">${b.runs || 0}</div>
+                <div style="text-align:right;color:#ff1744;">${b.wickets || 0}</div>
+            </div>
+        `).join('');
+
+        return `
+            <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:16px;overflow:hidden;min-width:0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(26,35,126,0.75);padding:14px 18px;">
+                    <div>
+                        <div style="font-size:11px;color:#00e676;font-weight:950;letter-spacing:2px;">INNINGS ${idx + 1}</div>
+                        <div style="font-size:24px;font-weight:950;color:#fff;line-height:1.1;">${(inn.battingTeam || 'TEAM').toUpperCase()}</div>
+                    </div>
+                    <div style="font-size:34px;font-weight:950;color:#ffd700;">${inn.runs || 0}/${inn.wickets || 0} <span style="font-size:18px;color:#fff;opacity:.65;">(${formatOvers(inn.balls || 0, m.ballsPerOver || 6)})</span></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px;">
+                    <div style="background:rgba(0,0,0,0.22);border-radius:12px;overflow:hidden;">
+                        <div style="display:grid;grid-template-columns:1fr 60px 60px 60px 60px;background:rgba(255,255,255,0.08);padding:8px 12px;font-size:10px;font-weight:950;color:#aaa;letter-spacing:1px;"><span>BATTER</span><span style="text-align:right;">R</span><span style="text-align:right;">B</span><span style="text-align:right;">4S</span><span style="text-align:right;">6S</span></div>
+                        ${batsHtml || '<div style="padding:12px;color:#aaa;font-weight:800;">No batting data</div>'}
+                    </div>
+                    <div style="background:rgba(0,0,0,0.22);border-radius:12px;overflow:hidden;">
+                        <div style="display:grid;grid-template-columns:1fr 60px 60px 60px;background:rgba(255,255,255,0.08);padding:8px 12px;font-size:10px;font-weight:950;color:#aaa;letter-spacing:1px;"><span>BOWLER</span><span style="text-align:right;">O</span><span style="text-align:right;">R</span><span style="text-align:right;">W</span></div>
+                        ${bowlHtml || '<div style="padding:12px;color:#aaa;font-weight:800;">No bowling data</div>'}
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
 
     el.innerHTML = `
-        <div style="background:rgba(26, 35, 126, 0.9); padding:25px; border-radius:15px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
             <div>
-                <div style="font-size:14px; opacity:0.7; letter-spacing:2px;">NOW BATTING</div>
-                <div style="font-size:36px; font-weight:950; color:#fff;">${inn.battingTeam.toUpperCase()}</div>
+                <div style="font-size:13px;color:#00e676;font-weight:950;letter-spacing:4px;">FULL SCORECARD</div>
+                <div style="font-size:40px;font-weight:950;color:#fff;line-height:1.05;">${teams[0].toUpperCase()} VS ${teams[1].toUpperCase()}</div>
             </div>
-            <div style="text-align:right;">
-                <div style="font-size:48px; font-weight:950; color:#ffd700;">${inn.runs}/${inn.wickets} <small style="font-size:24px; color:#fff; opacity:0.6;">(${formatOvers(inn.balls)})</small></div>
-            </div>
+            <div style="font-size:14px;color:#aaa;font-weight:900;">LIVE MATCH</div>
         </div>
-        <div class="fs-grid">
-            <div class="fs-column" style="background:rgba(0,0,0,0.2); border-radius:15px; overflow:hidden;">
-                <div style="background:rgba(255,255,255,0.1); padding:10px 20px; font-size:12px; font-weight:900; letter-spacing:2px; color:#aaa;">BATSMEN</div>
-                ${batsHtml}
-            </div>
-            <div class="fs-column" style="background:rgba(0,0,0,0.2); border-radius:15px; overflow:hidden;">
-                <div style="background:rgba(255,255,255,0.1); padding:10px 20px; font-size:12px; font-weight:900; letter-spacing:2px; color:#aaa;">BOWLERS</div>
-                ${bowlHtml}
-            </div>
-        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;overflow:hidden;">${inningsHtml}</div>
     `;
 }
 
@@ -664,10 +701,11 @@ function buildTeamCardPlayers(m, teamName) {
     };
 
     const players = [];
-    const roster = m.rosters && (m.rosters[teamName] || m.rosters[m.team1 === teamName ? 0 : 1]);
+    const teams = getOverlayTeamNames(m);
+    const roster = m.rosters && (m.rosters[teamName] || m.rosters[teams[0] === teamName ? 0 : 1]);
     if (Array.isArray(roster)) roster.forEach(p => addPlayer(players, p));
 
-    (m.innings || []).forEach(inn => {
+    (m.innings || []).filter(Boolean).forEach(inn => {
         if (inn.battingTeam === teamName) (inn.batsmen || []).forEach(p => addPlayer(players, p));
         if (inn.bowlingTeam === teamName) (inn.bowlers || []).forEach(p => addPlayer(players, p));
     });
@@ -703,11 +741,13 @@ function showGuestGraphic(data) {
 function toggleBroadcastSummary(tId) {
     const el = document.getElementById('broadcast-summary');
     if (!el) return;
-    if (el.style.display === 'block') {
+    if (el.style.display === 'block' || el.style.display === 'flex') {
         gsap.to(el, { opacity: 0, y: 100, duration: 0.5, onComplete: () => el.style.display = 'none' });
     } else {
         renderBroadcastSummaryOverlay(getActiveOverlayMatch(matchId), tId);
-        el.style.display = 'block';
+        el.style.display = 'flex';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
         gsap.fromTo(el, { opacity: 0, y: 100 }, { opacity: 1, y: 0, duration: 0.6 });
     }
 }
@@ -720,6 +760,7 @@ function renderBroadcastSummaryOverlay(m, tId) {
         return;
     }
 
+    const teams = getOverlayTeamNames(m);
     const inningsHtml = (m.innings || []).filter(Boolean).map((inn, idx) => {
         const topBats = (inn.batsmen || []).slice().sort((a, b) => (b.runs || 0) - (a.runs || 0)).slice(0, 3);
         const topBowls = (inn.bowlers || []).slice().sort((a, b) => (b.wickets || 0) - (a.wickets || 0) || (a.runs || 0) - (b.runs || 0)).slice(0, 3);
@@ -737,9 +778,9 @@ function renderBroadcastSummaryOverlay(m, tId) {
     }).join('');
 
     el.innerHTML = `
-        <div style="background:rgba(10,15,35,0.96);border:2px solid rgba(0,230,118,.35);border-radius:24px;padding:28px;width:900px;color:white;box-shadow:0 30px 80px rgba(0,0,0,.55);">
+        <div style="background:rgba(10,15,35,0.96);border:2px solid rgba(0,230,118,.35);border-radius:24px;padding:28px;width:min(980px,92vw);max-height:86vh;overflow:hidden;color:white;box-shadow:0 30px 80px rgba(0,0,0,.55);">
             <div style="font-size:13px;color:#00e676;letter-spacing:4px;font-weight:950;">MATCH SUMMARY</div>
-            <div style="font-size:42px;font-weight:950;line-height:1.1;margin-top:6px;">${(m.team1 || 'TEAM A').toUpperCase()} VS ${(m.team2 || 'TEAM B').toUpperCase()}</div>
+            <div style="font-size:42px;font-weight:950;line-height:1.1;margin-top:6px;">${teams[0].toUpperCase()} VS ${teams[1].toUpperCase()}</div>
             ${inningsHtml || '<div style="margin-top:20px;color:#aaa;">No innings data available</div>'}
         </div>`;
 }

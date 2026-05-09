@@ -1089,13 +1089,16 @@
                     if (t2Img) t2Img.src = t2Logo || DEFAULT_TEAM;
 
                     // Team name labels
-                    setLabel('btn-team1-label-photo', m.team1 || 'TEAM 1');
-                    setLabel('btn-team2-label-photo', m.team2 || 'TEAM 2');
-                    setLabel('btn-team1-label', m.team1 || 'TEAM A');
-                    setLabel('btn-team2-label', m.team2 || 'TEAM B');
+                    const broadcastTeams = (typeof getBroadcastTeamNames === 'function')
+                        ? getBroadcastTeamNames(m)
+                        : [m.team1 || 'TEAM A', m.team2 || 'TEAM B'];
+                    setLabel('btn-team1-label-photo', broadcastTeams[0] || 'TEAM 1');
+                    setLabel('btn-team2-label-photo', broadcastTeams[1] || 'TEAM 2');
+                    setLabel('btn-team1-label', broadcastTeams[0] || 'TEAM A');
+                    setLabel('btn-team2-label', broadcastTeams[1] || 'TEAM B');
 
                     // Header indicators
-                    setLabel('bm-vs-indicator', `${m.team1 || 'A'} vs ${m.team2 || 'B'}`);
+                    setLabel('bm-vs-indicator', `${broadcastTeams[0] || 'A'} vs ${broadcastTeams[1] || 'B'}`);
                     const scoreEl = document.getElementById('bm-score-indicator');
                     if (scoreEl) scoreEl.textContent = `${inn.runs || 0}/${inn.wickets || 0} (${(Math.floor((inn.balls||0)/6) + '.' + ((inn.balls||0)%6))})`;
 

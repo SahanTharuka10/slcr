@@ -20,6 +20,26 @@ function getCurrentBroadcastTournament() {
     return null;
 }
 
+function getBroadcastTeamNames(m) {
+    if (typeof window.getBroadcastTeamNames === 'function' && window.getBroadcastTeamNames !== getBroadcastTeamNames) {
+        return window.getBroadcastTeamNames(m);
+    }
+    if (!m) return ['TEAM A', 'TEAM B'];
+    const teams = [];
+    const add = (name) => {
+        const v = String(name || '').trim();
+        if (!v || ['tbd', 'team a', 'team b', 'team 1', 'team 2', 'undefined', 'null'].includes(v.toLowerCase()) || teams.includes(v)) return;
+        teams.push(v);
+    };
+    add(m.team1);
+    add(m.team2);
+    (m.innings || []).filter(Boolean).forEach(inn => {
+        add(inn.battingTeam);
+        add(inn.bowlingTeam);
+    });
+    return [teams[0] || m.team1 || 'TEAM A', teams[1] || m.team2 || 'TEAM B'];
+}
+
 function getBroadcastMatchSnapshot() {
     const m = getCurrentBroadcastMatch();
     if (!m) return null;
@@ -361,7 +381,8 @@ const Broadcast = {
     broadcastTeamCard(teamIdx) {
         const m = getCurrentBroadcastMatch();
         if (!m || !window.DB) return showToast('No active match', 'error');
-        const teamName = teamIdx === 0 ? m.team1 : m.team2;
+        const teams = getBroadcastTeamNames(m);
+        const teamName = teams[teamIdx] || (teamIdx === 0 ? m.team1 : m.team2);
         if (!teamName) return showToast('Team not found', 'error');
 
         // Try to get squad from tournament or match
@@ -378,7 +399,7 @@ const Broadcast = {
             }
         }
         if (players.length === 0 && m.innings) {
-            const inn = m.innings.find(i => i.battingTeam === teamName || i.bowlingTeam === teamName);
+            const inn = m.innings.filter(Boolean).find(i => i.battingTeam === teamName || i.bowlingTeam === teamName);
             if (inn) {
                 const allPlayers = [...(inn.batsmen||[]), ...(inn.bowlers||[])];
                 const seen = new Set();
