@@ -801,7 +801,8 @@ function showCRRGraphic(data) {
 
 function showBigEventGraphic(data) {
     if (!data) return;
-    const type = (data.type || data.event || 'EVENT').toUpperCase();
+    const type = (data.type || data.event || '').toUpperCase();
+    if (!['FOUR', 'SIX', 'WICKET'].includes(type)) return;
     const el = document.createElement('div');
     el.className = 'broadcast-overlay';
     el.style.display = 'flex';
