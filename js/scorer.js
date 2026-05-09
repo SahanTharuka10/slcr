@@ -94,6 +94,29 @@ function playerPhotoSrc(p) {
     return DEFAULT_PLAYER_PHOTO;
 }
 
+function rolePhotoOverride(role) {
+    if (role === 'striker') return window.__photo_striker || '';
+    if (role === 'nonstriker') return window.__photo_nonstriker || '';
+    if (role === 'bowler') return window.__photo_bowler || '';
+    return '';
+}
+
+function setRolePhotoOverride(role, dataUrl) {
+    if (role === 'striker') window.__photo_striker = dataUrl;
+    else if (role === 'nonstriker') window.__photo_nonstriker = dataUrl;
+    else if (role === 'bowler') window.__photo_bowler = dataUrl;
+}
+
+function setHotkeyRoleImage(role, dataUrl) {
+    const ids = {
+        striker: 'bm-photo-striker',
+        nonstriker: 'bm-photo-nonstriker',
+        bowler: 'bm-photo-bowler'
+    };
+    const img = document.getElementById(ids[role]);
+    if (img && dataUrl) img.src = dataUrl;
+}
+
 function isRealTeamName(value) {
     const v = String(value || '').trim();
     return !!v && !['tbd', 'team a', 'team b', 'team 1', 'team 2', 'undefined', 'null'].includes(v.toLowerCase());
@@ -1566,9 +1589,9 @@ function renderScoring() {
         const striker = sIdx !== null && sIdx !== undefined ? inn.batsmen[sIdx] : null;
         const nonStriker = nsIdx !== null && nsIdx !== undefined ? inn.batsmen[nsIdx] : null;
         
-        imgStriker.src = (striker && striker.playerId) ? DB.getPlayerPhoto(striker.playerId) : '../assets/default-player.svg';
-        imgNonStriker.src = (nonStriker && nonStriker.playerId) ? DB.getPlayerPhoto(nonStriker.playerId) : '../assets/default-player.svg';
-        imgBowler.src = (bowler && bowler.playerId) ? DB.getPlayerPhoto(bowler.playerId) : '../assets/default-player.svg';
+        imgStriker.src = rolePhotoOverride('striker') || playerPhotoSrc(striker);
+        imgNonStriker.src = rolePhotoOverride('nonstriker') || playerPhotoSrc(nonStriker);
+        imgBowler.src = rolePhotoOverride('bowler') || playerPhotoSrc(bowler);
     }
 }
 
@@ -1611,14 +1634,17 @@ function uploadPlayerPhoto(role) {
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (ev) => {
-            DB.savePlayerPhoto(p.playerId, ev.target.result);
+            const dataUrl = ev.target.result;
+            DB.savePlayerPhoto(p.playerId, dataUrl);
+            setRolePhotoOverride(role, dataUrl);
+            setHotkeyRoleImage(role, dataUrl);
             DB.saveMatch(currentMatch); // Save the dummy ID if it was generated
             showToast('✅ Photo updated & synced!', 'success');
             if (typeof renderCurrentState === 'function') renderCurrentState();
             
             // Sync to remote if broadcast active
             if (typeof Broadcast !== 'undefined') {
-                Broadcast.send('SYNC_PLAYER_PHOTO', { playerId: p.playerId, photo: ev.target.result });
+                Broadcast.send('SYNC_PLAYER_PHOTO', { playerId: p.playerId, role, photo: dataUrl });
                 Broadcast.send('SYNC_SCORE', { match: currentMatch });
             }
         };
@@ -4006,7 +4032,8 @@ function broadcastCurrentBatters() {
     const batters = getOnCreaseBatterNames(inn); // [idx0, idx1]
     
     const profiles = batters.map((bName, index) => {
-        let p = resolvePlayerProfileForBatter(inn, bName) || {};
+        const batterRecord = inn.batsmen.find(x => x.name === bName) || { runs:0, balls:0, fours:0, sixes:0 };
+        let p = resolvePlayerProfileForBatter(inn, bName) || batterRecord || {};
         
         // Priority 1: Specific inline button
         if (window[`__photo_batter${index+1}`]) {
@@ -4025,7 +4052,7 @@ function broadcastCurrentBatters() {
             }
         }
         
-        const stats = inn.batsmen.find(x => x.name === bName) || { runs:0, balls:0, fours:0, sixes:0 };
+        const stats = batterRecord;
         return { name: bName, profile: p, stats };
     });
     sendBroadcast('SHOW_BATTER_PROFILES', { profiles });
@@ -4040,10 +4067,9 @@ function broadcastStrikerProfile() {
     const strikerName = getStrikerBatterName(inn);
     if (!strikerName) return;
     
-    let p = resolvePlayerProfileForBatter(inn, strikerName);
     const stats = inn.batsmen.find(x => x.name === strikerName) || { runs:0, balls:0, fours:0, sixes:0 };
+    let p = resolvePlayerProfileForBatter(inn, strikerName) || stats || {};
     
-    if (!p) p = {};
     if (window.__photo_striker) {
         p.photo = window.__photo_striker;
         // Don't nullify window.__photo_striker so it stays for Partnership
@@ -4072,9 +4098,9 @@ function broadcastNonStrikerProfile() {
     const [b0, b1] = getOnCreaseBatterNames(inn);
     const nonStrikerName = (inn.strikerIdx === 0) ? b1 : b0;
     if (!nonStrikerName) return;
-    let p = resolvePlayerProfileForBatter(inn, nonStrikerName) || {};
-    if (window.__photo_nonstriker) p.photo = window.__photo_nonstriker;
     const stats = inn.batsmen.find(x => x.name === nonStrikerName) || { runs:0, balls:0, fours:0, sixes:0 };
+    let p = resolvePlayerProfileForBatter(inn, nonStrikerName) || stats || {};
+    if (window.__photo_nonstriker) p.photo = window.__photo_nonstriker;
     sendBroadcast('SHOW_NON_STRIKER_PROFILE', {
         playerName: nonStrikerName,
         playerPhoto: p.photo || playerPhotoSrc(p),
@@ -4113,7 +4139,7 @@ function broadcastBowlerProfile() {
         }
     }
     
-    if (!p) p = {};
+    if (!p) p = bowler || {};
     if (window.__photo_bowler) {
         p.photo = window.__photo_bowler;
         // Retain for multiple re-broadcasts

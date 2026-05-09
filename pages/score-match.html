@@ -1059,9 +1059,17 @@
                     const sImg = document.getElementById('bm-photo-striker');
                     const nsImg = document.getElementById('bm-photo-nonstriker');
                     const bImg = document.getElementById('bm-photo-bowler');
-                    if (sImg) sImg.src = (striker && striker.playerId && DB.getPlayerPhoto(striker.playerId) !== DEFAULT_PLAYER) ? DB.getPlayerPhoto(striker.playerId) : DEFAULT_PLAYER;
-                    if (nsImg) nsImg.src = (nonStriker && nonStriker.playerId && DB.getPlayerPhoto(nonStriker.playerId) !== DEFAULT_PLAYER) ? DB.getPlayerPhoto(nonStriker.playerId) : DEFAULT_PLAYER;
-                    if (bImg) bImg.src = (bowler && bowler.playerId && DB.getPlayerPhoto(bowler.playerId) !== DEFAULT_PLAYER) ? DB.getPlayerPhoto(bowler.playerId) : DEFAULT_PLAYER;
+                    const rolePhoto = (role, player) => {
+                        if (typeof rolePhotoOverride === 'function') {
+                            const override = rolePhotoOverride(role);
+                            if (override) return override;
+                        }
+                        if (typeof playerPhotoSrc === 'function') return playerPhotoSrc(player);
+                        return (player && player.playerId && DB.getPlayerPhoto(player.playerId) !== DEFAULT_PLAYER) ? DB.getPlayerPhoto(player.playerId) : DEFAULT_PLAYER;
+                    };
+                    if (sImg) sImg.src = rolePhoto('striker', striker);
+                    if (nsImg) nsImg.src = rolePhoto('nonstriker', nonStriker);
+                    if (bImg) bImg.src = rolePhoto('bowler', bowler);
 
                     // Name labels under photos
                     const setLabel = (id, name) => { const el = document.getElementById(id); if (el) el.textContent = name || '—'; };
