@@ -1012,7 +1012,7 @@ if (BACKEND_BASE_URL && typeof io !== 'undefined') {
             }
         });
 
-        socket.on('disconnect', () => console.warn('🔴 Socket disconnected — polling continues'));
+        socket.on('disconnect', (reason) => console.info('Socket disconnected; polling fallback active:', reason || 'unknown'));
 
         // ── scoreUpdate: server broadcasts full match data → update local cache & render
         socket.on('scoreUpdate', (data) => {
@@ -1065,7 +1065,11 @@ if (BACKEND_BASE_URL && typeof io !== 'undefined') {
         // ── broadcast_command (TV overlay hotkey events)
         socket.on('broadcast_command', (data) => {
             console.log('📺 broadcast_command received:', data?.cmd);
-            if (typeof handleBroadcastCommand === 'function') handleBroadcastCommand(data?.cmd, data);
+            const commandData = data && data.data ? data.data : data;
+            const isOverlayPage = window.location.pathname.includes('overlay');
+            if (!isOverlayPage && typeof handleBroadcastCommand === 'function') {
+                handleBroadcastCommand(data?.cmd, commandData);
+            }
             if (typeof handleBroadcastEvent === 'function') handleBroadcastEvent(data);
         });
 

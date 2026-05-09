@@ -243,6 +243,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function handleBroadcastCommand(cmd, data = {}) {
+    if (data && data.cmd && data.data && !data.playerName && !data.playerPhoto && !data.match) {
+        data = data.data;
+    }
     if (!cmd) return;
     if (data && data.match) {
         matchId = data.match.id || matchId;
