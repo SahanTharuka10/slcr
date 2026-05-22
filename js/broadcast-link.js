@@ -15,17 +15,25 @@
   }
 
   function socketState() {
+    if (!syncEnabled() && !global.BACKEND_BASE_URL && !global.CRICPRO_CLOUD_CONFIG?.backendUrl) {
+      return 'off';
+    }
     const s = global.SLCRICK_LIVE?.socket || global._cricproSocket;
-    if (!syncEnabled()) return 'off';
     if (s?.connected) return 'connected';
     if (s && !s.connected) return 'connecting';
-    return syncEnabled() ? 'connecting' : 'off';
+    if (syncEnabled() || global.BACKEND_BASE_URL || global.CRICPRO_CLOUD_CONFIG?.backendUrl) {
+      return 'connecting';
+    }
+    return 'off';
   }
 
   /** @returns {'isolated'|'linked'|'on-air'} */
   function getPhase() {
-    if (!syncEnabled()) return 'isolated';
+    const onWeb = !global.SLCRICK_DESKTOP;
+    if (!syncEnabled() && global.SLCRICK_DESKTOP) return 'isolated';
     if (getLiveMatch()) return 'on-air';
+    if (onWeb && (global.BACKEND_BASE_URL || global.CRICPRO_CLOUD_CONFIG?.backendUrl)) return 'linked';
+    if (!syncEnabled()) return 'isolated';
     return 'linked';
   }
 
