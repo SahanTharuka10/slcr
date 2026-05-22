@@ -10,7 +10,7 @@
 </head>
 <body>
     <header class="main-header">
-        <a href="score-match.html?tab=hotkeys" class="header-btn-sm">← Hotkeys</a>
+        <a href="../index.html" class="header-btn-sm" id="bs-back-link">← Home</a>
         <div class="logo-wrap">
             <img src="../assets/logo.png" alt="SLCRICKPRO" class="logo-img" onerror="this.style.display='none'" />
             <span class="logo-text">SLCRICKPRO</span>
@@ -20,33 +20,94 @@
         </div>
     </header>
 
-    <main class="bs-main">
+    <!-- Public site: desktop live mirror → password → OBS link + preview only -->
+    <main class="bs-main" id="bs-public">
         <div class="bs-hero">
             <h1>📡 Broadcast Station</h1>
-            <p>Tournament list, live scorebar mirror, and OBS URLs — uses the site cloud API (WebSocket + sync).</p>
+            <p id="bs-hero-desc">Mirrors the live match from SLCRICKPRO Desktop (cloud sync). Enter the tournament password to copy the OBS overlay URL.</p>
         </div>
 
+        <section id="bs-idle" class="bs-state-panel">
+            <div class="bs-empty bs-empty--hero">
+                <span class="bs-empty-icon">📡</span>
+                <h2>No live match on air</h2>
+                <p>Score a match in the <strong>Desktop app</strong> with <strong>Cloud Sync</strong> on — it will appear here automatically.</p>
+                <button type="button" class="btn btn-primary" onclick="SLCRICK_BROADCAST_STATION.syncNow()">🔄 Check again</button>
+            </div>
+        </section>
+
+        <section id="bs-gate" class="bs-state-panel" hidden>
+            <div class="bs-live-banner" id="bs-live-banner"></div>
+            <div class="bs-mirror-block">
+                <div class="bs-mirror-head">
+                    <span id="bs-gate-preview-label">Live preview (from desktop)</span>
+                    <span class="bs-live-dot">● LIVE</span>
+                </div>
+                <div class="bs-preview-wrap bs-preview-wrap--gate">
+                    <iframe id="bs-gate-preview-frame" title="Live overlay preview" scrolling="no"></iframe>
+                </div>
+            </div>
+            <div class="bs-unlock-card" id="bs-unlock-card">
+                <h3>🔐 Tournament password</h3>
+                <p class="bs-hint">Required to copy the OBS browser source URL. Preview updates without password.</p>
+                <form id="bs-unlock-form" class="bs-unlock-form" onsubmit="return SLCRICK_BROADCAST_STATION.submitUnlock(event)">
+                    <input type="password" id="bs-password" class="form-input" placeholder="Scoring password" autocomplete="off" />
+                    <button type="submit" class="btn btn-primary">Unlock OBS link</button>
+                </form>
+                <p id="bs-unlock-error" class="bs-unlock-error" hidden></p>
+            </div>
+        </section>
+
+        <section id="bs-studio" class="bs-state-panel" hidden>
+            <div class="bs-live-banner" id="bs-studio-banner"></div>
+            <div class="bs-mirror-block">
+                <div class="bs-mirror-head">
+                    <span id="bs-studio-preview-label">Overlay preview</span>
+                    <span class="bs-live-dot">● LIVE</span>
+                </div>
+                <div class="bs-preview-wrap">
+                    <iframe id="bs-studio-preview-frame" title="Overlay preview" scrolling="no"></iframe>
+                </div>
+            </div>
+            <div class="bs-obs-block bs-obs-block--solo">
+                <h3>OBS / vMix browser source</h3>
+                <p class="bs-hint">Paste in OBS → Sources → Browser. Width <strong>1920</strong>, height <strong>120</strong> (theme2), align bottom, transparent background.</p>
+                <div class="bs-url-row">
+                    <input type="text" class="form-input" id="bs-url-overlay" readonly />
+                    <button type="button" class="btn btn-primary btn-sm" onclick="SLCRICK_BROADCAST_STATION.copyUrl('bs-url-overlay')">Copy URL</button>
+                </div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm bs-lock-btn" onclick="SLCRICK_BROADCAST_STATION.lockStudio()">🔒 Lock OBS link</button>
+        </section>
+    </main>
+
+    <!-- Desktop operator: full tournament picker (unchanged) -->
+    <main class="bs-main bs-operator-root" id="bs-operator" hidden>
+        <div class="bs-hero">
+            <h1>📡 Broadcast Station</h1>
+            <p>Tournament list, live scorebar mirror, and OBS URLs — desktop ↔ site via cloud API.</p>
+            <div id="bs-sync-warn" class="bs-sync-warn" style="display:none">
+                Turn on <a href="settings.html">Cloud Sync</a> on this PC to push scores to the website.
+            </div>
+        </div>
         <div class="bs-layout">
             <aside class="bs-panel">
                 <h2 class="bs-panel-title">Tournaments</h2>
-                <p class="bs-hint">Schedule on the site, then Sync</p>
+                <p class="bs-hint">Scheduled on site → sync → appears here</p>
                 <div id="bs-tournament-list" class="bs-tiles"></div>
             </aside>
-
             <section class="bs-panel bs-detail" id="bs-detail">
                 <h2 class="bs-panel-title" id="bs-detail-title">Select a tournament</h2>
                 <div id="bs-match-list" class="bs-matches"></div>
-
                 <div class="bs-mirror-block">
                     <div class="bs-mirror-head">
                         <span id="bs-preview-label">Live overlay mirror</span>
-                        <span class="bs-live-dot" title="WebSocket scoreUpdate">● LIVE SYNC</span>
+                        <span class="bs-live-dot">● LIVE SYNC</span>
                     </div>
                     <div id="bs-preview-wrap" class="bs-preview-wrap" style="display:none">
                         <iframe id="bs-preview-frame" title="Scorebar preview" scrolling="no"></iframe>
                     </div>
                 </div>
-
                 <div class="bs-obs-block">
                     <h3>OBS / vMix browser sources</h3>
                     <p id="bs-url-site-note" class="bs-hint"></p>
@@ -60,7 +121,6 @@
                         <input type="text" class="form-input" id="bs-url-hotkeys" readonly />
                         <button type="button" class="btn btn-primary btn-sm" onclick="SLCRICK_BROADCAST_STATION.copyUrl('bs-url-hotkeys')">Copy</button>
                     </div>
-                    <p class="bs-hint" style="margin-top:10px">Scorebar: 1920×120 (theme2) · bottom align · transparent OBS background.</p>
                 </div>
             </section>
         </div>
@@ -68,7 +128,7 @@
 
     <div class="toast" id="toast"></div>
     <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
-    <script src="../js/db.js"></script>
+    <script src="../js/db.js?v=2.2"></script>
     <script src="../js/live-sync.js"></script>
     <script src="../js/broadcast-station.js"></script>
     <script>

@@ -1,7 +1,14 @@
 /**
- * SLCRICKPRO Broadcast Station — tournaments, live mirror, OBS URLs
+ * SLCRICKPRO Broadcast Station
+ * - Site: desktop live mirror → password → OBS URL + preview only
+ * - Desktop operator: tournament list + full OBS tools
  */
 (function (global) {
+  let selectedTournamentId = null;
+  let selectedMatchId = null;
+  let activeLiveMatch = null;
+  let operatorMode = false;
+
   function liveApi() {
     if (!global.SLCRICK_LIVE) {
       console.error('[BroadcastStation] SLCRICK_LIVE missing — load live-sync.js');
@@ -9,8 +16,6 @@
     }
     return global.SLCRICK_LIVE;
   }
-  let selectedTournamentId = null;
-  let selectedMatchId = null;
 
   function esc(s) {
     if (typeof escapeHTML === 'function') return escapeHTML(String(s ?? ''));
@@ -52,6 +57,185 @@
     return `${inn.runs}/${inn.wickets} (${overs} ov)`;
   }
 
+  function tournamentLocked(t) {
+    return !!(t && (t.scoringPassword || t.password || t.isLocked));
+  }
+
+  function isBroadcastUnlocked(tournamentId) {
+    if (!tournamentId) return true;
+    try {
+      if (sessionStorage.getItem('bs_unlock_' + tournamentId) === '1') return true;
+      const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
+      if (grants[tournamentId]) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function markBroadcastUnlocked(tournamentId, password) {
+    if (!tournamentId) return;
+    sessionStorage.setItem('bs_unlock_' + tournamentId, '1');
+    if (password) localStorage.setItem('tourn_pw_' + tournamentId, password);
+    try {
+      const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
+      grants[tournamentId] = true;
+      localStorage.setItem('cricpro_grants', JSON.stringify(grants));
+    } catch (_) {}
+  }
+
+  function clearBroadcastUnlock(tournamentId) {
+    if (tournamentId) sessionStorage.removeItem('bs_unlock_' + tournamentId);
+  }
+
+  function resolveLiveMatch() {
+    const L = liveApi();
+    if (!L) return null;
+    return L.getAnyLiveMatch?.() || null;
+  }
+
+  function overlayUrlForMatch(match, extra) {
+    const L = liveApi();
+    if (!L || !match) return '';
+    const theme = getTheme();
+    const tid = match.tournamentId;
+    const parts = 'strip=1&theme=' + encodeURIComponent(theme) + (extra || '');
+    return L.buildOverlayUrl({
+      tournamentId: tid,
+      matchId: match.id,
+      layer: 'scorebar',
+      extra: parts,
+    });
+  }
+
+  function setIframe(frameId, url, heightPx) {
+    const frame = document.getElementById(frameId);
+    if (!frame || !url) return;
+    if (heightPx) frame.style.height = heightPx + 'px';
+    if (frame.src !== url) frame.src = url;
+  }
+
+  function renderLiveBanner(elId, match) {
+    const el = document.getElementById(elId);
+    if (!el || !match) return;
+    const t = global.DB?.getTournament(match.tournamentId);
+    const tName = t?.name ? `<span class="bs-banner-tourn">${esc(t.name)}</span>` : '';
+    el.innerHTML = `${tName}<strong>${esc(match.team1)} vs ${esc(match.team2)}</strong>
+      <span class="bs-banner-score">${esc(scoreLine(match))}</span>
+      <span class="bs-banner-status">${statusLabel(match)}</span>`;
+  }
+
+  function showPublicState(state) {
+    ['bs-idle', 'bs-gate', 'bs-studio'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = id !== state;
+    });
+  }
+
+  function refreshPublic() {
+    if (operatorMode) return;
+    activeLiveMatch = resolveLiveMatch();
+    const match = activeLiveMatch;
+    const L = liveApi();
+
+    if (!match) {
+      showPublicState('bs-idle');
+      return;
+    }
+
+    const tid = match.tournamentId;
+    const theme = getTheme();
+    const h = stripHeight(theme);
+    const previewUrl = overlayUrlForMatch(match, '&preview=1');
+    L?.joinTournament(tid);
+    L?.joinMatch(match.id);
+
+    const unlocked =
+      !tournamentLocked(global.DB?.getTournament(tid)) || isBroadcastUnlocked(tid);
+
+    if (unlocked) {
+      showPublicState('bs-studio');
+      renderLiveBanner('bs-studio-banner', match);
+      const label = document.getElementById('bs-studio-preview-label');
+      if (label) label.textContent = `Live — ${match.team1} vs ${match.team2}`;
+      setIframe('bs-studio-preview-frame', previewUrl, h);
+      const urlEl = document.getElementById('bs-url-overlay');
+      if (urlEl) urlEl.value = overlayUrlForMatch(match, '');
+      return;
+    }
+
+    showPublicState('bs-gate');
+    renderLiveBanner('bs-live-banner', match);
+    const gateLabel = document.getElementById('bs-gate-preview-label');
+    if (gateLabel) gateLabel.textContent = `Live from desktop — ${match.team1} vs ${match.team2}`;
+    setIframe('bs-gate-preview-frame', previewUrl, h);
+    const unlockCard = document.getElementById('bs-unlock-card');
+    if (unlockCard) unlockCard.style.display = '';
+  }
+
+  async function submitUnlock(ev) {
+    if (ev) ev.preventDefault();
+    const match = activeLiveMatch || resolveLiveMatch();
+    if (!match?.tournamentId) {
+      showToast?.('No live match', 'error');
+      return false;
+    }
+    const tid = match.tournamentId;
+    const pw = (document.getElementById('bs-password')?.value || '').trim();
+    const errEl = document.getElementById('bs-unlock-error');
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = '';
+    }
+    if (!pw) {
+      if (errEl) {
+        errEl.textContent = 'Enter the tournament scoring password.';
+        errEl.hidden = false;
+      }
+      return false;
+    }
+
+    const t = global.DB?.getTournament(tid);
+    const localPw = t?.scoringPassword || t?.password;
+    if (localPw && pw === localPw) {
+      markBroadcastUnlocked(tid, pw);
+      showToast?.('✅ Unlocked', 'success');
+      refreshPublic();
+      return false;
+    }
+
+    if (typeof global.DB?.handshake === 'function') {
+      showToast?.('🔐 Verifying…', 'default');
+      const result = await global.DB.handshake(tid, pw);
+      if (result?.ok) {
+        markBroadcastUnlocked(tid, pw);
+        localStorage.setItem('tourn_pw_' + tid, pw);
+        showToast?.('✅ Unlocked', 'success');
+        refreshPublic();
+        return false;
+      }
+      if (errEl) {
+        errEl.textContent = result?.error || 'Wrong password';
+        errEl.hidden = false;
+      }
+      showToast?.('❌ Wrong password', 'error');
+      return false;
+    }
+
+    if (errEl) {
+      errEl.textContent = 'Could not verify — check connection.';
+      errEl.hidden = false;
+    }
+    return false;
+  }
+
+  function lockStudio() {
+    const tid = activeLiveMatch?.tournamentId;
+    if (tid) clearBroadcastUnlock(tid);
+    refreshPublic();
+    showToast?.('OBS link locked', 'default');
+  }
+
+  // ─── Operator mode (desktop) ─────────────────────────────────────────────
+
   async function pullLatest() {
     if (typeof global.wakeUpServer === 'function') {
       try {
@@ -89,7 +273,7 @@
     const tourns = global.DB.getTournaments().filter((t) => t && t.id && t.status !== 'requested');
     if (!tourns.length) {
       el.innerHTML =
-        '<div class="bs-empty">No tournaments yet. Schedule on the site or desktop, then <button type="button" class="btn btn-primary btn-sm" onclick="SLCRICK_BROADCAST_STATION.syncNow()">Sync now</button></div>';
+        '<div class="bs-empty">No tournaments yet. <button type="button" class="btn btn-primary btn-sm" onclick="SLCRICK_BROADCAST_STATION.syncNow()">Sync now</button></div>';
       return;
     }
     tourns.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -140,27 +324,18 @@
     if (!scoreEl || !hotEl) return;
     const theme = getTheme();
     const tid = selectedTournamentId;
-    const mid = selectedMatchId || LIVE?.getLiveMatchForTournament(tid)?.id;
-    if (!tid) {
+    const L = liveApi();
+    const mid = selectedMatchId || L?.getLiveMatchForTournament(tid)?.id;
+    if (!tid || !L) {
       scoreEl.value = '';
       hotEl.value = '';
       return;
     }
     const extra = 'strip=1&theme=' + encodeURIComponent(theme);
-    const L = liveApi();
-    if (!L) return;
-    scoreEl.value = L.buildOverlayUrl({
-      tournamentId: tid,
-      matchId: mid,
-      layer: 'scorebar',
-      extra,
-    });
+    scoreEl.value = L.buildOverlayUrl({ tournamentId: tid, matchId: mid, layer: 'scorebar', extra });
     hotEl.value = L.buildOverlayUrl({ tournamentId: tid, matchId: mid, layer: 'hotkeys' });
     if (siteEl) {
-      siteEl.textContent =
-        'Public site mirror: ' +
-        (L.PUBLIC_SITE || 'https://slcrickpro.live') +
-        ' — same URLs work in OBS for any viewer.';
+      siteEl.textContent = 'Public URLs: ' + (L.PUBLIC_SITE || 'https://slcrickpro.live');
     }
   }
 
@@ -175,8 +350,7 @@
       return;
     }
     const L = liveApi();
-    if (!L) return;
-    const live = L.getLiveMatchForTournament(tid);
+    const live = L?.getLiveMatchForTournament(tid);
     const mid = selectedMatchId || live?.id;
     const theme = getTheme();
     const h = stripHeight(theme);
@@ -195,9 +369,7 @@
     if (label) {
       label.textContent = live
         ? `Live mirror — ${live.team1} vs ${live.team2}`
-        : mid
-          ? 'Preview — select a live match or start scoring on desktop'
-          : 'Waiting for live match…';
+        : 'Preview — select or start a live match';
     }
     L.joinTournament(tid);
     if (mid) L.joinMatch(mid);
@@ -227,15 +399,27 @@
     liveApi()?.joinMatch(mid);
   }
 
+  function refreshOperator() {
+    if (!operatorMode) return;
+    renderTournamentList();
+    if (selectedTournamentId) {
+      renderMatchList();
+      updatePreview();
+      updateObsUrls();
+    }
+  }
+
+  // ─── Shared ──────────────────────────────────────────────────────────────
+
   async function syncNow() {
     const btn = document.getElementById('bs-btn-sync');
     if (btn) btn.disabled = true;
     try {
       await pullLatest();
-      if (typeof showToast === 'function') showToast('✅ Synced with cloud', 'success');
+      showToast?.('✅ Synced with cloud', 'success');
       refresh();
     } catch (e) {
-      if (typeof showToast === 'function') showToast('Sync failed — check cloud settings', 'error');
+      showToast?.('Sync failed — check connection', 'error');
     }
     if (btn) btn.disabled = false;
   }
@@ -250,29 +434,51 @@
   }
 
   function refresh() {
-    renderTournamentList();
-    if (selectedTournamentId) {
-      renderMatchList();
-      updatePreview();
-      updateObsUrls();
+    if (operatorMode) refreshOperator();
+    else refreshPublic();
+  }
+
+  function enableOperatorUi() {
+    operatorMode = true;
+    const pub = document.getElementById('bs-public');
+    if (pub) pub.hidden = true;
+    const op = document.getElementById('bs-operator');
+    if (op) op.hidden = false;
+    const back = document.getElementById('bs-back-link');
+    if (back) {
+      back.href = 'score-match.html?tab=hotkeys';
+      back.textContent = '← Hotkeys';
     }
   }
 
   async function init() {
-    if (global.SLCRICK_DESKTOP) {
+    const params = new URLSearchParams(global.location.search);
+    operatorMode =
+      !!global.SLCRICK_DESKTOP || params.get('operator') === '1' || params.get('full') === '1';
+
+    if (operatorMode) {
+      enableOperatorUi();
       ensureDesktopCloudSync();
-      if (global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled()) {
-        const hint = document.getElementById('bs-sync-warn');
-        if (hint) hint.style.display = 'block';
-      }
+      const warn = document.getElementById('bs-sync-warn');
+      if (warn && global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled()) warn.style.display = 'block';
     }
+
     if (global.SLCRICK_LIVE?.install) global.SLCRICK_LIVE.install({ force: true });
     await pullLatest();
-    renderTournamentList();
+
     global.addEventListener('slcrick-live-update', refresh);
-    const params = new URLSearchParams(global.location.search);
-    const tid = params.get('tournament') || params.get('tournamentId');
-    if (tid) selectTournament(tid);
+
+    if (operatorMode) {
+      renderTournamentList();
+      const tid = params.get('tournament') || params.get('tournamentId');
+      if (tid) selectTournament(tid);
+      return;
+    }
+
+    refreshPublic();
+    setInterval(() => {
+      if (!operatorMode) refreshPublic();
+    }, 8000);
   }
 
   global.SLCRICK_BROADCAST_STATION = {
@@ -282,5 +488,7 @@
     selectTournament,
     selectMatch,
     copyUrl,
+    submitUnlock,
+    lockStudio,
   };
 })(window);

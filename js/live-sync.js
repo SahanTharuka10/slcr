@@ -126,6 +126,15 @@
     );
   }
 
+  /** First live/paused match synced from desktop (any tournament). */
+  function getAnyLiveMatch() {
+    if (!global.DB) return null;
+    const matches = global.DB.getMatches().filter((m) => m && m.id);
+    const live = matches.filter((m) => m.status === 'live' || m.status === 'paused');
+    live.sort((a, b) => (b.lastUpdated || b.scoringStartedAt || 0) - (a.lastUpdated || a.scoringStartedAt || 0));
+    return live[0] || null;
+  }
+
   function install(opts) {
     const force = opts && opts.force;
     if (!force && global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled()) return;
@@ -142,6 +151,7 @@
     applyScoreUpdate,
     buildOverlayUrl,
     getLiveMatchForTournament,
+    getAnyLiveMatch,
     install,
     get socket() {
       return _socket;
