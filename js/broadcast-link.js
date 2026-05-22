@@ -50,10 +50,18 @@
     };
   }
 
+  let _statusEmitLock = false;
+
   function emitStatus() {
-    global.dispatchEvent?.(
-      new CustomEvent('slcrick-broadcast-status', { detail: getStatus() })
-    );
+    if (_statusEmitLock) return;
+    _statusEmitLock = true;
+    try {
+      global.dispatchEvent?.(
+        new CustomEvent('slcrick-broadcast-status', { detail: getStatus() })
+      );
+    } finally {
+      _statusEmitLock = false;
+    }
   }
 
   function setPublishEnabled(enabled, options = {}) {

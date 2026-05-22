@@ -561,6 +561,10 @@
     );
   }
 
+  function onBroadcastStatus() {
+    renderStatusRibbon();
+  }
+
   function refresh() {
     renderStatusRibbon();
     renderIdleCopy();
@@ -571,7 +575,6 @@
       renderWebCatalog();
     }
     renderStudio();
-    linkApi()?.emitStatus?.();
   }
 
   async function init() {
@@ -607,10 +610,10 @@
     ensureSocket();
 
     global.addEventListener('slcrick-live-update', refresh);
-    global.addEventListener('slcrick-broadcast-status', refresh);
+    global.addEventListener('slcrick-broadcast-status', onBroadcastStatus);
     if (global._cricproSocket) {
-      global._cricproSocket.on('connect', () => linkApi()?.emitStatus?.());
-      global._cricproSocket.on('disconnect', () => linkApi()?.emitStatus?.());
+      global._cricproSocket.on('connect', onBroadcastStatus);
+      global._cricproSocket.on('disconnect', onBroadcastStatus);
     }
 
     await pullLatest();
@@ -638,7 +641,7 @@
     refresh();
 
     if (!operatorMode) setInterval(refresh, 8000);
-    else setInterval(() => linkApi()?.emitStatus?.(), 3000);
+    else setInterval(onBroadcastStatus, 4000);
   }
 
   global.SLCRICK_BROADCAST_STATION = {
