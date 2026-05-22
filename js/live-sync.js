@@ -4,23 +4,30 @@
  */
 (function (global) {
   const PUBLIC_SITE = 'https://slcrickpro.live';
+  const DEFAULT_API = 'https://slcrickpro.onrender.com';
   let _socket = null;
   let _joinedMatch = null;
   let _joinedTournament = null;
 
+  /** Socket + REST only — never the Vercel site (no Socket.IO there → 307). */
   function backendUrl() {
-    if (global.SLCRICK_SYNC?.getBackendUrl?.()) return global.SLCRICK_SYNC.getBackendUrl();
-    return global.BACKEND_BASE_URL || PUBLIC_SITE.replace(/\/$/, '') || '';
+    const cfg = global.CRICPRO_CLOUD_CONFIG?.backendUrl;
+    if (cfg && String(cfg).trim()) return String(cfg).trim().replace(/\/$/, '');
+    if (global.SLCRICK_SYNC?.getBackendUrl?.()) {
+      const u = global.SLCRICK_SYNC.getBackendUrl();
+      if (u) return u.replace(/\/$/, '');
+    }
+    if (global.BACKEND_BASE_URL) return String(global.BACKEND_BASE_URL).replace(/\/$/, '');
+    const host = global.location?.hostname || '';
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return `http://${host}:${global.location?.port || 3000}`;
+    }
+    return DEFAULT_API;
   }
 
+  /** Public overlay pages live on the marketing site. */
   function siteOrigin() {
-    const u = backendUrl();
-    if (!u) return PUBLIC_SITE;
-    try {
-      return new URL(u).origin;
-    } catch (_) {
-      return PUBLIC_SITE;
-    }
+    return PUBLIC_SITE;
   }
 
   function applyScoreUpdate(data) {

@@ -967,11 +967,14 @@ const IS_PRODUCTION = !(window.location.hostname === 'localhost' || window.locat
 const CLOUD_RUNTIME_CONFIG = window.CRICPRO_CLOUD_CONFIG || {};
 const CONFIGURED_BACKEND_URL = (CLOUD_RUNTIME_CONFIG.backendUrl || localStorage.getItem('cricpro_backend_url') || '').trim();
 
+const DEFAULT_PRODUCTION_API = 'https://slcrickpro.onrender.com';
 let BACKEND_BASE_URL;
 if (CONFIGURED_BACKEND_URL) {
     BACKEND_BASE_URL = CONFIGURED_BACKEND_URL;
 } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     BACKEND_BASE_URL = `http://${window.location.hostname}:${window.location.port || 3000}`;
+} else if (IS_PRODUCTION) {
+    BACKEND_BASE_URL = DEFAULT_PRODUCTION_API;
 } else {
     BACKEND_BASE_URL = "";
 }
@@ -1046,8 +1049,7 @@ if (BACKEND_BASE_URL && typeof io !== 'undefined') {
         if (!awake) return;
         socket = io(BACKEND_BASE_URL, {
             path: '/socket.io',
-            transports: ['websocket'],
-            upgrade: false,
+            transports: ['websocket', 'polling'],
             reconnectionAttempts: 15,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 8000,
