@@ -18,10 +18,6 @@
       if (u) return u.replace(/\/$/, '');
     }
     if (global.BACKEND_BASE_URL) return String(global.BACKEND_BASE_URL).replace(/\/$/, '');
-    const host = global.location?.hostname || '';
-    if (host === 'localhost' || host === '127.0.0.1') {
-      return `http://${host}:${global.location?.port || 3000}`;
-    }
     return DEFAULT_API;
   }
 

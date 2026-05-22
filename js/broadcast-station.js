@@ -516,6 +516,7 @@
   }
 
   async function pullLatest() {
+    if (global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled?.()) return;
     if (typeof global.wakeUpServer === 'function') {
       try {
         await global.wakeUpServer();
@@ -531,6 +532,7 @@
   }
 
   function ensureSocket() {
+    if (global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled?.()) return;
     global.SLCRICK_LIVE?.install?.({ force: true });
     if (global._cricproSocket && !global._cricproSocket.connected && global.SLCRICK_LIVE?.connect) {
       global.SLCRICK_LIVE.connect();
