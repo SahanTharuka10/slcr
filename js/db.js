@@ -44,9 +44,10 @@ const DB_KEYS = {
     REPORTS: 'cricpro_reports',
 };
 
-const MATCH_HISTORY_STORAGE_LIMIT = 30;
-const LOCAL_MATCH_CACHE_LIMIT = 80;
-const LOCAL_COMPLETED_MATCH_CACHE_LIMIT = 30;
+const MATCH_HISTORY_STORAGE_LIMIT = 20;
+const LOCAL_MATCH_CACHE_LIMIT = 48;
+const LOCAL_COMPLETED_MATCH_CACHE_LIMIT = 16;
+let _quotaNoticeShown = false;
 
 function stripEmbeddedMediaForStorage(value) {
     if (!value || typeof value !== 'object') return value;
@@ -83,24 +84,80 @@ function isQuotaExceededError(error) {
     );
 }
 
+function isActiveMatchStatus(status) {
+    const s = String(status || '').toLowerCase();
+    return s === 'live' || s === 'paused';
+}
+
 function prepareMatchForPersistence(match) {
     if (!match || typeof match !== 'object') return match;
     const copy = JSON.parse(JSON.stringify(match));
     delete copy._isSyncing;
     delete copy._isBackgroundSync;
 
-    // Keep reload persistence small and reliable while preserving recent undo history.
-    if (Array.isArray(copy.history) && copy.history.length > MATCH_HISTORY_STORAGE_LIMIT) {
-        copy.history = copy.history.slice(-MATCH_HISTORY_STORAGE_LIMIT);
-    }
-    if (Array.isArray(copy.redoStack) && copy.redoStack.length > MATCH_HISTORY_STORAGE_LIMIT) {
-        copy.redoStack = copy.redoStack.slice(-MATCH_HISTORY_STORAGE_LIMIT);
+    const active = isActiveMatchStatus(copy.status);
+
+    // Browser cache: only live/paused matches keep undo history; others stay lite.
+    if (!active) {
+        delete copy.history;
+        delete copy.redoStack;
+    } else {
+        if (Array.isArray(copy.history) && copy.history.length > MATCH_HISTORY_STORAGE_LIMIT) {
+            copy.history = copy.history.slice(-MATCH_HISTORY_STORAGE_LIMIT);
+        }
+        if (Array.isArray(copy.redoStack) && copy.redoStack.length > MATCH_HISTORY_STORAGE_LIMIT) {
+            copy.redoStack = copy.redoStack.slice(-MATCH_HISTORY_STORAGE_LIMIT);
+        }
     }
     return stripEmbeddedMediaForStorage(copy);
 }
 
+/** Lite row for scheduled/completed matches — saves localStorage space on the public site. */
+function prepareMatchForLocalCache(match) {
+    const copy = prepareMatchForPersistence(match);
+    if (isActiveMatchStatus(copy.status)) return copy;
+    return {
+        id: copy.id,
+        tournamentId: copy.tournamentId,
+        tournamentName: copy.tournamentName,
+        team1: copy.team1,
+        team2: copy.team2,
+        status: copy.status,
+        overs: copy.overs,
+        ballsPerOver: copy.ballsPerOver,
+        currentInnings: copy.currentInnings,
+        innings: copy.innings,
+        publishLive: copy.publishLive,
+        lastUpdated: copy.lastUpdated,
+        createdAt: copy.createdAt,
+        scheduledName: copy.scheduledName,
+        type: copy.type,
+        _cloudLite: true,
+    };
+}
+
 function prepareMatchesForPersistence(matches) {
-    return Array.isArray(matches) ? matches.map(prepareMatchForPersistence) : matches;
+    if (!Array.isArray(matches)) return matches;
+    const prepared = matches.map((m) =>
+        isActiveMatchStatus(m?.status) ? prepareMatchForPersistence(m) : prepareMatchForLocalCache(m)
+    );
+    return compactMatchesForQuota(prepared);
+}
+
+function logQuotaNotice(keptCount) {
+    if (_quotaNoticeShown) return;
+    _quotaNoticeShown = true;
+    console.info(
+        `[SLCRICKPRO] Browser storage limit — keeping ${keptCount} recent matches in cache. Older data stays on the server.`
+    );
+}
+
+function pruneLegacyLocalStorage() {
+    ['hotkey_match_id', 'hotkey_mode'].forEach((k) => {
+        try {
+            if (localStorage.getItem(k) != null) localStorage.removeItem(k);
+        } catch (_) {}
+    });
 }
 
 // SLCRICKPRO – Theme Logic is now handled via inline scripts in HTML files to prevent FOUC
@@ -271,25 +328,32 @@ const DB = {
 
     // ---------- SECURE STORAGE ----------
     _secureSet(key, val) {
+        const payload = key === DB_KEYS.MATCHES ? prepareMatchesForPersistence(val) : val;
         try {
-            const safeVal = key === DB_KEYS.MATCHES ? prepareMatchesForPersistence(val) : val;
-            const str = JSON.stringify(safeVal);
+            const str = JSON.stringify(payload);
             const enc = btoa(encodeURIComponent(str));
             localStorage.setItem(key, 'SECURE_' + enc);
-        } catch(e) {
+        } catch (e) {
             if (key === DB_KEYS.MATCHES && isQuotaExceededError(e)) {
+                pruneLegacyLocalStorage();
                 try {
-                    const compacted = compactMatchesForQuota(prepareMatchesForPersistence(val));
+                    const compacted = compactMatchesForQuota(
+                        Array.isArray(payload) ? payload : prepareMatchesForPersistence(val)
+                    );
                     const compactedStr = JSON.stringify(compacted);
                     const compactedEnc = btoa(encodeURIComponent(compactedStr));
                     localStorage.setItem(key, 'SECURE_' + compactedEnc);
-                    console.warn(`Storage quota reached. Kept ${compacted.length} recent matches in local cache.`);
+                    logQuotaNotice(compacted.length);
                     return;
                 } catch (retryErr) {
-                    console.error("Storage quota retry failed", retryErr);
+                    if (!_quotaNoticeShown) {
+                        _quotaNoticeShown = true;
+                        console.warn('[SLCRICKPRO] Local cache full — using cloud data only.', retryErr);
+                    }
+                    return;
                 }
             }
-            console.error("Storage err", e);
+            if (!_quotaNoticeShown) console.error('Storage err', e);
         }
     },
     _secureGet(key, def) {
