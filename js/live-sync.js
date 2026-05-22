@@ -40,6 +40,7 @@
       global._desktopApplyingRemoteMatch = false;
     }
     global.dispatchEvent?.(new CustomEvent('slcrick-live-update', { detail: { type: 'match', id: data.id } }));
+    emitLinkStatus();
     if (typeof global.SLCRICK_BROADCAST_STATION?.refresh === 'function') {
       global.SLCRICK_BROADCAST_STATION.refresh();
     }
@@ -60,6 +61,33 @@
       global.SLCRICK_BROADCAST_STATION?.refresh?.();
     });
     return sock;
+  }
+
+  function emitLinkStatus() {
+    global.SLCRICK_BROADCAST?.emitStatus?.();
+  }
+
+  function disconnect() {
+    const sock = _socket || global._cricproSocket;
+    if (sock) {
+      try {
+        sock.removeAllListeners();
+        sock.disconnect();
+      } catch (_) {}
+    }
+    _socket = null;
+    global._cricproSocket = null;
+    global.socket = null;
+    _joinedMatch = null;
+    _joinedTournament = null;
+    emitLinkStatus();
+  }
+
+  function getSocketState() {
+    if (!backendUrl()) return 'off';
+    const s = _socket || global._cricproSocket;
+    if (s?.connected) return 'connected';
+    return s ? 'connecting' : 'off';
   }
 
   function connect() {
@@ -89,9 +117,13 @@
       _socket.emit('join_global', {});
       if (_joinedMatch) _socket.emit('join_match', _joinedMatch);
       if (_joinedTournament) _socket.emit('join_tournament', _joinedTournament);
+      emitLinkStatus();
     });
+    _socket.on('disconnect', () => emitLinkStatus());
+    _socket.on('connect_error', () => emitLinkStatus());
 
     wireSocket(_socket);
+    emitLinkStatus();
     return _socket;
   }
 
@@ -146,6 +178,8 @@
     backendUrl,
     siteOrigin,
     connect,
+    disconnect,
+    getSocketState,
     joinMatch,
     joinTournament,
     applyScoreUpdate,
@@ -154,7 +188,7 @@
     getAnyLiveMatch,
     install,
     get socket() {
-      return _socket;
+      return _socket || global._cricproSocket;
     },
   };
 

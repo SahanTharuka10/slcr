@@ -1,7 +1,5 @@
 /**
- * SLCRICKPRO Broadcast Station
- * - Site: desktop live mirror → password → OBS URL + preview only
- * - Desktop operator: tournament list + full OBS tools
+ * SLCRICKPRO Broadcast Station — desktop studio + site mirror
  */
 (function (global) {
   let selectedTournamentId = null;
@@ -9,12 +7,12 @@
   let activeLiveMatch = null;
   let operatorMode = false;
 
+  function linkApi() {
+    return global.SLCRICK_BROADCAST || null;
+  }
+
   function liveApi() {
-    if (!global.SLCRICK_LIVE) {
-      console.error('[BroadcastStation] SLCRICK_LIVE missing — load live-sync.js');
-      return null;
-    }
-    return global.SLCRICK_LIVE;
+    return global.SLCRICK_LIVE || null;
   }
 
   function esc(s) {
@@ -39,10 +37,9 @@
 
   function statusLabel(m) {
     if (!m) return '—';
-    if (m.status === 'live') return '🔴 LIVE';
-    if (m.status === 'paused') return '⏸ Paused';
-    if (m.status === 'completed') return '✅ Done';
-    return '📅 Scheduled';
+    if (m.status === 'live') return 'LIVE';
+    if (m.status === 'paused') return 'PAUSED';
+    return String(m.status || '').toUpperCase();
   }
 
   function scoreLine(m) {
@@ -86,98 +83,204 @@
     if (tournamentId) sessionStorage.removeItem('bs_unlock_' + tournamentId);
   }
 
-  function resolveLiveMatch() {
-    const L = liveApi();
-    if (!L) return null;
-    return L.getAnyLiveMatch?.() || null;
+  function currentMatch() {
+    if (operatorMode && selectedTournamentId) {
+      const L = liveApi();
+      if (selectedMatchId) return global.DB?.getMatch(selectedMatchId) || null;
+      return L?.getLiveMatchForTournament(selectedTournamentId) || null;
+    }
+    return activeLiveMatch || linkApi()?.getLiveMatch() || liveApi()?.getAnyLiveMatch() || null;
   }
 
-  function overlayUrlForMatch(match, extra) {
+  function overlayUrlForMatch(match, extra, useLocal) {
     const L = liveApi();
     if (!L || !match) return '';
     const theme = getTheme();
-    const tid = match.tournamentId;
     const parts = 'strip=1&theme=' + encodeURIComponent(theme) + (extra || '');
     return L.buildOverlayUrl({
-      tournamentId: tid,
+      tournamentId: match.tournamentId,
       matchId: match.id,
       layer: 'scorebar',
       extra: parts,
+      useLocalPreview: !!useLocal,
     });
   }
 
-  function setIframe(frameId, url, heightPx) {
-    const frame = document.getElementById(frameId);
-    if (!frame || !url) return;
-    if (heightPx) frame.style.height = heightPx + 'px';
-    if (frame.src !== url) frame.src = url;
+  function renderStatusRibbon() {
+    const st = linkApi()?.getStatus() || {
+      phase: 'isolated',
+      syncEnabled: false,
+      websocket: 'off',
+      liveMatch: null,
+      publicSite: 'https://slcrickpro.live',
+    };
+
+    document.body.classList.remove('bs-phase-isolated', 'bs-phase-linked', 'bs-phase-on-air');
+    document.body.classList.add('bs-phase-' + st.phase);
+
+    const steps = ['bs-step-desktop', 'bs-step-cloud', 'bs-step-site'];
+    const lines = ['bs-line-1', 'bs-line-2'];
+    steps.forEach((id) => document.getElementById(id)?.classList.remove('bs-step--active'));
+    lines.forEach((id) => document.getElementById(id)?.classList.remove('bs-step-line--active'));
+
+    if (st.phase === 'isolated') {
+      document.getElementById('bs-step-desktop')?.classList.add('bs-step--active');
+    } else if (st.phase === 'linked') {
+      document.getElementById('bs-step-desktop')?.classList.add('bs-step--active');
+      document.getElementById('bs-step-cloud')?.classList.add('bs-step--active');
+      document.getElementById('bs-line-1')?.classList.add('bs-step-line--active');
+    } else {
+      steps.forEach((id) => document.getElementById(id)?.classList.add('bs-step--active'));
+      lines.forEach((id) => document.getElementById(id)?.classList.add('bs-step-line--active'));
+    }
+
+    const pills = document.getElementById('bs-status-pills');
+    if (pills) {
+      const syncCls = st.syncEnabled ? 'bs-pill--ok' : 'bs-pill--off';
+      const wsCls =
+        st.websocket === 'connected' ? 'bs-pill--ok' : st.websocket === 'connecting' ? 'bs-pill--warn' : 'bs-pill--off';
+      const liveCls = st.liveMatch ? 'bs-pill--ok' : 'bs-pill--off';
+      pills.innerHTML = `
+        <span class="bs-pill ${syncCls}">Publish ${st.syncEnabled ? 'ON' : 'OFF'}</span>
+        <span class="bs-pill ${wsCls}">WebSocket ${st.websocket}</span>
+        <span class="bs-pill ${liveCls}">${st.liveMatch ? '● ON AIR' : 'No live feed'}</span>`;
+    }
+
+    const note = document.getElementById('bs-ribbon-note');
+    if (note) {
+      if (st.phase === 'isolated') {
+        note.textContent = operatorMode
+          ? 'Isolated mode — scores stay on this PC only. Turn on Publish to push to the website.'
+          : 'Waiting for desktop studio — scorer must enable Publish on the desktop app.';
+      } else if (st.phase === 'linked') {
+        note.textContent =
+          'Linked to cloud API. Start or resume a LIVE match on desktop — WebSocket will mirror each ball to this page.';
+      } else {
+        note.textContent = `On air — ${st.liveMatch.team1} vs ${st.liveMatch.team2}. Overlay updates in real time via WebSocket.`;
+      }
+    }
+
+    const wsInd = document.getElementById('bs-ws-indicator');
+    if (wsInd) {
+      if (st.websocket === 'connected') {
+        wsInd.textContent = '● WEBSOCKET LIVE';
+        wsInd.classList.add('bs-live-dot--pulse');
+      } else {
+        wsInd.textContent = st.syncEnabled ? '○ CONNECTING…' : '○ OFFLINE';
+        wsInd.classList.remove('bs-live-dot--pulse');
+      }
+    }
+
+    const toggle = document.getElementById('bs-publish-toggle');
+    const toggleText = document.getElementById('bs-toggle-text');
+    if (toggle) toggle.checked = !!st.syncEnabled;
+    if (toggleText) toggleText.textContent = st.syncEnabled ? 'Publishing' : 'Isolated';
   }
 
-  function renderLiveBanner(elId, match) {
-    const el = document.getElementById(elId);
+  function renderMatchHero(match) {
+    const el = document.getElementById('bs-match-hero');
     if (!el || !match) return;
     const t = global.DB?.getTournament(match.tournamentId);
-    const tName = t?.name ? `<span class="bs-banner-tourn">${esc(t.name)}</span>` : '';
-    el.innerHTML = `${tName}<strong>${esc(match.team1)} vs ${esc(match.team2)}</strong>
-      <span class="bs-banner-score">${esc(scoreLine(match))}</span>
-      <span class="bs-banner-status">${statusLabel(match)}</span>`;
+    el.innerHTML = `
+      ${t?.name ? `<span class="bs-match-hero-meta" style="opacity:0.7;font-size:11px;text-transform:uppercase;letter-spacing:1px">${esc(t.name)}</span>` : ''}
+      <strong>${esc(match.team1)} vs ${esc(match.team2)}</strong>
+      <div class="bs-match-hero-meta">
+        <span>${esc(scoreLine(match))}</span>
+        <span class="bs-match-hero-status">${statusLabel(match)}</span>
+      </div>`;
   }
 
-  function showPublicState(state) {
-    ['bs-idle', 'bs-gate', 'bs-studio'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) el.hidden = id !== state;
-    });
-  }
+  function updatePreviewAndUrls() {
+    const match = currentMatch();
+    const frame = document.getElementById('bs-preview-frame');
+    const idle = document.getElementById('bs-idle');
+    const stage = document.getElementById('bs-live-stage');
+    const unlockPanel = document.getElementById('bs-unlock-panel');
+    const obsPanel = document.getElementById('bs-obs-panel');
 
-  function refreshPublic() {
-    if (operatorMode) return;
-    activeLiveMatch = resolveLiveMatch();
-    const match = activeLiveMatch;
-    const L = liveApi();
+    activeLiveMatch = match;
 
     if (!match) {
-      showPublicState('bs-idle');
+      if (idle) idle.hidden = false;
+      if (stage) stage.hidden = true;
+      renderStatusRibbon();
       return;
     }
 
-    const tid = match.tournamentId;
+    if (idle) idle.hidden = true;
+    if (stage) stage.hidden = false;
+    renderMatchHero(match);
+
     const theme = getTheme();
     const h = stripHeight(theme);
-    const previewUrl = overlayUrlForMatch(match, '&preview=1');
-    L?.joinTournament(tid);
-    L?.joinMatch(match.id);
-
-    const unlocked =
-      !tournamentLocked(global.DB?.getTournament(tid)) || isBroadcastUnlocked(tid);
-
-    if (unlocked) {
-      showPublicState('bs-studio');
-      renderLiveBanner('bs-studio-banner', match);
-      const label = document.getElementById('bs-studio-preview-label');
-      if (label) label.textContent = `Live — ${match.team1} vs ${match.team2}`;
-      setIframe('bs-studio-preview-frame', previewUrl, h);
-      const urlEl = document.getElementById('bs-url-overlay');
-      if (urlEl) urlEl.value = overlayUrlForMatch(match, '');
-      return;
+    const useLocal =
+      operatorMode && global.SLCRICK_DESKTOP && (!global.SLCRICK_SYNC || !global.SLCRICK_SYNC.isEnabled());
+    const previewUrl = overlayUrlForMatch(match, '&preview=1', useLocal);
+    if (frame) {
+      frame.style.height = h + 'px';
+      if (frame.src !== previewUrl) frame.src = previewUrl;
     }
 
-    showPublicState('bs-gate');
-    renderLiveBanner('bs-live-banner', match);
-    const gateLabel = document.getElementById('bs-gate-preview-label');
-    if (gateLabel) gateLabel.textContent = `Live from desktop — ${match.team1} vs ${match.team2}`;
-    setIframe('bs-gate-preview-frame', previewUrl, h);
-    const unlockCard = document.getElementById('bs-unlock-card');
-    if (unlockCard) unlockCard.style.display = '';
+    const L = liveApi();
+    L?.joinTournament(match.tournamentId);
+    L?.joinMatch(match.id);
+
+    const tid = match.tournamentId;
+    const unlocked = operatorMode || !tournamentLocked(global.DB?.getTournament(tid)) || isBroadcastUnlocked(tid);
+
+    if (unlockPanel) unlockPanel.hidden = operatorMode || unlocked;
+    if (obsPanel) obsPanel.hidden = !unlocked && !operatorMode;
+
+    const urlEl = document.getElementById('bs-url-overlay');
+    if (urlEl && (unlocked || operatorMode)) {
+      urlEl.value = overlayUrlForMatch(match, '', false);
+    }
+
+    if (operatorMode && selectedTournamentId) {
+      const hotEl = document.getElementById('bs-url-hotkeys');
+      const L2 = liveApi();
+      if (hotEl && L2) {
+        hotEl.value = L2.buildOverlayUrl({
+          tournamentId: selectedTournamentId,
+          matchId: match.id,
+          layer: 'hotkeys',
+        });
+      }
+      const viewer = document.getElementById('bs-viewer-link');
+      const site = linkApi()?.PUBLIC_SITE || 'https://slcrickpro.live';
+      if (viewer) {
+        viewer.href = site + '/pages/broadcast-station.html';
+        viewer.textContent = 'Open site mirror ↗';
+      }
+      document.getElementById('bs-viewer-panel')?.removeAttribute('hidden');
+    }
+
+    renderStatusRibbon();
   }
+
+  function renderIdleCopy() {
+    const st = linkApi()?.getStatus();
+    const title = document.getElementById('bs-idle-title');
+    const desc = document.getElementById('bs-idle-desc');
+    if (!title || !desc) return;
+    if (operatorMode && !st?.syncEnabled) {
+      title.textContent = 'Publish is OFF';
+      desc.textContent = 'Turn on Publish above, then go LIVE in Score Match — the overlay will push here and to the website.';
+    } else if (operatorMode) {
+      title.textContent = 'Ready — no live match';
+      desc.textContent = 'Cloud link is active. Start scoring a match as LIVE to see preview and OBS URLs.';
+    } else {
+      title.textContent = 'Waiting for desktop broadcast';
+      desc.textContent = 'When the desktop app publishes a LIVE match, preview and OBS tools appear here automatically.';
+    }
+  }
+
+  // ─── Public unlock ───────────────────────────────────────────────────────
 
   async function submitUnlock(ev) {
     if (ev) ev.preventDefault();
-    const match = activeLiveMatch || resolveLiveMatch();
-    if (!match?.tournamentId) {
-      showToast?.('No live match', 'error');
-      return false;
-    }
+    const match = currentMatch();
+    if (!match?.tournamentId) return false;
     const tid = match.tournamentId;
     const pw = (document.getElementById('bs-password')?.value || '').trim();
     const errEl = document.getElementById('bs-unlock-error');
@@ -187,54 +290,128 @@
     }
     if (!pw) {
       if (errEl) {
-        errEl.textContent = 'Enter the tournament scoring password.';
+        errEl.textContent = 'Enter tournament password.';
         errEl.hidden = false;
       }
       return false;
     }
-
     const t = global.DB?.getTournament(tid);
     const localPw = t?.scoringPassword || t?.password;
     if (localPw && pw === localPw) {
       markBroadcastUnlocked(tid, pw);
-      showToast?.('✅ Unlocked', 'success');
-      refreshPublic();
+      showToast?.('Unlocked', 'success');
+      updatePreviewAndUrls();
       return false;
     }
-
-    if (typeof global.DB?.handshake === 'function') {
-      showToast?.('🔐 Verifying…', 'default');
-      const result = await global.DB.handshake(tid, pw);
-      if (result?.ok) {
-        markBroadcastUnlocked(tid, pw);
-        localStorage.setItem('tourn_pw_' + tid, pw);
-        showToast?.('✅ Unlocked', 'success');
-        refreshPublic();
-        return false;
-      }
-      if (errEl) {
-        errEl.textContent = result?.error || 'Wrong password';
-        errEl.hidden = false;
-      }
-      showToast?.('❌ Wrong password', 'error');
+    const hs = global.DB?.handshake ? await global.DB.handshake(tid, pw) : null;
+    if (hs?.ok) {
+      markBroadcastUnlocked(tid, pw);
+      localStorage.setItem('tourn_pw_' + tid, pw);
+      showToast?.('Unlocked', 'success');
+      updatePreviewAndUrls();
       return false;
     }
-
     if (errEl) {
-      errEl.textContent = 'Could not verify — check connection.';
+      errEl.textContent = hs?.error || 'Wrong password';
       errEl.hidden = false;
     }
+    showToast?.('Wrong password', 'error');
     return false;
   }
 
   function lockStudio() {
-    const tid = activeLiveMatch?.tournamentId;
+    const tid = currentMatch()?.tournamentId;
     if (tid) clearBroadcastUnlock(tid);
-    refreshPublic();
-    showToast?.('OBS link locked', 'default');
+    updatePreviewAndUrls();
+    showToast?.('OBS URL locked', 'default');
   }
 
-  // ─── Operator mode (desktop) ─────────────────────────────────────────────
+  // ─── Operator sidebar ────────────────────────────────────────────────────
+
+  function renderTournamentList() {
+    const el = document.getElementById('bs-tournament-list');
+    if (!el || !global.DB) return;
+    const tourns = global.DB.getTournaments().filter((t) => t && t.id && t.status !== 'requested');
+    if (!tourns.length) {
+      el.innerHTML = '<p class="bs-hint">No tournaments — sync or create on desktop.</p>';
+      return;
+    }
+    tourns.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    el.innerHTML = tourns
+      .map((t) => {
+        const active = t.id === selectedTournamentId ? ' bs-tile--active' : '';
+        const live = liveApi()?.getLiveMatchForTournament(t.id);
+        const badge = live ? ' · LIVE' : '';
+        return `<button type="button" class="bs-tile${active}" data-tid="${esc(t.id)}">
+          <span class="bs-tile-title">${esc(t.name)}</span>
+          <span class="bs-tile-meta">${(t.matches?.length || 0)} matches${badge}</span>
+        </button>`;
+      })
+      .join('');
+    el.querySelectorAll('[data-tid]').forEach((btn) => {
+      btn.onclick = () => selectTournament(btn.getAttribute('data-tid'));
+    });
+  }
+
+  function renderMatchList() {
+    const el = document.getElementById('bs-match-list');
+    if (!el || !selectedTournamentId || !global.DB) return;
+    el.hidden = false;
+    const matches = global.DB.getMatches().filter((m) => m.tournamentId === selectedTournamentId);
+    if (!matches.length) {
+      el.innerHTML = '<p class="bs-hint">No matches yet.</p>';
+      return;
+    }
+    matches.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    el.innerHTML = matches
+      .map((m) => {
+        const active = m.id === selectedMatchId ? ' bs-match--active' : '';
+        return `<button type="button" class="bs-match${active}" data-mid="${esc(m.id)}">
+          <div class="bs-match-top"><strong>${esc(m.team1)} vs ${esc(m.team2)}</strong>
+          <span>${statusLabel(m)}</span></div>
+          <div class="bs-match-score">${esc(scoreLine(m))}</div>
+        </button>`;
+      })
+      .join('');
+    el.querySelectorAll('[data-mid]').forEach((btn) => {
+      btn.onclick = () => {
+        selectedMatchId = btn.getAttribute('data-mid');
+        renderMatchList();
+        updatePreviewAndUrls();
+        liveApi()?.joinMatch(selectedMatchId);
+      };
+    });
+  }
+
+  function selectTournament(tid) {
+    selectedTournamentId = tid;
+    selectedMatchId = null;
+    const live = liveApi()?.getLiveMatchForTournament(tid);
+    if (live) selectedMatchId = live.id;
+    renderTournamentList();
+    renderMatchList();
+    updatePreviewAndUrls();
+    liveApi()?.joinTournament(tid);
+  }
+
+  function setupPublishToggle() {
+    const panel = document.getElementById('bs-publish-panel');
+    const toggle = document.getElementById('bs-publish-toggle');
+    if (!panel || !toggle) return;
+    panel.hidden = false;
+    toggle.onchange = async () => {
+      const on = toggle.checked;
+      showToast?.(on ? 'Linking to website…' : 'Isolated from website', 'default');
+      await linkApi()?.setPublishEnabled(on, { syncNow: on });
+      if (on) global.SLCRICK_LIVE?.install?.({ force: true });
+      renderStatusRibbon();
+      renderIdleCopy();
+      updatePreviewAndUrls();
+      if (operatorMode) renderTournamentList();
+    };
+  }
+
+  // ─── Sync ────────────────────────────────────────────────────────────────
 
   async function pullLatest() {
     if (typeof global.wakeUpServer === 'function') {
@@ -248,178 +425,26 @@
     }
     if (global.SLCRICK_SYNC?.syncCloudData) {
       await global.SLCRICK_SYNC.syncCloudData({ forceRefresh: true });
-      return;
-    }
-    if (typeof global.pullGlobalData === 'function') {
-      await global.pullGlobalData(false);
     }
   }
 
   function ensureDesktopCloudSync() {
     if (!global.SLCRICK_DESKTOP || !global.SLCRICK_SYNC) return;
     const s = global.SLCRICK_SYNC.loadSettings();
-    if (!s.enabled) {
-      global.SLCRICK_SYNC.saveSettings({
-        enabled: true,
-        backendUrl: s.backendUrl || global.SLCRICK_SYNC.DEFAULT_BACKEND,
-      });
-      global.SLCRICK_SYNC.install();
-    }
+    if (!s.enabled) return;
+    global.SLCRICK_SYNC.install();
   }
-
-  function renderTournamentList() {
-    const el = document.getElementById('bs-tournament-list');
-    if (!el || !global.DB) return;
-    const tourns = global.DB.getTournaments().filter((t) => t && t.id && t.status !== 'requested');
-    if (!tourns.length) {
-      el.innerHTML =
-        '<div class="bs-empty">No tournaments yet. <button type="button" class="btn btn-primary btn-sm" onclick="SLCRICK_BROADCAST_STATION.syncNow()">Sync now</button></div>';
-      return;
-    }
-    tourns.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    el.innerHTML = tourns
-      .map((t) => {
-        const active = t.id === selectedTournamentId ? ' bs-tile--active' : '';
-        const live = liveApi()?.getLiveMatchForTournament(t.id);
-        const badge = live ? '<span class="bs-badge bs-badge--live">LIVE</span>' : '';
-        return `<button type="button" class="bs-tile${active}" data-tid="${esc(t.id)}">
-          <span class="bs-tile-title">${esc(t.name)}</span>
-          <span class="bs-tile-meta">${(t.matches?.length || 0)} matches ${badge}</span>
-        </button>`;
-      })
-      .join('');
-    el.querySelectorAll('[data-tid]').forEach((btn) => {
-      btn.onclick = () => selectTournament(btn.getAttribute('data-tid'));
-    });
-  }
-
-  function renderMatchList() {
-    const el = document.getElementById('bs-match-list');
-    if (!el || !selectedTournamentId || !global.DB) return;
-    const matches = global.DB.getMatches().filter((m) => m.tournamentId === selectedTournamentId);
-    if (!matches.length) {
-      el.innerHTML = '<div class="bs-empty">No matches in this tournament yet.</div>';
-      return;
-    }
-    matches.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-    el.innerHTML = matches
-      .map((m) => {
-        const active = m.id === selectedMatchId ? ' bs-match--active' : '';
-        return `<button type="button" class="bs-match${active}" data-mid="${esc(m.id)}">
-          <div class="bs-match-top"><strong>${esc(m.team1)} vs ${esc(m.team2)}</strong>
-          <span class="bs-match-status">${statusLabel(m)}</span></div>
-          <div class="bs-match-score">${esc(scoreLine(m))}</div>
-        </button>`;
-      })
-      .join('');
-    el.querySelectorAll('[data-mid]').forEach((btn) => {
-      btn.onclick = () => selectMatch(btn.getAttribute('data-mid'));
-    });
-  }
-
-  function updateObsUrls() {
-    const scoreEl = document.getElementById('bs-url-scorebar');
-    const hotEl = document.getElementById('bs-url-hotkeys');
-    const siteEl = document.getElementById('bs-url-site-note');
-    if (!scoreEl || !hotEl) return;
-    const theme = getTheme();
-    const tid = selectedTournamentId;
-    const L = liveApi();
-    const mid = selectedMatchId || L?.getLiveMatchForTournament(tid)?.id;
-    if (!tid || !L) {
-      scoreEl.value = '';
-      hotEl.value = '';
-      return;
-    }
-    const extra = 'strip=1&theme=' + encodeURIComponent(theme);
-    scoreEl.value = L.buildOverlayUrl({ tournamentId: tid, matchId: mid, layer: 'scorebar', extra });
-    hotEl.value = L.buildOverlayUrl({ tournamentId: tid, matchId: mid, layer: 'hotkeys' });
-    if (siteEl) {
-      siteEl.textContent = 'Public URLs: ' + (L.PUBLIC_SITE || 'https://slcrickpro.live');
-    }
-  }
-
-  function updatePreview() {
-    const wrap = document.getElementById('bs-preview-wrap');
-    const frame = document.getElementById('bs-preview-frame');
-    const label = document.getElementById('bs-preview-label');
-    if (!wrap || !frame) return;
-    const tid = selectedTournamentId;
-    if (!tid) {
-      wrap.style.display = 'none';
-      return;
-    }
-    const L = liveApi();
-    const live = L?.getLiveMatchForTournament(tid);
-    const mid = selectedMatchId || live?.id;
-    const theme = getTheme();
-    const h = stripHeight(theme);
-    const useLocalPreview =
-      !!global.SLCRICK_DESKTOP && (!global.SLCRICK_SYNC || !global.SLCRICK_SYNC.isEnabled());
-    const url = L.buildOverlayUrl({
-      tournamentId: tid,
-      matchId: mid,
-      layer: 'scorebar',
-      extra: 'strip=1&theme=' + encodeURIComponent(theme) + '&preview=1',
-      useLocalPreview,
-    });
-    wrap.style.display = 'block';
-    frame.style.height = h + 'px';
-    if (frame.src !== url) frame.src = url;
-    if (label) {
-      label.textContent = live
-        ? `Live mirror — ${live.team1} vs ${live.team2}`
-        : 'Preview — select or start a live match';
-    }
-    L.joinTournament(tid);
-    if (mid) L.joinMatch(mid);
-  }
-
-  function selectTournament(tid) {
-    selectedTournamentId = tid;
-    selectedMatchId = null;
-    const t = global.DB?.getTournament(tid);
-    const title = document.getElementById('bs-detail-title');
-    if (title) title.textContent = t?.name || 'Tournament';
-    document.getElementById('bs-detail')?.classList.add('bs-detail--open');
-    liveApi()?.joinTournament(tid);
-    const live = liveApi()?.getLiveMatchForTournament(tid);
-    if (live) selectedMatchId = live.id;
-    renderTournamentList();
-    renderMatchList();
-    updatePreview();
-    updateObsUrls();
-  }
-
-  function selectMatch(mid) {
-    selectedMatchId = mid;
-    renderMatchList();
-    updatePreview();
-    updateObsUrls();
-    liveApi()?.joinMatch(mid);
-  }
-
-  function refreshOperator() {
-    if (!operatorMode) return;
-    renderTournamentList();
-    if (selectedTournamentId) {
-      renderMatchList();
-      updatePreview();
-      updateObsUrls();
-    }
-  }
-
-  // ─── Shared ──────────────────────────────────────────────────────────────
 
   async function syncNow() {
     const btn = document.getElementById('bs-btn-sync');
     if (btn) btn.disabled = true;
     try {
       await pullLatest();
-      showToast?.('✅ Synced with cloud', 'success');
+      if (operatorMode && global.SLCRICK_SYNC?.isEnabled()) global.SLCRICK_SYNC.flushQueue?.();
+      showToast?.('Feed updated', 'success');
       refresh();
-    } catch (e) {
-      showToast?.('Sync failed — check connection', 'error');
+    } catch (_) {
+      showToast?.('Sync failed', 'error');
     }
     if (btn) btn.disabled = false;
   }
@@ -428,27 +453,19 @@
     const el = document.getElementById(inputId);
     if (!el?.value) return;
     navigator.clipboard.writeText(el.value).then(
-      () => showToast?.('URL copied', 'success'),
+      () => showToast?.('Copied', 'success'),
       () => showToast?.(el.value, 'default')
     );
   }
 
   function refresh() {
-    if (operatorMode) refreshOperator();
-    else refreshPublic();
-  }
-
-  function enableOperatorUi() {
-    operatorMode = true;
-    const pub = document.getElementById('bs-public');
-    if (pub) pub.hidden = true;
-    const op = document.getElementById('bs-operator');
-    if (op) op.hidden = false;
-    const back = document.getElementById('bs-back-link');
-    if (back) {
-      back.href = 'score-match.html?tab=hotkeys';
-      back.textContent = '← Hotkeys';
+    renderStatusRibbon();
+    renderIdleCopy();
+    if (operatorMode) {
+      if (selectedTournamentId) renderMatchList();
+      renderTournamentList();
     }
+    updatePreviewAndUrls();
   }
 
   async function init() {
@@ -456,29 +473,42 @@
     operatorMode =
       !!global.SLCRICK_DESKTOP || params.get('operator') === '1' || params.get('full') === '1';
 
+    document.body.classList.add(operatorMode ? 'bs-mode-operator' : 'bs-mode-public');
+
     if (operatorMode) {
-      enableOperatorUi();
+      document.getElementById('bs-site-hint')?.setAttribute('hidden', '');
+      document.getElementById('bs-operator-sidebar')?.removeAttribute('hidden');
+      document.getElementById('bs-obs-extra')?.removeAttribute('hidden');
+      document.getElementById('bs-settings-link')?.removeAttribute('hidden');
+      const back = document.getElementById('bs-back-link');
+      if (back) {
+        back.href = 'score-match.html?tab=hotkeys';
+        back.textContent = '← Hotkeys';
+      }
       ensureDesktopCloudSync();
-      const warn = document.getElementById('bs-sync-warn');
-      if (warn && global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled()) warn.style.display = 'block';
+      setupPublishToggle();
+    } else {
+      document.getElementById('bs-publish-panel')?.setAttribute('hidden', '');
     }
 
-    if (global.SLCRICK_LIVE?.install) global.SLCRICK_LIVE.install({ force: true });
-    await pullLatest();
+    if (global.SLCRICK_LIVE?.install) {
+      global.SLCRICK_LIVE.install({ force: !global.SLCRICK_SYNC || global.SLCRICK_SYNC.isEnabled() });
+    }
 
     global.addEventListener('slcrick-live-update', refresh);
+    global.addEventListener('slcrick-broadcast-status', refresh);
 
-    if (operatorMode) {
-      renderTournamentList();
-      const tid = params.get('tournament') || params.get('tournamentId');
-      if (tid) selectTournament(tid);
-      return;
+    await pullLatest();
+    if (operatorMode) renderTournamentList();
+
+    const tid = params.get('tournament') || params.get('tournamentId');
+    if (operatorMode && tid) selectTournament(tid);
+
+    refresh();
+
+    if (!operatorMode) {
+      setInterval(refresh, 6000);
     }
-
-    refreshPublic();
-    setInterval(() => {
-      if (!operatorMode) refreshPublic();
-    }, 8000);
   }
 
   global.SLCRICK_BROADCAST_STATION = {
@@ -486,7 +516,6 @@
     refresh,
     syncNow,
     selectTournament,
-    selectMatch,
     copyUrl,
     submitUnlock,
     lockStudio,
