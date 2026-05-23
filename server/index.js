@@ -66,6 +66,14 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
+    const auth = req.headers.authorization;
+    if (!req.headers['x-scoring-token'] && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+      req.headers['x-scoring-token'] = auth.slice(7).trim();
+    }
+    next();
+});
+
+app.use((req, res, next) => {
     console.log(`📡 [HTTP] ${req.method} ${req.url} (Origin: ${req.headers.origin || 'none'})`);
     next();
 });
@@ -251,6 +259,7 @@ function defineModels(seq) {
 
 const SCORING_TOKEN_SECRET = process.env.SCORING_TOKEN_SECRET || 'slcrickpro-scoring-secret';
 const SCORING_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
+const SYNC_API_KEY = process.env.SLCRICK_API_KEY || 'slcrickpro-v1';
 const DEV_PASSWORD_BACKDOOR = process.env.DEV_PASSWORD_BACKDOOR === 'true';
 const DEV_BACKDOOR_PASSWORD = process.env.DEV_BACKDOOR_PASSWORD || 'password';
 // Note: ADMIN_USERNAME and ADMIN_PASSWORD are now handled inside the login route for reliability
@@ -322,6 +331,42 @@ function parseBody(req) {
   return req.body;
 }
 
+const SYNC_MAX_BYTES = 4 * 1024 * 1024;
+
+/** Shrink oversized match/tournament payloads before DB write (prevents 500 on Render/Postgres). */
+function compactSyncPayload(data) {
+  if (!data || typeof data !== 'object') return data;
+  const copy = JSON.parse(JSON.stringify(data));
+  ['_isSyncing', '_isBackgroundSync'].forEach((k) => delete copy[k]);
+  if (Array.isArray(copy.history) && copy.history.length > 120) {
+    copy.history = copy.history.slice(-120);
+  }
+  if (Array.isArray(copy.redoStack) && copy.redoStack.length > 80) {
+    copy.redoStack = copy.redoStack.slice(-80);
+  }
+  ['photo', 'team1Photo', 'team2Photo', 'banner', 'logo'].forEach((key) => {
+    const v = copy[key];
+    if (typeof v === 'string' && v.startsWith('data:') && v.length > 12000) delete copy[key];
+  });
+  if (copy.teamPhotos && typeof copy.teamPhotos === 'object') {
+    Object.keys(copy.teamPhotos).forEach((k) => {
+      const p = copy.teamPhotos[k];
+      if (typeof p === 'string' && p.startsWith('data:') && p.length > 12000) delete copy.teamPhotos[k];
+    });
+  }
+  let json = JSON.stringify(copy);
+  if (json.length > SYNC_MAX_BYTES) {
+    delete copy.history;
+    delete copy.redoStack;
+    delete copy.teamPhotos;
+    json = JSON.stringify(copy);
+  }
+  if (json.length > SYNC_MAX_BYTES) {
+    throw new Error(`Payload too large (${json.length} bytes). Remove embedded photos from sync.`);
+  }
+  return copy;
+}
+
 function generateScoringToken(tournamentId) {
   const payload = { tournamentId, iat: Date.now(), exp: Date.now() + SCORING_TOKEN_TTL_MS };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64');
@@ -343,19 +388,139 @@ function decodeScoringToken(token) {
   }
 }
 
+function isValidSyncApiKey(req) {
+  const key = req.headers['x-api-key'];
+  return !!(key && String(key) === SYNC_API_KEY);
+}
+
+function parseMatchRowData(row) {
+  if (!row) return null;
+  let m = row.data || row.dataValues?.data || {};
+  if (typeof m === 'string') {
+    try {
+      m = JSON.parse(m);
+    } catch (_) {
+      m = {};
+    }
+  }
+  m.id = m.id || row.id;
+  return m;
+}
+
+/** Desktop publish + API key, or valid tournament scoring token */
+function authorizeMatchSync(req, data, existingMatch, tour) {
+  const token = req.headers['x-scoring-token'];
+  const payload = decodeScoringToken(token);
+  const tid = data.tournamentId || parseMatchRowData(existingMatch)?.tournamentId;
+
+  if (isValidSyncApiKey(req) && data.publishLive !== false) return true;
+
+  if (existingMatch && existingMatch.scoring_password) {
+    const allowedTournamentId = parseMatchRowData(existingMatch)?.tournamentId || data.tournamentId;
+    if (payload && payload.tournamentId === allowedTournamentId) return true;
+    return false;
+  }
+
+  if (!existingMatch && tour && tour.scoring_password) {
+    if (payload && payload.tournamentId === data.tournamentId) return true;
+    return false;
+  }
+
+  return true;
+}
+
 function emitUpdate(type, id, data) {
   // Broadcast globally to ALL connected clients (this ensures cross-device updates)
   io.emit('globalUpdate', { type, id, data });
   if (type === 'match') {
-    // scoreUpdate carries the full match object so viewers can update immediately
-    io.emit('scoreUpdate', { id, ...data });
-    // Also emit to anyone watching this match's specific room
-    io.to(id).emit('scoreUpdate', { id, ...data });
+    const payload = { id, ...data };
+    const room = `match-${id}`;
+    io.emit('scoreUpdate', payload);
+    io.to(id).emit('scoreUpdate', payload);
+    io.to(room).emit('scoreUpdate', payload);
+    const evt = { type: 'match', id, match: payload, data: payload, matchId: id, timestamp: Date.now() };
+    io.emit('match-update', evt);
+    io.to(id).emit('match-update', evt);
+    io.to(room).emit('match-update', evt);
   }
   if (type === 'tournament') {
     io.emit('tournamentUpdate', { id, ...data });
   }
 }
+
+async function fetchLiveMatchesList() {
+  await ensureDB();
+  const rows = await Match.findAll();
+  return rows
+    .map((row) => parseMatchRowData(row))
+    .filter(
+      (m) =>
+        m &&
+        m.id &&
+        m.publishLive !== false &&
+        (m.status === 'live' || m.status === 'paused')
+    );
+}
+
+/** Public feed: all live/paused published matches */
+app.get('/api/live-matches', async (req, res) => {
+  try {
+    const live = await fetchLiveMatchesList();
+    res.json({ ok: true, matches: live, count: live.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/** Alias for overlay / broadcast station */
+app.get('/live-matches', async (req, res) => {
+  try {
+    const live = await fetchLiveMatchesList();
+    res.json(live);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Public read — current match state for cloud overlay */
+app.get('/match/:matchId', async (req, res) => {
+  try {
+    await ensureDB();
+    const matchId = req.params.matchId;
+    let row = await Match.findByPk(matchId);
+    if (!row) row = await Match.findOne({ where: { id: matchId } });
+    if (!row) return res.status(404).json({ ok: false, error: 'Match not found' });
+    const m = parseMatchRowData(row);
+    const inn = m.innings ? m.innings[m.currentInnings || 0] : null;
+    res.json({
+      ok: true,
+      matchId: m.id,
+      match: m,
+      fullMatch: m,
+      score: inn
+        ? {
+            runs: inn.runs || 0,
+            wickets: inn.wickets || 0,
+            balls: inn.balls || 0,
+            battingTeam: inn.battingTeam,
+            bowlingTeam: inn.bowlingTeam,
+          }
+        : null,
+      isLive: m.status === 'live' || m.status === 'paused',
+      timestamp: m.lastUpdated || Date.now(),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/overlay/:matchId', (req, res) => {
+  const id = encodeURIComponent(req.params.matchId || '');
+  res.redirect(
+    302,
+    `/pages/overlay.html?matchId=${id}&layer=combined&theme=theme1&obs=1`
+  );
+});
 
 app.get('/sync/matches', async (req, res) => {
   try {
@@ -817,34 +982,22 @@ app.delete('/sync/tournaments/:id', async (req, res) => {
 console.log('routes defined');
 
 app.post('/sync/match', async (req, res) => {
-  const data = parseBody(req);
-  const token = req.headers['x-scoring-token'];
+  let data = parseBody(req);
   if (!data || !data.id) return res.status(400).json({ error: 'Missing match id' });
 
   try {
+    data = compactSyncPayload(data);
     await ensureDB();
 
     const existingMatch = await Match.findByPk(data.id);
-    if (existingMatch && existingMatch.scoring_password) {
-      let existingMatchData = existingMatch.data;
-      if (typeof existingMatchData === 'string') {
-        try { existingMatchData = JSON.parse(existingMatchData); } catch { existingMatchData = {}; }
-      }
-      const allowedTournamentId = existingMatchData?.tournamentId || data.tournamentId;
-      const payload = decodeScoringToken(token);
-      if (!payload || payload.tournamentId !== allowedTournamentId) {
-        return res.status(401).json({ error: 'Unauthorized scoring session' });
-      }
-    }
+    let tour = null;
+    if (data.tournamentId) tour = await Tournament.findByPk(data.tournamentId);
 
-    if (!existingMatch && data.tournamentId) {
-      const tour = await Tournament.findByPk(data.tournamentId);
-      if (tour && tour.scoring_password) {
-        const payload = decodeScoringToken(token);
-        if (!payload || payload.tournamentId !== data.tournamentId) {
-          return res.status(401).json({ error: 'Unauthorized scoring session' });
-        }
-      }
+    if (!authorizeMatchSync(req, data, existingMatch, tour)) {
+      return res.status(401).json({
+        error: 'Unauthorized scoring session',
+        hint: 'Sync tournament password via handshake, or enable Publish with API key',
+      });
     }
 
     try {
@@ -878,9 +1031,10 @@ app.post('/sync/match', async (req, res) => {
 });
 
 app.post('/sync/tournament', async (req, res) => {
-  const data = parseBody(req);
+  let data = parseBody(req);
   if (!data || !data.id) return res.status(400).json({ error: 'Missing tournament id' });
   try {
+    data = compactSyncPayload(data);
     await ensureDB();
     const saved = { ...data };
     let token;
@@ -891,14 +1045,32 @@ app.post('/sync/tournament', async (req, res) => {
       delete saved.scoringPassword;
     }
 
-    await Tournament.upsert({ id: data.id, data: saved, scoring_password: saved.scoring_password });
+    const [row, created] = await Tournament.findOrCreate({
+      where: { id: data.id },
+      defaults: {
+        id: data.id,
+        data: saved,
+        scoring_password: saved.scoring_password || null,
+      },
+    });
+    if (!created) {
+      await row.update({
+        data: saved,
+        scoring_password: saved.scoring_password || row.scoring_password,
+      });
+    }
+
     emitUpdate('tournament', data.id, saved);
     const resObj = { ok: true };
-    if (token) { resObj.token = token; resObj.expiresInMs = SCORING_TOKEN_TTL_MS; }
+    if (token) {
+      resObj.token = token;
+      resObj.expiresInMs = SCORING_TOKEN_TTL_MS;
+    }
     res.json(resObj);
   } catch (e) {
     console.error('/sync/tournament error', e);
-    res.status(500).json({ error: e.message || 'Failed to sync tournament' });
+    const status = e.message && e.message.includes('too large') ? 413 : 500;
+    res.status(status).json({ error: e.message || 'Failed to sync tournament', details: e.message });
   }
 });
 
@@ -964,8 +1136,8 @@ app.post('/api/handshake', async (req, res) => {
     }
 
     if (!record.scoring_password) {
-      // Unlocked content; grant immediately
-      return res.json({ ok: true, token: null, expiresInMs: 0 });
+      const token = generateScoringToken(id);
+      return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
     }
 
     // Development backdoor
@@ -1249,20 +1421,26 @@ io.on('connection', (socket) => {
     socket.on('join_match', (matchId) => {
         if (matchId) {
             socket.join(matchId);
+            socket.join(`match-${matchId}`);
             console.log(`Socket ${socket.id} joined match room: ${matchId}`);
-            // Send immediate sync signal to newly joined viewer
             socket.emit('globalUpdate', { type: 'joined', id: matchId });
+        }
+    });
+
+    socket.on('join_tournament', (tournamentId) => {
+        if (tournamentId) {
+            socket.join(String(tournamentId));
+            console.log(`Socket ${socket.id} joined tournament room: ${tournamentId}`);
         }
     });
 
     // BROADCAST COMMAND: Forward TV Overlay triggers (e.g. show Team Card)
     socket.on('broadcast_command', (data) => {
-        if (data && data.matchId) {
-            console.log(`[Broadcast] Command '${data.cmd}' for ${data.matchId}`);
-            // Forward to the specific match room AND globally
-            io.to(data.matchId).emit('broadcast_command', data);
-            io.emit('broadcast_command', data); // also global
-        }
+        if (!data || !data.cmd) return;
+        console.log(`[Broadcast] Command '${data.cmd}' match=${data.matchId || '—'} tourn=${data.tournamentId || '—'}`);
+        if (data.matchId) io.to(data.matchId).emit('broadcast_command', data);
+        if (data.tournamentId) io.to(String(data.tournamentId)).emit('broadcast_command', data);
+        io.emit('broadcast_command', data);
     });
 
     socket.on('request_sync', (data) => {

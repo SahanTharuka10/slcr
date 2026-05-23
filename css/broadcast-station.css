@@ -577,6 +577,40 @@
     font-weight: 800;
 }
 
+.bs-preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.bs-obs-quick-url {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(124, 77, 255, 0.12);
+    border-top: 1px solid var(--bs-border);
+    font-size: 11px;
+}
+
+.bs-obs-quick-label {
+    font-weight: 800;
+    color: var(--bs-accent2);
+    white-space: nowrap;
+}
+
+.bs-obs-quick-code {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--bs-muted);
+}
+
 .bs-ws-badge {
     font-size: 10px;
     font-weight: 900;
@@ -712,4 +746,74 @@ body.light-mode.bs-page {
     --bs-muted: #5c6478;
     --bs-surface: rgba(255, 255, 255, 0.85);
     --bs-border: rgba(0, 0, 0, 0.08);
+}
+
+.bs-share-board {
+    margin-bottom: 20px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border: 1px solid rgba(124, 77, 255, 0.35);
+    background: linear-gradient(135deg, rgba(124, 77, 255, 0.12), rgba(0, 0, 0, 0.2));
+}
+
+.bs-share-board-head h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+}
+
+.bs-share-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.bs-share-card {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--bs-border);
+}
+
+.bs-share-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.bs-share-live {
+    font-size: 10px;
+    font-weight: 900;
+    color: var(--bs-live);
+    letter-spacing: 0.08em;
+}
+
+.bs-share-score {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--bs-muted);
+}
+
+.bs-share-url {
+    display: block;
+    font-size: 10px;
+    word-break: break-all;
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.35);
+    margin-bottom: 8px;
+}
+
+.bs-share-hint {
+    margin: 0 0 10px;
+    font-size: 10px;
+    color: var(--bs-muted);
+}
+
+.bs-share-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }

@@ -2,17 +2,31 @@
 
 async function onResumeOrStart(matchId, tournamentId, isStart) {
     try {
-        const baseUrl = window.BACKEND_BASE_URL || "";
-        const userId = window.CURRENT_USER || 'unknown';
-        
         showToast('🔄 Initializing session...', 'default');
-        
-        const match = DB.getMatch(matchId);
-        if (!match && !isStart) {
+
+        let match = DB.getMatch(matchId);
+        if (!match) {
             showToast('Match data missing locally. Fetching...', 'default');
-            await window.pullGlobalData();
+            if (typeof window.pullGlobalData === 'function') await window.pullGlobalData();
+            match = DB.getMatch(matchId);
         }
-        
+
+        const tid = tournamentId || match?.tournamentId || '';
+        if (tid && typeof window.ensureTournamentAccess === 'function') {
+            const allowed = await window.ensureTournamentAccess(tid, {
+                type: 'match',
+                matchId,
+                tournamentId: tid,
+                isStart: !!isStart
+            });
+            if (!allowed) return;
+        } else if (match && (match.scoringPassword || match.password || match.isLocked)) {
+            if (typeof window.showMatchLoginScreen === 'function') {
+                window.showMatchLoginScreen(match, { type: 'match', matchId, isStart: !!isStart });
+            }
+            return;
+        }
+
         closeModal('modal-tournament-matches');
         showModeSelectionModal(match || { id: matchId, team1: 'TBD', team2: 'TBD' });
     } catch (err) {
@@ -74,8 +88,7 @@ function showModeSelectionModal(match) {
 
         document.getElementById('dyn-btn-cancel').onclick = () => overlay.remove();
 
-        document.getElementById('dyn-btn-scorer').onclick = async () => {
-            if (!(await ensureMatchScoringAuth(match))) return;
+        document.getElementById('dyn-btn-scorer').onclick = () => {
             const isNewMatch = !match.status || match.status === 'setup' || match.status === 'scheduled';
             if (isNewMatch) {
                 renderTossSelection();
@@ -85,8 +98,7 @@ function showModeSelectionModal(match) {
             }
         };
 
-        document.getElementById('dyn-btn-hotkey').onclick = async () => {
-            if (!(await ensureMatchScoringAuth(match))) return;
+        document.getElementById('dyn-btn-hotkey').onclick = () => {
             overlay.remove();
             openHotkeyPanel(match.id);
         };
@@ -129,8 +141,7 @@ function showModeSelectionModal(match) {
             </div>
         `;
 
-        document.getElementById('dyn-btn-start-scoring').onclick = async () => {
-            if (!(await ensureMatchScoringAuth(match))) return;
+        document.getElementById('dyn-btn-start-scoring').onclick = () => {
             const tWinner = document.getElementById('dyn-toss-winner').value;
             const tDec = document.getElementById('dyn-toss-decision').value;
             const ov = parseInt(document.getElementById('dyn-overs').value) || match.overs;
@@ -165,41 +176,7 @@ function showModeSelectionModal(match) {
     renderModeSelection();
 }
 
-async function ensureMatchScoringAuth(match) {
-    if (!match || !match.tournamentId) return true;
-
-    const tournament = DB.getTournament(match.tournamentId);
-    const locked = tournament && (tournament.scoringPassword || tournament.password || tournament.isLocked);
-    if (!locked) return true;
-
-    const tokenExpiry = parseInt(localStorage.getItem('cricpro_token_expiry') || '0');
-    if (localStorage.getItem('cricpro_token') && (!tokenExpiry || tokenExpiry > Date.now())) return true;
-
-    const storedPassword = localStorage.getItem(`tourn_pw_${match.tournamentId}`);
-    if (storedPassword) {
-        const res = await DB.handshake(match.tournamentId, storedPassword);
-        if (res && res.ok) return true;
-        localStorage.removeItem(`tourn_pw_${match.tournamentId}`);
-    }
-
-    const password = await showInputModal('🔐 Enter tournament scoring password:', '');
-    if (password === null) return false;
-
-    const res = await DB.handshake(match.tournamentId, password.trim());
-    if (res && res.ok) {
-        localStorage.setItem(`tourn_pw_${match.tournamentId}`, password.trim());
-        const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
-        grants[match.tournamentId] = true;
-        grants[match.id] = true;
-        localStorage.setItem('cricpro_grants', JSON.stringify(grants));
-        return true;
-    }
-
-    showToast('❌ Incorrect scoring password', 'error');
-    return false;
-}
-
-async function openScorerDashboard(matchId) {
+function openScorerDashboard(matchId) {
     // Back to CLASSIC INLINE FLOW - Load match in current tab
     const m = DB.getMatch(matchId);
     if (!m) {
@@ -211,18 +188,16 @@ async function openScorerDashboard(matchId) {
         });
         return;
     }
-    if (!(await ensureMatchScoringAuth(m))) return;
     loadMatch(m);
 }
 
-async function openHotkeyPanel(matchId) {
+function openHotkeyPanel(matchId) {
     // Load the match inline and switch to the Broadcast Master tab
     const m = DB.getMatch(matchId);
     if (!m) {
         showToast('Match data not found', 'error');
         return;
     }
-    if (!(await ensureMatchScoringAuth(m))) return;
     // Load match data into current session
     loadMatch(m);
     // After a short delay (for the scoring screen to render), switch to broadcast tab

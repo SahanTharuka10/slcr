@@ -1,0 +1,1530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Match Draw — SLCRICKPRO</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap" rel="stylesheet" />
+    <style>
+        :root {
+            --bg: #f4f6f9;
+            --surface: #fff;
+            --border: #d8dee6;
+            --text: #1a1d26;
+            --muted: #6b7280;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #16a34a;
+            --success-bg: #dcfce7;
+            --danger: #dc2626;
+            --sidebar-w: 200px;
+            --slot-h: 36px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f1419;
+                --surface: #1a2332;
+                --border: #2d3a4d;
+                --text: #e8edf4;
+                --muted: #94a3b8;
+                --primary: #3b82f6;
+                --primary-hover: #60a5fa;
+                --success-bg: rgba(22, 163, 74, 0.25);
+            }
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        .toolbar h1 { font-size: 16px; font-weight: 900; margin-right: 8px; letter-spacing: 0.5px; }
+        .toolbar .sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+        .toolbar .hint { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 600; }
+        .btn {
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .btn-primary:hover:not(:disabled) { background: var(--primary-hover); color: #fff; }
+        .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+        .layout { display: flex; flex: 1; min-height: 0; }
+        .sidebar {
+            width: var(--sidebar-w);
+            flex-shrink: 0;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+        }
+        .sidebar h2 { font-size: 10px; font-weight: 900; letter-spacing: 2px; color: var(--muted); }
+        .format-btns { display: flex; flex-direction: column; gap: 6px; }
+        .format-btns .btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .custom-panel {
+            display: none;
+            padding: 10px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 11px;
+        }
+        .custom-panel.open { display: block; }
+        .custom-panel input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            margin: 6px 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface);
+            color: var(--text);
+            font-family: inherit;
+            font-weight: 700;
+        }
+        .custom-info { color: var(--muted); line-height: 1.45; margin-top: 6px; }
+        .custom-info strong { color: var(--primary); }
+        .slot.bye-slot { border-left: 3px solid #f59e0b; }
+        .slot.bye-slot.empty::after {
+            content: ' (bye)';
+            font-size: 10px;
+            font-style: normal;
+            opacity: 0.7;
+        }
+        .team-input-row { display: flex; gap: 6px; }
+        .team-input-row input {
+            flex: 1;
+            min-width: 0;
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 12px;
+        }
+        .team-chips { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+        .chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: grab;
+        }
+        .chip:active { cursor: grabbing; }
+        .chip .x {
+            margin-left: auto;
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0 2px;
+        }
+        .chip .x:hover { color: var(--danger); }
+        .fill-btns { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
+        .canvas-wrap {
+            flex: 1;
+            overflow: auto;
+            padding: 24px;
+            background: var(--bg);
+        }
+        .bracket-stage {
+            position: relative;
+            min-width: min-content;
+            margin: 0 auto;
+        }
+        .bracket-lines {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            overflow: visible;
+        }
+        .bracket-lines path {
+            fill: none;
+            stroke: rgba(148, 163, 184, 0.45);
+            stroke-width: 2;
+            transition: stroke 0.25s, stroke-width 0.25s;
+        }
+        .bracket-lines path.active {
+            stroke: #22c55e;
+            stroke-width: 2.5;
+            filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.5));
+        }
+        .bracket {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: stretch;
+            gap: 0;
+            min-width: min-content;
+            margin: 0 auto;
+        }
+        .bracket.dual { justify-content: center; gap: 28px; }
+        .bracket.dual.size-16 { gap: 24px; }
+        .bracket.dual.size-32 { gap: 10px; }
+        .bracket.dual.size-32 .round-col {
+            min-width: 82px;
+            max-width: 96px;
+            padding: 0 4px;
+        }
+        .bracket.dual.size-32 .round-label {
+            font-size: 7px;
+            letter-spacing: 0.8px;
+            margin-bottom: 6px;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .bracket.dual.size-32 .match-card {
+            border-radius: 6px;
+            font-size: 10px;
+        }
+        .bracket.dual.size-32 .slot {
+            min-height: 22px;
+            padding: 2px 6px;
+            font-size: 10px;
+            gap: 4px;
+        }
+        .bracket.dual.size-32 .slot .win-badge {
+            font-size: 7px;
+            padding: 1px 3px;
+        }
+        .bracket.dual.size-32 .center-finals {
+            min-width: 88px;
+            padding: 0 6px;
+        }
+        .bracket-stage.size-32-viewport {
+            transform: scale(0.88);
+            transform-origin: top center;
+        }
+        .canvas-wrap.compact-32 {
+            padding: 8px 12px;
+        }
+        .bracket-lines.size-32-lines path {
+            stroke-width: 1.5;
+        }
+        .bracket-lines.size-32-lines path.active {
+            stroke-width: 2;
+        }
+        .bracket-half { display: flex; gap: 0; }
+        .bracket-half.right { flex-direction: row-reverse; }
+        .round-col {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            padding: 0 12px;
+            min-width: 140px;
+        }
+        .round-label {
+            text-align: center;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 1.5px;
+            color: var(--muted);
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+        .round-matches {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            flex: 1;
+            gap: 8px;
+        }
+        .match-card {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+            overflow: hidden;
+            transition: box-shadow 0.3s;
+        }
+        .match-card.glow {
+            animation: matchGlow 0.6s ease;
+        }
+        @keyframes matchGlow {
+            0%, 100% { box-shadow: none; }
+            50% { box-shadow: 0 0 16px rgba(22, 163, 74, 0.6); }
+        }
+        .slot {
+            min-height: var(--slot-h);
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+        .slot:last-child { border-bottom: none; }
+        .slot.empty { color: var(--muted); font-style: italic; font-weight: 500; }
+        .slot.winner { background: var(--success-bg); color: var(--success); }
+        .slot .win-badge {
+            font-size: 9px;
+            font-weight: 900;
+            background: var(--success);
+            color: #fff;
+            padding: 2px 5px;
+            border-radius: 4px;
+            margin-left: auto;
+        }
+        .slot.drag-over { outline: 2px dashed var(--primary); outline-offset: -2px; }
+        .center-finals {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 0 16px;
+            min-width: 160px;
+        }
+        .trophy { font-size: 48px; margin-bottom: 4px; }
+        .winner-title { font-size: 11px; font-weight: 900; letter-spacing: 3px; color: #f59e0b; }
+        /* Preview modal — broadcast theme */
+        .preview-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(0, 8, 20, 0.92);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .preview-overlay.open { display: flex; }
+        .preview-box {
+            max-width: 96vw;
+            max-height: 96vh;
+            overflow: auto;
+            position: relative;
+        }
+        .preview-close {
+            position: fixed;
+            top: 16px;
+            right: 20px;
+            z-index: 10001;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 800;
+            font-family: inherit;
+        }
+        #export-canvas {
+            background: linear-gradient(160deg, #0a1628 0%, #0d2137 50%, #061018 100%);
+            padding: 32px 40px 48px;
+            border-radius: 12px;
+            position: relative;
+            min-width: 800px;
+        }
+        #export-canvas .cup-banner {
+            text-align: center;
+            font-size: 28px;
+            font-weight: 900;
+            font-style: italic;
+            letter-spacing: 4px;
+            color: #7dd3fc;
+            margin-bottom: 24px;
+            text-shadow: 0 0 20px rgba(125, 211, 252, 0.4);
+        }
+        #export-canvas .bracket { gap: 8px; }
+        #export-canvas .round-label { color: #94a3b8; }
+        #export-canvas .match-card {
+            background: rgba(15, 40, 70, 0.6);
+            border-color: rgba(0, 212, 255, 0.25);
+        }
+        #export-canvas .slot {
+            background: linear-gradient(135deg, #0891b2 0%, #1e40af 100%);
+            color: #fff;
+            border: none;
+            transform: skewX(-6deg);
+            margin: 2px 4px;
+            border-radius: 4px;
+            min-height: 32px;
+        }
+        #export-canvas .slot > span { transform: skewX(6deg); display: block; width: 100%; }
+        #export-canvas .slot.empty {
+            background: rgba(30, 58, 95, 0.5);
+            color: rgba(255,255,255,0.35);
+        }
+        #export-canvas .slot.winner {
+            background: linear-gradient(135deg, #15803d 0%, #22c55e 100%);
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.5);
+        }
+        #export-canvas .connectors {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+        }
+        #export-canvas .bracket-wrap { position: relative; z-index: 1; }
+        .champion-line {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 22px;
+            font-weight: 900;
+            color: #fbbf24;
+        }
+        body.preview-only .toolbar .edit-only,
+        body.preview-only .sidebar { display: none !important; }
+        body.preview-only .layout { }
+        body.preview-only .canvas-wrap { display: none; }
+        body.preview-only .preview-overlay { display: flex !important; }
+        body.overlay-embed {
+            background: #0a1628;
+            overflow: hidden;
+        }
+        body.overlay-embed .toolbar,
+        body.overlay-embed .sidebar,
+        body.overlay-embed .layout,
+        body.overlay-embed .canvas-wrap,
+        body.overlay-embed .preview-close { display: none !important; }
+        body.overlay-embed .preview-overlay {
+            display: flex !important;
+            position: fixed;
+            inset: 0;
+            padding: 0;
+            background: #0a1628;
+        }
+        body.overlay-embed .preview-box {
+            max-width: 100vw;
+            max-height: 100vh;
+            width: 100%;
+            height: 100%;
+        }
+        body.overlay-embed #export-canvas {
+            min-width: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 24px;
+        }
+        .save-toast {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            background: #16a34a;
+            color: #fff;
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-weight: 800;
+            font-size: 13px;
+            z-index: 99999;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .save-toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <header class="toolbar">
+        <h1>🎯 Match Draw</h1>
+        <button type="button" class="btn edit-only" id="btn-undo" disabled>↶ Undo</button>
+        <button type="button" class="btn edit-only" id="btn-redo" disabled>↷ Redo</button>
+        <span class="sep edit-only"></span>
+        <button type="button" class="btn edit-only" id="btn-clear">Clear</button>
+        <button type="button" class="btn btn-primary edit-only" id="btn-show">Show Draw</button>
+        <button type="button" class="btn btn-success edit-only" id="btn-download">Download</button>
+        <button type="button" class="btn edit-only" id="btn-save">💾 Save</button>
+        <a href="score-match.html" class="btn edit-only" id="btn-back">← Back</a>
+        <span class="hint edit-only">Ctrl+Z/Y · Ctrl+P preview · Esc close</span>
+    </header>
+    <div class="layout">
+        <aside class="sidebar edit-only">
+            <h2>FORMAT</h2>
+            <div class="format-btns">
+                <button type="button" class="btn format-btn" data-format="4">4 Teams</button>
+                <button type="button" class="btn format-btn active" data-format="8">8 Teams</button>
+                <button type="button" class="btn format-btn" data-format="16">16 Teams</button>
+                <button type="button" class="btn format-btn" data-format="32">32 Teams</button>
+                <button type="button" class="btn format-btn" data-format="custom">Custom…</button>
+            </div>
+            <div class="custom-panel" id="custom-panel">
+                <label class="form-label" style="font-size:10px;font-weight:900;letter-spacing:1px;color:var(--muted)">TEAM COUNT</label>
+                <input type="number" id="custom-count" min="3" max="64" value="24" />
+                <button type="button" class="btn btn-primary btn-full" id="btn-apply-custom" style="margin-top:4px">Apply bracket</button>
+                <div class="custom-info" id="custom-info"></div>
+            </div>
+            <h2>TEAMS</h2>
+            <div class="team-input-row">
+                <input type="text" id="team-input" placeholder="Team name..." maxlength="48" />
+                <button type="button" class="btn btn-primary" id="btn-add-team">+</button>
+            </div>
+            <button type="button" class="btn" id="btn-import" style="font-size:11px">↓ Import from roster</button>
+            <div class="team-chips" id="team-chips"></div>
+            <div class="fill-btns">
+                <button type="button" class="btn" id="btn-autofill">Auto-fill</button>
+                <button type="button" class="btn" id="btn-shuffle">Shuffle & Fill</button>
+            </div>
+        </aside>
+        <main class="canvas-wrap">
+            <div id="bracket-root" class="bracket-stage"></div>
+        </main>
+    </div>
+
+    <div id="save-toast" class="save-toast">Draw saved</div>
+
+    <div class="preview-overlay" id="preview-overlay">
+        <button type="button" class="preview-close" id="preview-close">✕ Close (Esc)</button>
+        <div class="preview-box">
+            <div id="export-canvas">
+                <div class="cup-banner">TOURNAMENT CUP</div>
+                <div class="bracket-wrap">
+                    <div id="preview-bracket" class="bracket-stage"></div>
+                </div>
+                <div class="champion-line" id="champion-line" style="display:none"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/cloud-config.js"></script>
+    <script src="../js/db.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+(function () {
+    'use strict';
+
+    const STORAGE_PREFIX = 'cricpro_match_draw_';
+    const IMPORT_PREFIX = 'cricpro_match_draw_import_';
+
+    const params = new URLSearchParams(location.search);
+    const tournamentId = params.get('tournament') || params.get('tournamentId') || 'default';
+    const matchIdParam = params.get('matchId') || '';
+    const isPreviewOnly = params.get('preview') === '1';
+    const isOverlayEmbed = params.get('overlay') === '1';
+
+    function storageKeys() {
+        const keys = new Set([STORAGE_PREFIX + tournamentId]);
+        if (matchIdParam) keys.add(STORAGE_PREFIX + 'match-' + matchIdParam);
+        return [...keys];
+    }
+
+    function storageKey() { return STORAGE_PREFIX + tournamentId; }
+
+    /** @type {{ teams: string[], format: number|string, customCount: number, slots: Record<string, string>, winners: Record<string, number> }} */
+    let state = { teams: [], format: 8, customCount: 24, slots: {}, winners: {} };
+    let history = [];
+    let historyIndex = -1;
+    let dragTeam = null;
+    let dragFromSlot = null;
+
+    function showSaveToast(msg) {
+        const el = document.getElementById('save-toast');
+        if (!el) return;
+        el.textContent = msg || 'Draw saved';
+        el.classList.add('show');
+        setTimeout(() => el.classList.remove('show'), 2200);
+    }
+
+    function cloneState() {
+        return JSON.parse(JSON.stringify(state));
+    }
+
+    function pushHistory() {
+        history = history.slice(0, historyIndex + 1);
+        history.push(cloneState());
+        if (history.length > 80) history.shift();
+        historyIndex = history.length - 1;
+        updateUndoRedo();
+    }
+
+    function applyState(s) {
+        state = JSON.parse(JSON.stringify(s));
+        render();
+        updateUndoRedo();
+    }
+
+    function updateUndoRedo() {
+        document.getElementById('btn-undo').disabled = historyIndex <= 0;
+        document.getElementById('btn-redo').disabled = historyIndex >= history.length - 1;
+    }
+
+    function undo() {
+        if (historyIndex <= 0) return;
+        historyIndex--;
+        applyState(history[historyIndex]);
+    }
+
+    function redo() {
+        if (historyIndex >= history.length - 1) return;
+        historyIndex++;
+        applyState(history[historyIndex]);
+    }
+
+    function saveDraw(silent) {
+        const payload = Object.assign(cloneState(), {
+            savedAt: Date.now(),
+            tournamentId: tournamentId,
+        });
+        try {
+            storageKeys().forEach((k) => localStorage.setItem(k, JSON.stringify(payload)));
+        } catch (e) { console.warn('[MatchDraw] save failed', e); }
+        if (typeof DB !== 'undefined') {
+            try {
+                if (tournamentId && tournamentId !== 'default') {
+                    const t = DB.getTournament(tournamentId);
+                    if (t) {
+                        t.matchDraw = payload;
+                        DB.saveTournament(t, true, { skipPublish: false });
+                    }
+                }
+                if (matchIdParam) {
+                    const m = DB.getMatch(matchIdParam);
+                    if (m) {
+                        m.matchDraw = payload;
+                        DB.saveMatch(m, true, { skipPublish: false });
+                    }
+                }
+            } catch (e) { console.warn('[MatchDraw] DB save failed', e); }
+        }
+        if (!silent) showSaveToast('Draw saved');
+        return payload;
+    }
+
+    function loadDraw() {
+        let parsed = null;
+        const keys = storageKeys();
+        for (let i = 0; i < keys.length; i++) {
+            try {
+                const raw = localStorage.getItem(keys[i]);
+                if (raw) { parsed = JSON.parse(raw); break; }
+            } catch (_) { /* ignore */ }
+        }
+        if (!parsed && typeof DB !== 'undefined') {
+            try {
+                if (tournamentId !== 'default') {
+                    const t = DB.getTournament(tournamentId);
+                    if (t?.matchDraw) parsed = t.matchDraw;
+                }
+                if (!parsed && matchIdParam) {
+                    const m = DB.getMatch(matchIdParam);
+                    if (m?.matchDraw) parsed = m.matchDraw;
+                }
+            } catch (_) { /* ignore */ }
+        }
+        if (parsed && typeof parsed === 'object') {
+            state.teams = parsed.teams || [];
+            state.format = parsed.format === 'custom' ? 'custom' : (Number(parsed.format) || 8);
+            state.customCount = parsed.customCount || 24;
+            state.slots = parsed.slots || {};
+            state.winners = parsed.winners || {};
+        }
+        tryImportTeams();
+    }
+
+    function applyExternalState(s) {
+        if (!s || typeof s !== 'object') return;
+        state.teams = s.teams || [];
+        state.format = s.format === 'custom' ? 'custom' : (Number(s.format) || 8);
+        state.customCount = s.customCount || 24;
+        state.slots = s.slots || {};
+        state.winners = s.winners || {};
+        history = [cloneState()];
+        historyIndex = 0;
+        syncFormatUI();
+        render();
+        if (isOverlayEmbed || isPreviewOnly) togglePreview(true);
+    }
+
+    function tryImportTeams() {
+        if (state.teams.length) return;
+        try {
+            const raw = sessionStorage.getItem(IMPORT_PREFIX + tournamentId);
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) {
+                    arr.forEach((n) => addTeam(String(n), true));
+                    sessionStorage.removeItem(IMPORT_PREFIX + tournamentId);
+                }
+            }
+        } catch (_) { /* ignore */ }
+    }
+
+    function slotKey(matchId, idx) { return matchId + ':' + idx; }
+
+    function getSlot(matchId, idx) {
+        return state.slots[slotKey(matchId, idx)] || null;
+    }
+
+    function setSlot(matchId, idx, name, recordHistory) {
+        const k = slotKey(matchId, idx);
+        if (name) state.slots[k] = name;
+        else delete state.slots[k];
+        if (recordHistory !== false) {
+            pushHistory();
+            saveDraw(true);
+        }
+        render();
+    }
+
+    function allMatchIds() {
+        return getBracketDef().flatMap((r) => r.matches.map((m) => m.id));
+    }
+
+    function allRoundsFlat() {
+        const def = getBracketDef();
+        if (def.dual) return [...def.left, ...def.right, def.center];
+        return def;
+    }
+
+    function clearDownstream(fromMatchId) {
+        const rounds = allRoundsFlat();
+        for (const round of rounds) {
+            for (const m of round.matches) {
+                if (!m.feedsFrom) continue;
+                const links = m.feedsFrom.filter((f) => f.matchId === fromMatchId);
+                if (!links.length) continue;
+                links.forEach((f) => setSlot(m.id, f.slot, null, false));
+                delete state.winners[m.id];
+                clearDownstream(m.id);
+            }
+        }
+    }
+
+    function setWinner(matchId, slotIdx, recordHistory) {
+        const cur = state.winners[matchId];
+        if (cur === slotIdx) {
+            delete state.winners[matchId];
+            clearDownstream(matchId);
+            if (recordHistory !== false) { pushHistory(); saveDraw(true); }
+            render();
+            return;
+        }
+        if (cur !== undefined) clearDownstream(matchId);
+        state.winners[matchId] = slotIdx;
+        const name = getSlot(matchId, slotIdx);
+        const rounds = allRoundsFlat();
+        for (const round of rounds) {
+            for (const m of round.matches) {
+                if (!m.feedsFrom) continue;
+                m.feedsFrom.forEach((f) => {
+                    if (f.matchId === matchId) {
+                        setSlot(m.id, f.slot, name, false);
+                    }
+                });
+            }
+        }
+        if (recordHistory !== false) {
+            pushHistory();
+            saveDraw(true);
+            const card = document.querySelector('[data-match-id="' + matchId + '"]');
+            if (card) {
+                card.classList.add('glow');
+                setTimeout(() => card.classList.remove('glow'), 600);
+            }
+        }
+        render();
+    }
+
+    function isCustomFormat() {
+        return state.format === 'custom';
+    }
+
+    function getFormatValue() {
+        if (state.format === 'custom') return 'custom';
+        const n = Number(state.format);
+        return Number.isFinite(n) ? n : 8;
+    }
+
+    function effectiveTeamCount() {
+        if (isCustomFormat()) return Math.max(3, Math.min(64, Number(state.customCount) || 24));
+        return getFormatValue();
+    }
+
+    /**
+     * Knockout plan: play-in round only where needed; byes land in next round.
+     * e.g. 24 teams → 8 byes, 8 play-in matches (16 play), then 8 → 4 → 2 → 1
+     */
+    function computeBracketPlan(n) {
+        n = Math.max(2, Math.min(64, Math.floor(Number(n) || 2)));
+        let size = 2;
+        while (size < n) size <<= 1;
+        const byes = size - n;
+        const playInTeams = n - byes;
+        const playInMatches = playInTeams / 2;
+        const firstMainTeams = byes > 0 ? size / 2 : n / 2;
+        const mainRounds = [];
+        let matches = firstMainTeams / 2;
+        while (matches >= 1) {
+            mainRounds.push(matches);
+            matches >>= 1;
+        }
+        return { n, size, byes, playInMatches, playInTeams, mainRounds };
+    }
+
+    function roundLabelForMatchCount(count) {
+        if (count === 1) return 'FINAL';
+        if (count === 2) return 'SEMI-FINALS';
+        if (count === 4) return 'QUARTER-FINALS';
+        if (count >= 8) return 'ROUND OF ' + (count * 2);
+        return 'ROUND';
+    }
+
+    function buildCustomBracket(teamCount) {
+        const plan = computeBracketPlan(teamCount);
+        const rounds = [];
+
+        if (plan.playInMatches > 0) {
+            const lbl = plan.byes > 0
+                ? 'ROUND 1 · ' + plan.playInMatches + ' matches (' + plan.byes + ' byes)'
+                : 'ROUND 1';
+            rounds.push({
+                label: lbl,
+                matches: Array.from({ length: plan.playInMatches }, (_, i) => ({
+                    id: 'PLAY-' + i,
+                    feedsFrom: null
+                }))
+            });
+        }
+
+        for (let ri = 0; ri < plan.mainRounds.length; ri++) {
+            const count = plan.mainRounds[ri];
+            const roundPrefix = 'M' + ri;
+            const label = roundLabelForMatchCount(count);
+            const matches = [];
+
+            for (let i = 0; i < count; i++) {
+                const id = count === 1 ? 'FINAL-0' : (roundPrefix + '-' + i);
+                const matchDef = { id, feedsFrom: null };
+
+                if (ri === 0 && plan.byes > 0 && plan.playInMatches > 0) {
+                    if (i < plan.playInMatches) {
+                        matchDef.feedsFrom = [{ matchId: 'PLAY-' + i, slot: 1 }];
+                        matchDef.byeSlot = 0;
+                    } else {
+                        matchDef.byeBoth = true;
+                    }
+                } else if (ri === 0 && plan.byes === 0 && plan.playInMatches > 0) {
+                    matchDef.feedsFrom = [
+                        { matchId: 'PLAY-' + (i * 2), slot: 0 },
+                        { matchId: 'PLAY-' + (i * 2 + 1), slot: 1 }
+                    ];
+                } else if (ri > 0) {
+                    const prev = 'M' + (ri - 1);
+                    matchDef.feedsFrom = [
+                        { matchId: prev + '-' + (i * 2), slot: 0 },
+                        { matchId: prev + '-' + (i * 2 + 1), slot: 1 }
+                    ];
+                }
+                matches.push(matchDef);
+            }
+            rounds.push({ label, matches });
+        }
+        return rounds;
+    }
+
+    function getBracketDef() {
+        const f = getFormatValue();
+        if (f === 'custom') {
+            const n = effectiveTeamCount();
+            if (n === 32 && computeBracketPlan(32).byes === 0) return buildDualBracket(8);
+            if (n === 16 && computeBracketPlan(16).byes === 0) return buildDualBracket(4);
+            return buildCustomBracket(n);
+        }
+        if (f === 4) return bracket4();
+        if (f === 32) return buildDualBracket(8);
+        if (f === 16) return buildDualBracket(4);
+        if (f === 8) return bracket8();
+        return bracket8();
+    }
+
+    /** Symmetrical dual-sided knockout: r1MatchCount = 4 → 16 teams, 8 → 32 teams */
+    function buildDualBracket(r1MatchCount) {
+        function buildSide(side) {
+            let matches = Array.from({ length: r1MatchCount }, (_, i) => ({
+                id: 'R1-' + side + '-' + i,
+                feedsFrom: null
+            }));
+            const rounds = [{ label: r1MatchCount === 8 ? 'R1' : 'ROUND 1', matches: matches.slice() }];
+            const labels = r1MatchCount === 8
+                ? ['R16', 'QF', 'SF']
+                : ['QUARTER-FINALS', 'SEMI-FINALS'];
+            const prefixes = r1MatchCount === 8 ? ['R16', 'QF', 'SF'] : ['QF', 'SF'];
+
+            for (let ri = 0; ri < labels.length; ri++) {
+                const count = matches.length / 2;
+                const prefix = prefixes[ri] + '-' + side;
+                const next = [];
+                for (let i = 0; i < count; i++) {
+                    next.push({
+                        id: prefix + '-' + i,
+                        feedsFrom: [
+                            { matchId: matches[i * 2].id, slot: 0 },
+                            { matchId: matches[i * 2 + 1].id, slot: 1 }
+                        ]
+                    });
+                }
+                matches = next;
+                rounds.push({ label: labels[ri], matches: matches.slice() });
+            }
+            return rounds;
+        }
+
+        const left = buildSide('L');
+        const right = buildSide('R');
+        const sfL = left[left.length - 1].matches[0].id;
+        const sfR = right[right.length - 1].matches[0].id;
+        return {
+            dual: true,
+            dualSize: r1MatchCount === 8 ? 32 : 16,
+            left,
+            right,
+            center: {
+                label: 'FINAL',
+                matches: [{
+                    id: 'FINAL-0',
+                    feedsFrom: [
+                        { matchId: sfL, slot: 0 },
+                        { matchId: sfR, slot: 1 }
+                    ]
+                }]
+            }
+        };
+    }
+
+    function bracket4() {
+        return [
+            { label: 'ROUND 1', matches: [
+                { id: 'R1-0', feedsFrom: null },
+                { id: 'R1-1', feedsFrom: null }
+            ]},
+            { label: 'FINAL', matches: [
+                { id: 'FINAL-0', feedsFrom: [
+                    { matchId: 'R1-0', slot: 0 },
+                    { matchId: 'R1-1', slot: 1 }
+                ]}
+            ]}
+        ];
+    }
+
+    function bracket8() {
+        return [
+            { label: 'ROUND 1', matches: [
+                { id: 'R1-0', feedsFrom: null }, { id: 'R1-1', feedsFrom: null },
+                { id: 'R1-2', feedsFrom: null }, { id: 'R1-3', feedsFrom: null }
+            ]},
+            { label: 'SEMI-FINALS', matches: [
+                { id: 'SF-0', feedsFrom: [
+                    { matchId: 'R1-0', slot: 0 },
+                    { matchId: 'R1-1', slot: 1 }
+                ]},
+                { id: 'SF-1', feedsFrom: [
+                    { matchId: 'R1-2', slot: 0 },
+                    { matchId: 'R1-3', slot: 1 }
+                ]}
+            ]},
+            { label: 'FINAL', matches: [
+                { id: 'FINAL-0', feedsFrom: [
+                    { matchId: 'SF-0', slot: 0 },
+                    { matchId: 'SF-1', slot: 1 }
+                ]}
+            ]}
+        ];
+    }
+
+    function firstRoundSlotIds() {
+        if (isCustomFormat()) {
+            return getCustomFillSlots(computeBracketPlan(effectiveTeamCount()));
+        }
+        const def = getBracketDef();
+        const ids = [];
+        if (def.dual) {
+            def.left[0].matches.forEach((m) => { ids.push([m.id, 0], [m.id, 1]); });
+            def.right[0].matches.forEach((m) => { ids.push([m.id, 0], [m.id, 1]); });
+        } else {
+            def[0].matches.forEach((m) => { ids.push([m.id, 0], [m.id, 1]); });
+        }
+        return ids;
+    }
+
+    /** Fill order: play-in pairs first, then bye slots in round of N */
+    function getCustomFillSlots(plan) {
+        const slots = [];
+        for (let i = 0; i < plan.playInMatches; i++) {
+            slots.push(['PLAY-' + i, 0], ['PLAY-' + i, 1]);
+        }
+        if (plan.byes > 0 && plan.mainRounds.length) {
+            const r16 = plan.mainRounds[0];
+            const prefix = 'M0';
+            for (let i = 0; i < r16; i++) {
+                if (i < plan.playInMatches) {
+                    slots.push([prefix + '-' + i, 0]);
+                } else {
+                    slots.push([prefix + '-' + i, 0], [prefix + '-' + i, 1]);
+                }
+            }
+        }
+        return slots;
+    }
+
+    function updateCustomInfo() {
+        const el = document.getElementById('custom-info');
+        if (!el || !isCustomFormat()) return;
+        const plan = computeBracketPlan(effectiveTeamCount());
+        let html;
+        if (plan.byes > 0) {
+            html = '<strong>' + plan.n + ' teams</strong> → bracket ' + plan.size +
+                '<br>' + plan.playInMatches + ' play-in matches (' + plan.playInTeams + ' teams)' +
+                '<br><strong>' + plan.byes + ' bye</strong> teams skip to ' + roundLabelForMatchCount(plan.mainRounds[0]) +
+                '<br>Then normal knockout to Final';
+        } else {
+            html = '<strong>' + plan.n + ' teams</strong> — full ' + plan.playInMatches +
+                ' match Round 1, no byes';
+        }
+        if (state.teams.length && state.teams.length !== plan.n) {
+            html += '<br><span style="color:#f59e0b">⚠ ' + state.teams.length + ' teams in list — add ' +
+                (plan.n - state.teams.length) + ' more or change count</span>';
+        }
+        el.innerHTML = html;
+    }
+
+    function clearBracket() {
+        state.slots = {};
+        state.winners = {};
+        pushHistory();
+        saveDraw(true);
+    }
+
+    function setFormat(n) {
+        state.format = n === 'custom' ? 'custom' : Number(n);
+        if (n === 'custom') {
+            const suggested = state.teams.length >= 3 ? state.teams.length : (state.customCount || 24);
+            state.customCount = Math.max(3, Math.min(64, suggested));
+            const inp = document.getElementById('custom-count');
+            if (inp) inp.value = state.customCount;
+        }
+        state.slots = {};
+        state.winners = {};
+        syncFormatUI();
+        updateCustomInfo();
+        render();
+        pushHistory();
+        saveDraw(true);
+    }
+
+    function applyCustomCount() {
+        const inp = document.getElementById('custom-count');
+        let n = Math.floor(Number(inp?.value) || 24);
+        n = Math.max(3, Math.min(64, n));
+        if (inp) inp.value = n;
+        state.customCount = n;
+        state.format = 'custom';
+        state.slots = {};
+        state.winners = {};
+        syncFormatUI();
+        updateCustomInfo();
+        render();
+        pushHistory();
+        saveDraw(true);
+    }
+
+    function syncFormatUI() {
+        const cur = getFormatValue();
+        document.querySelectorAll('.format-btn').forEach((b) => {
+            const f = b.dataset.format;
+            const active = f === 'custom'
+                ? cur === 'custom'
+                : Number(f) === cur;
+            b.classList.toggle('active', active);
+        });
+        const panel = document.getElementById('custom-panel');
+        if (panel) panel.classList.toggle('open', state.format === 'custom');
+    }
+
+    function addTeam(name, silent) {
+        const n = String(name || '').trim();
+        if (!n) return false;
+        const lower = n.toLowerCase();
+        if (state.teams.some((t) => t.toLowerCase() === lower)) return false;
+        state.teams.push(n);
+        if (!silent) { pushHistory(); saveDraw(true); renderChips(); }
+        else renderChips();
+        return true;
+    }
+
+    function removeTeam(name) {
+        state.teams = state.teams.filter((t) => t !== name);
+        Object.keys(state.slots).forEach((k) => {
+            if (state.slots[k] === name) delete state.slots[k];
+        });
+        pushHistory();
+        saveDraw(true);
+        render();
+    }
+
+    function fillOrdered(shuffle) {
+        let list = [...state.teams];
+        if (shuffle) {
+            for (let i = list.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [list[i], list[j]] = [list[j], list[i]];
+            }
+        }
+        clearBracket();
+        const slots = firstRoundSlotIds();
+        list.forEach((team, i) => {
+            if (i >= slots.length) return;
+            const [mid, idx] = slots[i];
+            setSlot(mid, idx, team, false);
+        });
+        pushHistory();
+        saveDraw(true);
+    }
+
+    function renderMatchCard(match, container) {
+        const card = document.createElement('div');
+        card.className = 'match-card';
+        card.dataset.matchId = match.id;
+        [0, 1].forEach((idx) => {
+            const el = document.createElement('div');
+            el.className = 'slot';
+            if (match.byeSlot === idx) el.classList.add('bye-slot');
+            el.dataset.matchId = match.id;
+            el.dataset.slotIdx = String(idx);
+            const name = getSlot(match.id, idx);
+            const isWin = state.winners[match.id] === idx;
+            if (!name) {
+                el.classList.add('empty');
+                el.textContent = match.byeSlot === idx ? 'Bye team' : 'Drop here';
+            } else {
+                el.innerHTML = '<span>' + escapeHtml(name) + '</span>' +
+                    (isWin ? '<span class="win-badge">✓ WIN</span>' : '');
+                if (isWin) el.classList.add('winner');
+            }
+            setupSlotDnD(el, match.id, idx);
+            el.addEventListener('click', (e) => {
+                if (!name) return;
+                e.stopPropagation();
+                setWinner(match.id, idx);
+            });
+            card.appendChild(el);
+        });
+        container.appendChild(card);
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function setupSlotDnD(el, matchId, slotIdx) {
+        el.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            el.classList.add('drag-over');
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+        el.addEventListener('drop', (e) => {
+            e.preventDefault();
+            el.classList.remove('drag-over');
+            const team = e.dataTransfer.getData('text/team') || dragTeam;
+            if (!team) return;
+            if (dragFromSlot) {
+                const [fm, fi] = dragFromSlot.split(':');
+                if (fm === matchId && Number(fi) === slotIdx) return;
+                setSlot(fm, Number(fi), null, false);
+            }
+            setSlot(matchId, slotIdx, team);
+        });
+        const name = getSlot(matchId, slotIdx);
+        if (name) {
+            el.draggable = true;
+            el.addEventListener('dragstart', (e) => {
+                dragTeam = name;
+                dragFromSlot = matchId + ':' + slotIdx;
+                e.dataTransfer.setData('text/team', name);
+            });
+            el.addEventListener('dragend', () => {
+                dragTeam = null;
+                dragFromSlot = null;
+            });
+        }
+    }
+
+    function buildRoundColumn(round, opts) {
+        opts = opts || {};
+        const col = document.createElement('div');
+        col.className = 'round-col';
+        const lbl = document.createElement('div');
+        lbl.className = 'round-label';
+        lbl.textContent = round.label;
+        col.appendChild(lbl);
+        const matches = document.createElement('div');
+        matches.className = 'round-matches';
+        const count = round.matches.length;
+        const maxR1 = (opts && opts.maxR1) || count;
+        const base = (opts && opts.compact) ? 3 : 6;
+        const gap = Math.max(base, Math.round((maxR1 / Math.max(1, count)) * base));
+        matches.style.gap = gap + 'px';
+        round.matches.forEach((m) => renderMatchCard(m, matches));
+        col.appendChild(matches);
+        return col;
+    }
+
+    function matchBracketSide(matchId) {
+        if (matchId === 'FINAL-0') return 'final';
+        if (matchId.indexOf('-R-') !== -1) return 'right';
+        if (matchId.indexOf('-L-') !== -1) return 'left';
+        return 'left';
+    }
+
+    function collectBracketLinks(def) {
+        const links = [];
+        if (!def.dual) return links;
+        [...def.left, ...def.right, def.center].forEach((round) => {
+            round.matches.forEach((m) => {
+                if (!m.feedsFrom) return;
+                m.feedsFrom.forEach((f) => {
+                    links.push({ from: f.matchId, to: m.id, toSlot: f.slot });
+                });
+            });
+        });
+        return links;
+    }
+
+    function offsetInAncestor(el, ancestor) {
+        let x = 0;
+        let y = 0;
+        let node = el;
+        while (node && node !== ancestor) {
+            x += node.offsetLeft;
+            y += node.offsetTop;
+            node = node.offsetParent;
+        }
+        return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+    }
+
+    function drawBracketConnectors(stage, def) {
+        const svg = stage.querySelector('.bracket-lines');
+        const bracket = stage.querySelector('.bracket');
+        if (!svg || !bracket || !def.dual) return;
+        const w = Math.max(bracket.offsetWidth, stage.offsetWidth);
+        const h = Math.max(bracket.offsetHeight, stage.offsetHeight);
+        svg.setAttribute('width', w);
+        svg.setAttribute('height', h);
+        svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+        svg.innerHTML = '';
+
+        function cardEl(matchId) {
+            return stage.querySelector('.match-card[data-match-id="' + matchId + '"]');
+        }
+
+        function slotCenterY(card, slotIdx) {
+            const slots = card.querySelectorAll('.slot');
+            const slot = slots[slotIdx] || card;
+            const o = offsetInAncestor(slot, bracket);
+            return o.y + o.h / 2;
+        }
+
+        function anchorOut(matchId) {
+            const card = cardEl(matchId);
+            if (!card) return null;
+            const o = offsetInAncestor(card, bracket);
+            const side = matchBracketSide(matchId);
+            const winSlot = state.winners[matchId];
+            const y = winSlot !== undefined ? slotCenterY(card, winSlot) : o.y + o.h / 2;
+            if (side === 'left') return { x: o.x + o.w, y };
+            if (side === 'right') return { x: o.x, y };
+            return null;
+        }
+
+        function anchorIn(matchId, slotIdx) {
+            const card = cardEl(matchId);
+            if (!card) return null;
+            const o = offsetInAncestor(card, bracket);
+            const y = slotCenterY(card, slotIdx);
+            if (matchId === 'FINAL-0') {
+                return { x: slotIdx === 0 ? o.x : o.x + o.w, y };
+            }
+            const side = matchBracketSide(matchId);
+            if (side === 'left') return { x: o.x, y };
+            if (side === 'right') return { x: o.x + o.w, y };
+            return { x: o.x, y };
+        }
+
+        collectBracketLinks(def).forEach((link) => {
+            const from = anchorOut(link.from);
+            const to = anchorIn(link.to, link.toSlot);
+            if (!from || !to) return;
+            const midX = from.x + (to.x - from.x) * 0.5;
+            const d = 'M ' + from.x + ' ' + from.y + ' H ' + midX + ' V ' + to.y + ' H ' + to.x;
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', d);
+            if (state.winners[link.from] !== undefined) path.classList.add('active');
+            path.dataset.from = link.from;
+            path.dataset.to = link.to;
+            svg.appendChild(path);
+        });
+    }
+
+    function renderBracketInto(rootEl, forExport) {
+        rootEl.innerHTML = '';
+        const def = getBracketDef();
+        const stage = rootEl;
+        stage.className = 'bracket-stage';
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'bracket-lines');
+        const bracket = document.createElement('div');
+        bracket.className = 'bracket';
+
+        if (def.dual) {
+            const is32 = def.dualSize === 32;
+            const colOpts = { maxR1: is32 ? 8 : 4, compact: is32 };
+            bracket.classList.add('dual');
+            if (is32) bracket.classList.add('size-32');
+            else bracket.classList.add('size-16');
+            stage.classList.toggle('size-32-viewport', is32 && !forExport);
+            svg.classList.toggle('size-32-lines', is32);
+            const wrap = document.querySelector('.canvas-wrap');
+            if (wrap) wrap.classList.toggle('compact-32', is32 && !forExport);
+            const halfL = document.createElement('div');
+            halfL.className = 'bracket-half';
+            def.left.forEach((r) => halfL.appendChild(buildRoundColumn(r, colOpts)));
+            const center = document.createElement('div');
+            center.className = 'center-finals';
+            if (forExport) {
+                const trophy = document.createElement('div');
+                trophy.className = 'trophy';
+                trophy.textContent = '🏆';
+                center.appendChild(trophy);
+                const wt = document.createElement('div');
+                wt.className = 'winner-title';
+                wt.textContent = 'WINNER';
+                center.appendChild(wt);
+            }
+            const finalLbl = document.createElement('div');
+            finalLbl.className = 'round-label';
+            finalLbl.textContent = def.center.label;
+            finalLbl.style.textAlign = 'center';
+            center.appendChild(finalLbl);
+            def.center.matches.forEach((m) => renderMatchCard(m, center));
+            const halfR = document.createElement('div');
+            halfR.className = 'bracket-half right';
+            def.right.forEach((r) => halfR.appendChild(buildRoundColumn(r, colOpts)));
+            bracket.appendChild(halfL);
+            bracket.appendChild(center);
+            bracket.appendChild(halfR);
+        } else {
+            stage.classList.remove('size-32-viewport');
+            document.querySelector('.canvas-wrap')?.classList.remove('compact-32');
+            const r1 = def[0]?.matches?.length || 4;
+            def.forEach((r) => bracket.appendChild(buildRoundColumn(r, { maxR1: r1, compact: false })));
+        }
+
+        stage.appendChild(svg);
+        stage.appendChild(bracket);
+
+        requestAnimationFrame(() => {
+            drawBracketConnectors(stage, def);
+            if (forExport) setTimeout(() => drawBracketConnectors(stage, def), 100);
+        });
+    }
+
+    function getChampion() {
+        const w = state.winners['FINAL-0'];
+        if (w === undefined) return null;
+        return getSlot('FINAL-0', w);
+    }
+
+    let resizeDrawTimer = null;
+    function scheduleConnectorRedraw() {
+        clearTimeout(resizeDrawTimer);
+        resizeDrawTimer = setTimeout(() => {
+            const root = document.getElementById('bracket-root');
+            const def = getBracketDef();
+            if (root && def.dual) drawBracketConnectors(root, def);
+        }, 80);
+    }
+
+    function render() {
+        renderChips();
+        syncFormatUI();
+        updateCustomInfo();
+        renderBracketInto(document.getElementById('bracket-root'), false);
+        renderBracketInto(document.getElementById('preview-bracket'), true);
+        scheduleConnectorRedraw();
+        const champ = getChampion();
+        const line = document.getElementById('champion-line');
+        if (champ) {
+            line.style.display = 'block';
+            line.textContent = '🏆 CHAMPION: ' + champ;
+        } else {
+            line.style.display = 'none';
+        }
+    }
+
+    function renderChips() {
+        const box = document.getElementById('team-chips');
+        box.innerHTML = '';
+        state.teams.forEach((name) => {
+            const chip = document.createElement('div');
+            chip.className = 'chip';
+            chip.draggable = true;
+            chip.textContent = name;
+            chip.addEventListener('dragstart', (e) => {
+                dragTeam = name;
+                dragFromSlot = null;
+                e.dataTransfer.setData('text/team', name);
+            });
+            chip.addEventListener('dragend', () => { dragTeam = null; });
+            const x = document.createElement('button');
+            x.type = 'button';
+            x.className = 'x';
+            x.textContent = '×';
+            x.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeTeam(name);
+            });
+            chip.appendChild(x);
+            box.appendChild(chip);
+        });
+    }
+
+    function togglePreview(open) {
+        const ov = document.getElementById('preview-overlay');
+        const show = open !== undefined ? open : !ov.classList.contains('open');
+        ov.classList.toggle('open', show);
+        if (show) render();
+    }
+
+    async function downloadPng() {
+        togglePreview(true);
+        await new Promise((r) => setTimeout(r, 150));
+        const el = document.getElementById('export-canvas');
+        if (typeof html2canvas !== 'function') {
+            alert('html2canvas not loaded');
+            return;
+        }
+        try {
+            const canvas = await html2canvas(el, {
+                scale: 2,
+                backgroundColor: '#0a1628',
+                useCORS: true,
+                logging: false
+            });
+            const a = document.createElement('a');
+            a.download = 'match-draw.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        } catch (e) {
+            console.error(e);
+            alert('Export failed');
+        }
+    }
+
+    function bindEvents() {
+        document.getElementById('btn-undo').addEventListener('click', undo);
+        document.getElementById('btn-redo').addEventListener('click', redo);
+        document.getElementById('btn-clear').addEventListener('click', () => {
+            if (confirm('Clear all bracket slots?')) clearBracket();
+        });
+        document.getElementById('btn-show').addEventListener('click', () => togglePreview(true));
+        document.getElementById('btn-download').addEventListener('click', downloadPng);
+        document.getElementById('btn-save').addEventListener('click', () => {
+            saveDraw(false);
+        });
+        document.getElementById('preview-close').addEventListener('click', () => togglePreview(false));
+        document.getElementById('preview-overlay').addEventListener('click', (e) => {
+            if (e.target.id === 'preview-overlay') togglePreview(false);
+        });
+        document.getElementById('btn-add-team').addEventListener('click', submitTeam);
+        document.getElementById('team-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submitTeam();
+        });
+        document.getElementById('btn-autofill').addEventListener('click', () => fillOrdered(false));
+        document.getElementById('btn-shuffle').addEventListener('click', () => fillOrdered(true));
+        document.getElementById('btn-import').addEventListener('click', tryImportTeams);
+        document.querySelectorAll('.format-btn').forEach((b) => {
+            b.addEventListener('click', () => {
+                const f = b.dataset.format;
+                setFormat(f === 'custom' ? 'custom' : Number(f));
+            });
+        });
+        document.getElementById('btn-apply-custom').addEventListener('click', applyCustomCount);
+        document.getElementById('custom-count').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') applyCustomCount();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
+            if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
+            if (e.ctrlKey && e.key === 'p') { e.preventDefault(); togglePreview(); }
+            if (e.key === 'Escape') togglePreview(false);
+        });
+    }
+
+    function submitTeam() {
+        const inp = document.getElementById('team-input');
+        if (addTeam(inp.value)) inp.value = '';
+    }
+
+    function init() {
+        if (isPreviewOnly) document.body.classList.add('preview-only');
+        if (isOverlayEmbed) document.body.classList.add('overlay-embed');
+        loadDraw();
+        history = [cloneState()];
+        historyIndex = 0;
+        const cc = document.getElementById('custom-count');
+        if (cc) cc.value = state.customCount || 24;
+        syncFormatUI();
+        updateCustomInfo();
+        bindEvents();
+        const wrap = document.querySelector('.canvas-wrap');
+        if (wrap) wrap.addEventListener('scroll', scheduleConnectorRedraw, { passive: true });
+        window.addEventListener('resize', scheduleConnectorRedraw);
+        window.addEventListener('message', (e) => {
+            if (e.data && e.data.type === 'cricpro_match_draw_state') {
+                applyExternalState(e.data.state);
+            }
+        });
+        render();
+        if (isPreviewOnly || isOverlayEmbed) togglePreview(true);
+        if (isOverlayEmbed) {
+            try { window.parent.postMessage({ type: 'cricpro_match_draw_ready' }, '*'); } catch (_) { /* ignore */ }
+        }
+    }
+
+    init();
+})();
+    </script>
+</body>
+</html>

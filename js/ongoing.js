@@ -66,10 +66,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 function startAutoRefresh() {
     if (refreshInterval) clearInterval(refreshInterval);
     refreshInterval = setInterval(() => {
+        const sockOk =
+            window.SLCRICK_REALTIME?.socket?.connected || window._cricproSocket?.connected;
+        if (sockOk) return;
         if (typeof syncCloudData === 'function') {
             syncCloudData({ forceRefresh: true, silent: true });
         }
-    }, 5000);
+    }, 30000);
 }
 
 function refreshAll() {

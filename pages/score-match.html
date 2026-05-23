@@ -39,7 +39,26 @@
             <span class="logo-name-animated">SLCRICK<span class="pro">PRO</span></span>
           </div>
         </div>
-        <div style="margin-left:auto;display:flex;gap:10px;align-items:center" id="header-actions">
+        <div style="margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap" id="header-actions">
+            <div id="obs-url-panel" style="display:none;max-width:520px;font-size:11px;background:rgba(124,77,255,0.12);border:1px solid rgba(124,77,255,0.35);border-radius:10px;padding:8px 10px">
+                <div style="font-weight:800;color:#b39ddb;margin-bottom:4px">📺 OBS URLs</div>
+                <div class="obs-tournament-hint" style="font-size:10px;color:#94a3b8;margin-bottom:6px;line-height:1.35"></div>
+                <label style="font-size:9px;opacity:0.85;color:#b39ddb">🌐 Site share · <span id="obs-full-size-hint">1920×1080</span></label>
+                <input type="text" id="obs-url-website" readonly class="form-input" style="font-size:10px;height:28px;padding:4px 8px;font-family:monospace;margin-bottom:4px;border-color:rgba(124,77,255,0.45)" />
+                <label style="font-size:9px;opacity:0.7">This PC / LAN</label>
+                <input type="text" id="obs-url-combined" readonly class="form-input" style="font-size:10px;height:28px;padding:4px 8px;font-family:monospace;margin-bottom:4px" />
+                <input type="text" id="obs-url-hotkeys" readonly class="form-input" style="display:none" aria-hidden="true" />
+                <label style="font-size:9px;opacity:0.55">Optional: scorebar strip only</label>
+                <input type="text" id="obs-url-scorebar" readonly class="form-input" style="font-size:10px;height:28px;padding:4px 8px;font-family:monospace;margin-bottom:4px;opacity:0.85" />
+                <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-green btn-sm" onclick="copyObsWebsiteUrl()">🌐 Site URL</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openObsWebsitePreview()">👁 Preview</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="setupObsQuick()">⚡ Local OBS</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="copyObsCombinedUrl()">📋 LAN</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="copyObsScorebarUrl()" title="Strip only — advanced">📋 Strip</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openObsSetupModal()">❓</button>
+                </div>
+            </div>
             <button class="theme-toggle" id="theme-toggle-scorer" onclick="toggleTheme()" title="Switch Day/Dark Mode" style="width:36px;height:36px">
                 <svg class="svg-theme-icon moon-icon"><use href="#icon-moon"></use></svg>
                 <svg class="svg-theme-icon sun-icon"><use href="#icon-sun"></use></svg>
@@ -54,12 +73,12 @@
                 <div style="text-align:center;margin-bottom:32px">
                     <div class="hero-badge" style="margin-bottom:16px">Choose Match Type</div>
                 <div class="match-type-selector" id="match-type-selector">
-                    <button class="type-btn active" id="type-single" data-match-type="single">
+                    <button class="type-btn" id="type-single" data-match-type="single">
                         <span class="type-icon"><svg style="width:24px;height:24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
                         <span class="type-label">Single Match</span>
                         <span class="type-sub">Quick match, no tournament</span>
                     </button>
-                    <button class="type-btn" id="type-tournament" data-match-type="tournament">
+                    <button class="type-btn active" id="type-tournament" data-match-type="tournament">
                         <span class="type-icon"><svg style="width:24px;height:24px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span>
                         <span class="type-label">Tournament Match</span>
                         <span class="type-sub">Schedule in a tournament</span>
@@ -72,7 +91,8 @@
                 </div>
             </div>
 
-            <!-- Tournament section (hidden by default) -->
+            <!-- Tournament section (hidden until "Tournament Match" is selected) -->
+            <div id="tournament-setup-section" style="display:block">
                 <div id="new-tournament-form">
                     <div class="grid-2">
                         <div class="form-group">
@@ -136,14 +156,14 @@
                         <label class="form-label">3rd Place Cash Prize</label>
                         <input type="text" class="form-input" id="tourn-prize-3" placeholder="e.g. Rs. 25000" />
                     </div>
-                </div>
                 <div class="form-group">
                     <label class="form-label">Teams (one per line)</label>
                     <textarea class="form-textarea" id="tourn-teams"
                         placeholder="Team Alpha&#10;Team Beta&#10;Team Gamma&#10;Team Delta" rows="4"></textarea>
                 </div>
                 <div class="modal-actions" style="margin-top:20px;">
-                    <button class="btn btn-primary btn-full" style="height:54px; font-size:17px; font-weight:900; border-radius:18px; box-shadow:0 10px 20px rgba(var(--c-primary-rgb),0.3)" onclick="startNewMatch()">📅 Schedule Tournament Matches</button>
+                    <button type="button" class="btn btn-primary btn-full" id="btn-schedule-tournament" style="height:54px; font-size:17px; font-weight:900; border-radius:18px; box-shadow:0 10px 20px rgba(var(--c-primary-rgb),0.3)">📅 Schedule Tournament Matches</button>
+                </div>
                 </div>
             </div>
         </div>
@@ -248,6 +268,16 @@
             </div>
             <div id="resume-matches-list"></div>
         </div>
+        <!-- Core scripts: right after list container (reliable render + schedule) -->
+        <script src="../js/cloud-config.js"></script>
+        <script src="../js/db.js"></script>
+        <script src="../js/resume-list.js"></script>
+        <script src="../js/socket-loader.js"></script>
+        <script src="../js/sync-client.js"></script>
+        <script src="../js/realtime-manager.js"></script>
+        <script src="../js/live-sync.js"></script>
+        <script src="../js/broadcast-link.js"></script>
+        <script src="../js/tournament-schedule.js"></script>
 
         <div id="panel-setup-nrr" style="display:none;margin-top:20px">
             <div id="instant-nrr-placeholder"></div>
@@ -260,11 +290,12 @@
         <div class="content-container" style="max-width:440px;text-align:center;padding-top:80px">
             <div style="font-size:64px;margin-bottom:16px">🔐</div>
             <h2 id="login-match-title" style="font-size:22px;font-weight:800;margin-bottom:8px">Resume Match</h2>
-            <p style="color:var(--c-muted);margin-bottom:28px">This tournament is password protected. Unlock once to access all scheduled matches.</p>
+            <p id="login-match-sub" style="color:var(--c-muted);margin-bottom:28px">Enter the tournament scoring password each time you open the dashboard.</p>
+            <p id="login-desktop-hint" style="display:none;font-size:11px;color:var(--c-muted);margin:-18px 0 20px;line-height:1.45">Desktop: if you did not set a custom password when creating the tournament, try <strong>offline</strong>.</p>
             <div class="form-group">
-                <input type="password" class="form-input" id="login-password" placeholder="Enter tournament scoring password..." />
+                <input type="password" class="form-input" id="login-password" placeholder="Enter tournament scoring password..." onkeydown="if(event.key==='Enter')loginToMatch()" />
             </div>
-            <button class="btn btn-primary btn-full" onclick="loginToMatch()">🔓 Unlock Tournament</button>
+            <button type="button" class="btn btn-primary btn-full" id="btn-login-unlock" onclick="loginToMatch()">🔓 Unlock &amp; Continue</button>
             <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showScreen('setup')">Cancel</button>
         </div>
     </div>
@@ -317,12 +348,14 @@
                 if (tabId === 'scorecard' && typeof renderEmbeddedScorecard === 'function') renderEmbeddedScorecard();
                 
                 if (tabId === 'hotkeys') {
-                    // Mark body so global hotkey listener knows we are in broadcast mode
                     document.body.classList.add('hotkey-panel-active');
-                    _refreshBroadcastPreview();
-                    
-                    // Initial scaling
-                    setTimeout(scaleBroadcastPreview, 100);
+                    if (typeof loadBroadcastProfileOptions === 'function') loadBroadcastProfileOptions();
+                    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+                    document.body.setAttribute('tabindex', '-1');
+                    document.body.focus({ preventScroll: true });
+                    if (typeof window.refreshBroadcastPreview === 'function') window.refreshBroadcastPreview();
+                    setTimeout(() => { if (typeof window.scaleBroadcastPreview === 'function') window.scaleBroadcastPreview(); }, 100);
+                    if (typeof setupIntegratedHotkeys === 'function') setupIntegratedHotkeys();
                     
                     if (typeof renderBroadcastMatchList === 'function') renderBroadcastMatchList();
                     if (window._bmSyncTimer) clearInterval(window._bmSyncTimer);
@@ -330,103 +363,13 @@
                         const m = (typeof currentMatch !== 'undefined') ? currentMatch : null;
                         if (m && typeof syncBroadcastMasterPhotos === 'function') syncBroadcastMasterPhotos(m);
                         if (typeof renderBroadcastMatchList === 'function') renderBroadcastMatchList();
-                    }, 2500);
+                    }, 5000);
                 } else {
                     document.body.classList.remove('hotkey-panel-active');
                     if (window._bmSyncTimer) { clearInterval(window._bmSyncTimer); window._bmSyncTimer = null; }
                 }
             }
 
-            function scaleBroadcastPreview() {
-                const frame = document.getElementById('broadcast-preview-iframe');
-                const container = document.getElementById('iframe-wrapper');
-                if (!frame || !container) return;
-                
-                const containerWidth = container.offsetWidth;
-                const scaleVal = containerWidth / 1920;
-                frame.style.transform = `scale(${scaleVal})`;
-                frame.style.width = '1920px';
-                frame.style.height = '1080px';
-                frame.style.transformOrigin = 'top left';
-            }
-
-            window.addEventListener('resize', () => {
-                if (document.getElementById('panel-hotkeys')?.style.display === 'block') {
-                    scaleBroadcastPreview();
-                }
-            });
-
-            function _refreshBroadcastPreview() {
-                const iframe = document.getElementById('broadcast-preview-iframe');
-                if (!iframe) return;
-                
-                const m = (typeof currentMatch !== 'undefined') ? currentMatch : null;
-                const mId = m ? m.id : null;
-                const tId = (m && m.tournamentId)
-                    ? m.tournamentId
-                    : ((typeof currentTournament !== 'undefined' && currentTournament) ? currentTournament.id : null);
-                
-                const targetSrc = '../pages/overlay.html?preview=true' + (mId ? '&match=' + encodeURIComponent(mId) : (tId ? '&tournament=' + encodeURIComponent(tId) : ''));
-                const targetUrl = new URL(targetSrc, window.location.href).href;
-                const previewNoMatch = document.getElementById('preview-no-match');
-
-                if (mId || tId) {
-                    if (previewNoMatch) previewNoMatch.style.display = 'none';
-                } else if (previewNoMatch) {
-                    previewNoMatch.style.display = 'flex';
-                }
-
-                const syncMatchToIframe = (matchPayload) => {
-                    if (!iframe || !iframe.contentWindow) return;
-                    iframe.contentWindow.postMessage({
-                        type: 'cricpro_broadcast_cmd',
-                        payload: { cmd: 'SYNC_SCORE', data: { match: matchPayload } }
-                    }, '*');
-                };
-
-                if (!iframe.src || !iframe.src.includes('overlay.html') || iframe.src !== targetUrl) {
-                    iframe._pendingBroadcastMatch = m;
-                    iframe.onload = () => {
-                        if (previewNoMatch) previewNoMatch.style.display = 'none';
-                        if (iframe && iframe.contentWindow && iframe._pendingBroadcastMatch) {
-                            setTimeout(() => syncMatchToIframe(iframe._pendingBroadcastMatch), 50);
-                            iframe._pendingBroadcastMatch = null;
-                        }
-                    };
-                    iframe.src = targetUrl;
-                } else if (iframe.contentWindow) {
-                    if (previewNoMatch) previewNoMatch.style.display = 'none';
-                    // Give the overlay iframe a short moment to attach its message handlers.
-                    setTimeout(() => syncMatchToIframe(m), 100);
-                } else {
-                    iframe._pendingBroadcastMatch = m;
-                }
-
-                scaleBroadcastPreview();
-
-                // Update header indicators
-                if (m && m.innings) {
-                    const inn = m.innings[m.currentInnings || 0] || { runs:0, wickets:0, balls:0 };
-                    const overs = typeof formatOvers === 'function' ? formatOvers(inn.balls) : (Math.floor(inn.balls/6) + '.' + (inn.balls%6));
-                    const scoreEl = document.getElementById('bm-score-indicator');
-                    const vsEl = document.getElementById('bm-vs-indicator');
-                    if (scoreEl) scoreEl.textContent = `${inn.runs}/${inn.wickets} (${overs})`;
-                    if (vsEl) vsEl.textContent = `${m.team1} vs ${m.team2}`;
-                    
-                    const t1lbl = document.getElementById('btn-team1-label');
-                    const t2lbl = document.getElementById('btn-team2-label');
-                    if (t1lbl) t1lbl.textContent = m.team1 || 'TEAM A';
-                    if (t2lbl) t2lbl.textContent = m.team2 || 'TEAM B';
-                    
-                    // Sync photos in the UI
-                    if (typeof syncBroadcastMasterPhotos === 'function') syncBroadcastMasterPhotos(m);
-                }
-                
-                const noMatchLabel = document.getElementById('preview-no-match');
-                if (noMatchLabel) {
-                    noMatchLabel.style.display = (mId || tId) ? 'none' : 'flex';
-                }
-            }
         </script>
 
         <!-- TAB 1: SCORING -->
@@ -449,9 +392,10 @@
                 .compact-scoring-layout .btn { padding: 8px; font-size: 13px; }
                 .mobile-batter-bar { display: none; }
                 @media (max-width: 900px) {
-                    .mobile-batter-bar { display: flex; gap: 0; margin-bottom: 8px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }
+                    .mobile-batter-bar { display: flex; gap: 0; align-items: stretch; margin-bottom: 8px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }
                     .mobile-batter-cell { flex: 1; padding: 10px 6px; background: rgba(255,255,255,0.04); border-right: 1px solid rgba(255,255,255,0.06); text-align: center; cursor: pointer; transition: background 0.2s; }
-                    .mobile-batter-cell:last-child { border-right: none; }
+                    .mobile-batter-bar > .mobile-batter-cell:last-of-type { border-right: none; }
+                    .mobile-batter-bar .btn-swap-ends--mobile { border-left: 1px solid rgba(255,255,255,0.06); border-right: 1px solid rgba(255,255,255,0.06); border-radius: 0; }
                     .mobile-batter-cell.is-striker { background: rgba(124,77,255,0.18); }
                     .mobile-batter-name { font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                     .mobile-batter-score { font-size: 20px; font-weight: 900; font-family: 'JetBrains Mono', monospace; color: #fff; }
@@ -468,11 +412,13 @@
                     <!-- MOBILE ONLY: Live Batter Stats Bar -->
                     <div class="mobile-batter-bar" id="mobile-batter-bar">
                         <div class="mobile-batter-cell is-striker" id="mob-bat-0" onclick="setStriker(0)">
-                            <div class="mobile-batter-name" id="mob-bat-name-0">Batter 1</div>
+                            <div class="mobile-batter-name scorer-name-editable" id="mob-bat-name-0" onclick="event.stopPropagation();editPlayerName('batsman', 0)" title="Tap to edit name">Batter 1</div>
                             <div class="mobile-batter-score" id="mob-bat-score-0">0</div>
                             <div class="mobile-batter-balls" id="mob-bat-balls-0">(0b)</div>
                         </div>
+                        <button type="button" class="btn-swap-ends btn-swap-ends--mobile" onclick="swapBatsmenEnds()" title="Swap ends">⇄</button>
                         <div class="mobile-batter-cell" id="mob-bat-1" onclick="setStriker(1)">
+                            <div class="mobile-batter-name scorer-name-editable" id="mob-bat-name-1" onclick="event.stopPropagation();editPlayerName('batsman', 1)" title="Tap to edit name">Batter 2</div>
                             <div class="mobile-batter-name" id="mob-bat-name-1">Batter 2</div>
                             <div class="mobile-batter-score" id="mob-bat-score-1">0</div>
                             <div class="mobile-batter-balls" id="mob-bat-balls-1">(0b)</div>
@@ -536,7 +482,10 @@
                 <div class="scoring-stats-col">
                     <!-- Batting -->
                     <div class="card" id="card-batting" style="margin-bottom:16px">
-                        <div class="card-head">⚾ Batting</div>
+                        <div class="card-head card-head--row">
+                            <span>⚾ Batting</span>
+                            <button type="button" class="btn-swap-ends" onclick="swapBatsmenEnds()" title="Swap striker &amp; non-striker (wrong end)">⇄ Swap</button>
+                        </div>
                         <table class="data-table">
                             <thead>
                                 <tr>
@@ -550,7 +499,7 @@
                             </thead>
                             <tbody>
                                 <tr id="bat-row-0">
-                                    <td class="striker-name"><span id="bat0-name">-</span> <span onclick="editPlayerName('batsman', 0)" style="cursor:pointer;font-size:10px">✏️</span></td>
+                                    <td class="striker-name"><span id="bat0-name" class="scorer-name-editable" onclick="editPlayerName('batsman', 0)" title="Click to edit name">-</span><button type="button" class="scorer-name-edit-btn" onclick="editPlayerName('batsman', 0)" title="Edit name">✎</button></td>
                                     <td id="bat0-runs">0</td>
                                     <td id="bat0-balls">0</td>
                                     <td id="bat0-4s">0</td>
@@ -558,7 +507,7 @@
                                     <td id="bat0-sr">0.0</td>
                                 </tr>
                                 <tr id="bat-row-1">
-                                    <td><span id="bat1-name">-</span> <span onclick="editPlayerName('batsman', 1)" style="cursor:pointer;font-size:10px">✏️</span></td>
+                                    <td><span id="bat1-name" class="scorer-name-editable" onclick="editPlayerName('batsman', 1)" title="Click to edit name">-</span><button type="button" class="scorer-name-edit-btn" onclick="editPlayerName('batsman', 1)" title="Edit name">✎</button></td>
                                     <td id="bat1-runs">0</td>
                                     <td id="bat1-balls">0</td>
                                     <td id="bat1-4s">0</td>
@@ -588,7 +537,7 @@
                             </thead>
                             <tbody id="bowling-table-body">
                                 <tr>
-                                    <td><span id="bowler-name">-</span> <span onclick="editPlayerName('bowler', null)" style="cursor:pointer;font-size:10px">✏️</span></td>
+                                    <td><span id="bowler-name" class="scorer-name-editable" onclick="editPlayerName('bowler', null)" title="Click to edit name">-</span><button type="button" class="scorer-name-edit-btn" onclick="editPlayerName('bowler', null)" title="Edit name">✎</button></td>
                                     <td id="bowler-overs">0</td>
                                     <td id="bowler-maidens">0</td>
                                     <td id="bowler-runs">0</td>
@@ -669,6 +618,30 @@
             <div class="broadcast-layout" style="gap:16px; align-items: start;">
                 <!-- LEFT COLUMN -->
                 <div style="display:flex; flex-direction:column; gap:16px;">
+                    <!-- OBS SETUP (laptop) -->
+                    <div class="card" id="obs-setup-card" style="border: 1px solid rgba(124,77,255,0.45); background: linear-gradient(135deg, rgba(124,77,255,0.12), rgba(0,0,0,0.25));">
+                        <div class="card-head" style="font-size:11px; margin-bottom:8px; color:#b39ddb">📺 OBS SETUP (LAPTOP)</div>
+                        <p style="font-size:12px; line-height:1.5; color:rgba(255,255,255,0.75); margin:0 0 12px">
+                            OBS එකේ <strong>Browser Source එකක්</strong> — scorebar + hotkey graphics (4/6/W, profiles, wicket…) සියල්ල එක URL එකෙන්.
+                        </p>
+                        <ol style="font-size:11px; line-height:1.55; color:rgba(255,255,255,0.6); margin:0 0 14px 18px; padding:0">
+                            <li>Match live → <strong>Quick OBS Setup</strong> (URL copy)</li>
+                            <li>OBS → Sources → + → <strong>Browser</strong> → paste URL · <span id="obs-scorebar-size-hint">1920×1080</span> · පහල align</li>
+                            <li>Scoring laptop IP (Wi‑Fi) · port <code style="font-size:9px">56320</code> · same network</li>
+                            <li>Custom CSS: <code style="font-size:10px">body{background:rgba(0,0,0,0)!important;}</code></li>
+                        </ol>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px">
+                            <button type="button" class="btn btn-primary btn-full" style="font-weight:900; border-radius:10px; min-height:44px" onclick="setupObsQuick()">⚡ Quick OBS Setup</button>
+                            <button type="button" class="btn btn-ghost btn-full" style="font-weight:800; border-radius:10px; min-height:44px" onclick="openObsSetupModal()">📖 Guide</button>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
+                            <button type="button" class="btn btn-green btn-sm btn-full" style="font-weight:800" onclick="copyObsWebsiteUrl()">🌐 Site URL (share)</button>
+                            <button type="button" class="btn btn-ghost btn-sm btn-full" style="font-weight:800" onclick="openObsWebsitePreview()">👁 Open preview</button>
+                            <button type="button" class="btn btn-primary btn-sm btn-full" style="font-weight:800" onclick="setupObsQuick()">⚡ Local OBS</button>
+                        </div>
+                        <p style="font-size:10px;color:rgba(255,255,255,0.45);margin:8px 0 0;line-height:1.4"><code>layer=combined</code> · Theme change → OBS Refresh browser source.</p>
+                    </div>
+
                     <!-- MASTER CONTROL -->
                     <div class="card" style="border: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.2);">
                         <div class="card-head" style="font-size:11px; margin-bottom:12px">🎮 MASTER CONTROL</div>
@@ -678,9 +651,9 @@
                         </button>
                         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                             <button class="btn btn-ghost btn-sm" style="border-radius:10px; height:42px; font-weight:800" onclick="reconnectBroadcast()">🔌 RECONNECT</button>
-                            <button class="btn btn-green btn-sm" style="border-radius:10px; height:42px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px" onclick="copyObsLink()"><span style="font-size:16px">🔗</span> OBS URL</button>
+                            <button class="btn btn-green btn-sm" style="border-radius:10px; height:42px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px" onclick="setupObsQuick()"><span style="font-size:16px">📺</span> OBS Setup</button>
                         </div>
-                        <a href="broadcast-station.html" class="btn btn-primary btn-full" style="margin-top:10px;height:46px;font-weight:800;border-radius:10px;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px">📡 Open Broadcast Station</a>
+                        <a href="broadcast-station.html" class="btn btn-primary btn-full" style="margin-top:10px;height:46px;font-weight:800;border-radius:10px;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px">📡 Broadcast Station (sync + mirror)</a>
                     </div>
 
                     <!-- SCOREBAR CONTROL -->
@@ -693,7 +666,7 @@
                         
                         <div class="form-group" style="margin-bottom:0">
                             <label class="form-label" style="font-size:10px; letter-spacing:1px; opacity:0.8">ACTIVE THEME</label>
-                            <select class="form-select" id="broadcast-theme-select" onchange="Broadcast.changeOverlayTheme(this.value)" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; font-size:14px; font-weight:700">
+                            <select class="form-select" id="broadcast-theme-select" onchange="Broadcast.changeOverlayTheme(this.value)" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; font-size:14px; font-weight:700" title="Scorecard 2 = modern purple bar with player photos">
                                 <option value="theme1">Classic Scoreboard (Default)</option>
                                 <option value="theme2">Scorecard 2 (Modern)</option>
                                 <option value="theme3">Manual Input Scorecard</option>
@@ -732,6 +705,10 @@
                             <button class="btn btn-ghost" onclick="triggerVisualBigEvent('SIX')" style="border-color:#7c4dff; color:#b388ff; height:45px; font-size:18px; font-weight:900; border-radius:10px">6</button>
                             <button class="btn btn-ghost" onclick="triggerVisualBigEvent('WICKET')" style="border-color:#d50000; color:#ff8a80; height:45px; font-size:18px; font-weight:900; border-radius:10px">W</button>
                         </div>
+                        <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;height:44px;font-weight:900;border-radius:10px" onclick="shareMatchDrawOverlay()" title="Full screen on OBS overlay">📡 Share Draw</button>
+                        <button type="button" class="btn btn-green btn-full btn-sm" style="margin-top:6px;font-weight:800" onclick="hideMatchDrawOverlay()">✕ Hide Draw</button>
+                        <button type="button" class="btn btn-ghost btn-full btn-sm" style="margin-top:6px;font-weight:700" onclick="openMatchDrawPreview()">👁 Preview in browser</button>
+                        <button type="button" class="btn btn-ghost btn-full btn-sm" style="margin-top:4px;font-weight:700" onclick="openMatchDraw()">🎯 Edit Match Draw</button>
                     </div>
                 </div>
 
@@ -745,18 +722,35 @@
                                 <span style="font-size:12px; font-weight:900; letter-spacing:1px">REAL-TIME OUTPUT PREVIEW</span>
                             </div>
                             <div style="display:flex; align-items:center; gap:8px">
-                                <span style="font-size:10px; color:var(--c-muted); font-weight:700">1920×1080</span>
-                                <button onclick="_refreshBroadcastPreview()" style="background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:var(--c-muted); font-size:10px; padding:3px 8px; cursor:pointer; font-weight:700">↺ REFRESH</button>
+                                <span style="font-size:10px; color:var(--c-muted); font-weight:700">1920×1080 · OBS layout</span>
+                                <button type="button" onclick="refreshBroadcastPreview()" style="background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:var(--c-muted); font-size:10px; padding:3px 8px; cursor:pointer; font-weight:700">↺ REFRESH</button>
                             </div>
                         </div>
-                        <div id="iframe-wrapper" style="position:relative; width:100%; aspect-ratio:16/9; background: transparent; border-radius:10px; overflow:hidden; border:2px solid rgba(255,255,255,0.08);">
-                            <iframe id="broadcast-preview-iframe" src="../pages/overlay.html?preview=true" style="position:absolute; top:0; left:0; width:1920px; height:1080px; transform-origin: top left; border:none; pointer-events:none; background:transparent;"></iframe>
-                            <!-- Fallback label when no match loaded -->
-                            <div id="preview-no-match" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:2">
-                                <div style="font-size:32px;margin-bottom:8px;opacity:0.15">📺</div>
-                                <div style="font-size:11px;font-weight:700;opacity:0.2;letter-spacing:2px">SELECT A MATCH TO PREVIEW</div>
+                        <div id="broadcast-preview-composite" class="obs-preview-checker" style="position:relative; width:100%; aspect-ratio:16/9; border-radius:10px; overflow:hidden; border:2px solid rgba(255,255,255,0.08);">
+                            <div id="preview-wrap-hotkeys" style="position:absolute; inset:0; width:100%; height:100%; overflow:hidden; pointer-events:none; z-index:3;">
+                                <iframe id="broadcast-preview-combined" title="OBS full overlay" style="border:none; pointer-events:none; background:transparent;"></iframe>
+                                <iframe id="broadcast-preview-hotkeys" title="OBS preview" style="display:none;border:none;" aria-hidden="true"></iframe>
+                            </div>
+                            <div id="preview-wrap-scorebar" style="display:none" aria-hidden="true">
+                                <iframe id="broadcast-preview-scorebar" title="Scorebar strip" style="border:none;"></iframe>
+                            </div>
+                            <div id="preview-no-match" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:5;background:rgba(0,0,0,0.35)">
+                                <div style="font-size:32px;margin-bottom:8px;opacity:0.4">📺</div>
+                                <div style="font-size:11px;font-weight:700;opacity:0.6;letter-spacing:2px">LIVE MATCH එකක් අරගෙන preview බලන්න</div>
                             </div>
                         </div>
+                        <style>
+                        .obs-preview-checker {
+                            background-color: #14141c;
+                            background-image:
+                                linear-gradient(45deg, #22222e 25%, transparent 25%),
+                                linear-gradient(-45deg, #22222e 25%, transparent 25%),
+                                linear-gradient(45deg, transparent 75%, #22222e 75%),
+                                linear-gradient(-45deg, transparent 75%, #22222e 75%);
+                            background-size: 14px 14px;
+                            background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+                        }
+                        </style>
                         <div style="display:flex; justify-content:space-between; margin-top:10px; padding:0 2px">
                             <div style="display:flex; align-items:center; gap:5px; font-size:10px; font-weight:800; color:#00e676">
                                 <div style="width:5px; height:5px; background:#00e676; border-radius:50%"></div> LIVE
@@ -767,16 +761,34 @@
                     </div>
                     <style>@keyframes pulse-red { 0%,100%{box-shadow:0 0 6px #ff1744}50%{box-shadow:0 0 16px #ff1744} }</style>
 
+                    <!-- PLAYER PROFILE OPTIONS -->
+                    <div class="card" style="border:1px solid rgba(100,181,246,0.35); background:rgba(41,98,255,0.06); margin-bottom:12px">
+                        <div class="card-head" style="font-size:11px; margin-bottom:10px; color:#90caf9">👤 PLAYER PROFILE OPTIONS</div>
+                        <label style="display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; margin-bottom:8px; cursor:pointer">
+                            <input type="checkbox" id="opt-profile-with-data" checked onchange="saveBroadcastProfileOptions()" style="width:18px;height:18px;accent-color:#7c4dff">
+                            <span><strong>With Data</strong> — Matches, Runs, innings stats on card</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; margin-bottom:8px; cursor:pointer">
+                            <input type="checkbox" id="opt-profile-auto-bat" checked onchange="saveBroadcastProfileOptions()" style="width:18px;height:18px;accent-color:#00c853">
+                            <span>Auto profile when <strong>new batsman</strong> comes in</span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:10px; font-size:12px; font-weight:700; cursor:pointer">
+                            <input type="checkbox" id="opt-profile-auto-bowl" checked onchange="saveBroadcastProfileOptions()" style="width:18px;height:18px;accent-color:#7c4dff">
+                            <span>Auto profile when <strong>new bowler</strong> starts</span>
+                        </label>
+                        <p style="font-size:10px;color:rgba(255,255,255,0.45);margin:10px 0 0;line-height:1.4">With Data off = name + team + photo only (smaller card).</p>
+                    </div>
+
                     <!-- CINEMATIC PRODUCTIONS -->
                     <div class="card" style="border: 1px solid rgba(124,77,255,0.2); background: rgba(124,77,255,0.03);">
                         <div class="card-head" style="font-size:11px; margin-bottom:12px; color:#b388ff">🎬 CINEMATIC PRODUCTIONS</div>
                         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                            <button class="btn btn-primary" style="background:#2962ff; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastStrikerProfile === 'function') broadcastStrikerProfile(); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastStrikerProfile();">
+                            <button class="btn btn-primary" style="background:#2962ff; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="typeof fireProfileBroadcast==='function'?fireProfileBroadcast('striker'):Broadcast.broadcastStrikerProfile()">
                                 <div style="font-size:18px">⚡</div>
                                 <div style="font-size:11px; font-weight:900">STRIKER</div>
                                 <div id="bm-label-striker" style="font-size:8px; opacity:0.6; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
                             </button>
-                            <button class="btn btn-primary" style="background:#e53935; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastNonStrikerProfile === 'function') broadcastNonStrikerProfile(); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastNonStrikerProfile();">
+                            <button class="btn btn-primary" style="background:#e53935; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="typeof fireProfileBroadcast==='function'?fireProfileBroadcast('nonstriker'):Broadcast.broadcastNonStrikerProfile()">
                                 <div style="font-size:18px">🏃</div>
                                 <div style="font-size:11px; font-weight:900">NON-STR</div>
                                 <div id="bm-label-nonstriker" style="font-size:8px; opacity:0.6; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
@@ -791,27 +803,32 @@
                                 <div style="font-size:11px; font-weight:900">PARTNER</div>
                                 <div id="bm-label-partner" style="font-size:8px; opacity:0.6">—</div>
                             </button>
-                            <button class="btn btn-primary" style="background:#7c4dff; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="broadcastBowlerProfile()">
+                            <button class="btn btn-primary" style="background:#7c4dff; border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="typeof fireProfileBroadcast==='function'?fireProfileBroadcast('bowler'):broadcastBowlerProfile()">
                                 <div style="font-size:18px">⚾</div>
                                 <div style="font-size:11px; font-weight:900">BOWLER</div>
                                 <div id="bm-label-bowler" style="font-size:8px; opacity:0.6; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastTeamCard === 'function') broadcastTeamCard(0); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastTeamCard(0);">
+                            <button class="btn btn-primary" style="background:linear-gradient(135deg,#7c4dff,#e91e63); border:none; height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastBattingTeamSquad()">
+                                <div style="font-size:18px">🏏</div>
+                                <div style="font-size:11px; font-weight:900">BATTING SQUAD</div>
+                                <div style="font-size:8px; opacity:0.85">Full lineup + photos</div>
+                            </button>
+                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastTeamCard(0)">
                                 <div style="font-size:18px">📋</div>
                                 <div style="font-size:11px; font-weight:900" id="btn-team1-label">TEAM A</div>
-                                <div style="font-size:8px; opacity:0.6">SQUAD CARD</div>
+                                <div style="font-size:8px; opacity:0.6">SQUAD</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof broadcastTeamCard === 'function') broadcastTeamCard(1); else if(typeof Broadcast !== 'undefined') Broadcast.broadcastTeamCard(1);">
+                            <button class="btn btn-ghost" style="background:rgba(255,255,255,0.04); border-color:rgba(255,255,255,0.12); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.broadcastTeamCard(1)">
                                 <div style="font-size:18px">📋</div>
                                 <div style="font-size:11px; font-weight:900" id="btn-team2-label">TEAM B</div>
                                 <div style="font-size:8px; opacity:0.6">SQUAD CARD</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(41,98,255,0.08); border-color:rgba(41,98,255,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof Broadcast !== 'undefined') Broadcast.showScorecard(); else if(typeof sendBroadcast === 'function') sendBroadcast('SHOW_SCORECARD');">
+                            <button class="btn btn-ghost" style="background:rgba(41,98,255,0.08); border-color:rgba(41,98,255,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.showScorecard()">
                                 <div style="font-size:18px">📊</div>
                                 <div style="font-size:11px; font-weight:900">SCORECARD</div>
                                 <div style="font-size:8px; opacity:0.6">TOGGLE</div>
                             </button>
-                            <button class="btn btn-ghost" style="background:rgba(255,143,0,0.08); border-color:rgba(255,143,0,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="if(typeof Broadcast !== 'undefined') Broadcast.showSummary(); else if(typeof sendBroadcast === 'function') sendBroadcast('SHOW_SUMMARY');">
+                            <button class="btn btn-ghost" style="background:rgba(255,143,0,0.08); border-color:rgba(255,143,0,0.3); height:70px; border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px" onclick="Broadcast.showSummary()">
                                 <div style="font-size:18px">🏆</div>
                                 <div style="font-size:11px; font-weight:900">SUMMARY</div>
                                 <div style="font-size:8px; opacity:0.6">TOGGLE</div>
@@ -841,7 +858,8 @@
                             <div style="display:flex; flex-direction:column; align-items:center; gap:4px">
                                 <div style="position:relative; cursor:pointer" onclick="uploadPlayerPhoto('striker')">
                                     <img id="bm-photo-striker" src="../assets/default-player.svg" style="width:60px; height:60px; border-radius:8px; border:2px solid #2962ff; object-fit:cover; background:rgba(41,98,255,0.1);" />
-                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);border-radius:8px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"><span style="font-size:16px">📷</span></div>
+                                    <button type="button" title="Hide photo on overlay (not deleted from DB)" onclick="event.stopPropagation(); clearPlayerPhotoSlot('striker')" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#e53935;color:#fff;font-size:12px;font-weight:900;line-height:1;cursor:pointer;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.4)">×</button>
+                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);border-radius:8px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"><span style="font-size:16px">📷</span></div>
                                 </div>
                                 <div style="font-size:9px; font-weight:900; color:#82b1ff">STRIKER</div>
                                 <div id="bm-name-striker" style="font-size:8px; opacity:0.5; text-align:center; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
@@ -849,7 +867,8 @@
                             <div style="display:flex; flex-direction:column; align-items:center; gap:4px">
                                 <div style="position:relative; cursor:pointer" onclick="uploadPlayerPhoto('nonstriker')">
                                     <img id="bm-photo-nonstriker" src="../assets/default-player.svg" style="width:60px; height:60px; border-radius:8px; border:2px solid #e53935; object-fit:cover; background:rgba(229,57,53,0.1);" />
-                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);border-radius:8px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"><span style="font-size:16px">📷</span></div>
+                                    <button type="button" title="Hide photo on overlay" onclick="event.stopPropagation(); clearPlayerPhotoSlot('nonstriker')" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#e53935;color:#fff;font-size:12px;font-weight:900;line-height:1;cursor:pointer;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.4)">×</button>
+                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);border-radius:8px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"><span style="font-size:16px">📷</span></div>
                                 </div>
                                 <div style="font-size:9px; font-weight:900; color:#ff8a80">NON-STR</div>
                                 <div id="bm-name-nonstriker" style="font-size:8px; opacity:0.5; text-align:center; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
@@ -857,7 +876,8 @@
                             <div style="display:flex; flex-direction:column; align-items:center; gap:4px">
                                 <div style="position:relative; cursor:pointer" onclick="uploadPlayerPhoto('bowler')">
                                     <img id="bm-photo-bowler" src="../assets/default-player.svg" style="width:60px; height:60px; border-radius:8px; border:2px solid #7c4dff; object-fit:cover; background:rgba(124,77,255,0.1);" />
-                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);border-radius:8px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"><span style="font-size:16px">📷</span></div>
+                                    <button type="button" title="Hide photo on overlay" onclick="event.stopPropagation(); clearPlayerPhotoSlot('bowler')" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#e53935;color:#fff;font-size:12px;font-weight:900;line-height:1;cursor:pointer;z-index:2;box-shadow:0 2px 6px rgba(0,0,0,0.4)">×</button>
+                                    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);border-radius:8px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;pointer-events:none" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0'"><span style="font-size:16px">📷</span></div>
                                 </div>
                                 <div style="font-size:9px; font-weight:900; color:#b388ff">BOWLER</div>
                                 <div id="bm-name-bowler" style="font-size:8px; opacity:0.5; text-align:center; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">—</div>
@@ -892,6 +912,13 @@
                             <button class="btn btn-primary" style="background:#1b5e20; border:none; height:52px; border-radius:10px; display:flex; align-items:center; gap:8px; padding:0 12px" onclick="Broadcast.showCRR()">
                                 <span style="font-size:16px">📈</span>
                                 <div style="text-align:left"><div style="font-weight:900; font-size:12px">RUN RATE</div><div id="bm-crr-val" style="font-size:9px; opacity:0.6">—</div></div>
+                            </button>
+                            <button class="btn btn-primary btn-full" style="grid-column:1/-1;background:linear-gradient(135deg,#0d4d2e,#8b1530);border:none;height:52px;border-radius:10px;display:flex;align-items:center;gap:10px;padding:0 14px" onclick="typeof showLastWicketBroadcast==='function'?showLastWicketBroadcast():(Broadcast.showLastWicket&&Broadcast.showLastWicket())">
+                                <span style="font-size:18px">🎯</span>
+                                <div style="text-align:left;flex:1">
+                                    <div style="font-weight:900;font-size:12px">LAST WICKET CARD</div>
+                                    <div style="font-size:9px;opacity:0.75">Shift+O — wicket card (blue/silver) above scorebar</div>
+                                </div>
                             </button>
                         </div>
                     </div>
@@ -938,17 +965,17 @@
             </div>
 
             <script>
-                // ── iFrame Scale ─────────────────────────────
-                const iframeWrap = document.getElementById('iframe-wrapper');
-                const iframe = document.getElementById('broadcast-preview-iframe');
-                if (iframeWrap && iframe) {
-                    new ResizeObserver(entries => {
-                        for (let entry of entries) {
-                            const w = entry.contentRect.width;
-                            iframe.style.transform = `scale(${w / 1920})`;
+                const previewComposite = document.getElementById('broadcast-preview-composite');
+                if (previewComposite && typeof ResizeObserver !== 'undefined') {
+                    new ResizeObserver(() => {
+                        if (typeof window.scaleBroadcastPreview === 'function') {
+                            window.scaleBroadcastPreview();
                         }
-                    }).observe(iframeWrap);
+                    }).observe(previewComposite);
                 }
+                setTimeout(() => {
+                    if (typeof window.scaleBroadcastPreview === 'function') window.scaleBroadcastPreview();
+                }, 200);
 
                 // ── Theme selector ───────────────────────────
                 function changeBroadcastTheme() {
@@ -978,25 +1005,7 @@
                 }
                 
                 
-                function copyObsLink() {
-                    // Build URL with live match/tournament ID so OBS renders the correct overlay
-                    const mId = (typeof currentMatch !== 'undefined' && currentMatch) ? currentMatch.id : null;
-                    const tId = (typeof currentMatch !== 'undefined' && currentMatch && currentMatch.tournamentId)
-                        ? currentMatch.tournamentId
-                        : ((typeof currentTournament !== 'undefined' && currentTournament) ? currentTournament.id : null);
-                    
-                    let url = window.location.origin + '/pages/overlay.html';
-                    if (mId) url += '?match=' + encodeURIComponent(mId);
-                    else if (tId) url += '?tournament=' + encodeURIComponent(tId);
-
-                    navigator.clipboard.writeText(url).then(() => {
-                        showToast('✅ OBS URL Copied! (' + (mId || tId || 'no match') + ')', 'success');
-                    }).catch(() => {
-                        // Fallback: show in a toast
-                        showToast('📋 OBS URL: ' + url, 'info');
-                    });
-                }
-
+                // copyObsLink / setupObsQuick — see js/obs-setup.js
 
                 // ── Compact Match List inside Broadcast Station ──────────────────
                 function renderBroadcastMatchList() {
@@ -1043,82 +1052,16 @@
                 }
 
                 function syncBroadcastMasterPhotos(m) {
-                    if (!m || !m.innings) return;
-                    const inn = m.innings[m.currentInnings || 0];
-                    if (!inn) return;
-
-                    const strikerIdx = inn.currentBatsmenIdx ? inn.currentBatsmenIdx[inn.strikerIdx || 0] : null;
-                    const nonStrikerIdx = inn.currentBatsmenIdx ? inn.currentBatsmenIdx[inn.strikerIdx === 0 ? 1 : 0] : null;
-                    const striker = (strikerIdx != null) ? inn.batsmen[strikerIdx] : null;
-                    const nonStriker = (nonStrikerIdx != null) ? inn.batsmen[nonStrikerIdx] : null;
-                    const bowler = (inn.currentBowlerIdx != null) ? inn.bowlers[inn.currentBowlerIdx] : null;
-
-                    const DEFAULT_PLAYER = '../assets/default-player.svg';
-                    const DEFAULT_TEAM = '../assets/default-team.svg';
-
-                    // Player photos with fallback text
-                    const sImg = document.getElementById('bm-photo-striker');
-                    const nsImg = document.getElementById('bm-photo-nonstriker');
-                    const bImg = document.getElementById('bm-photo-bowler');
-                    const rolePhoto = (role, player) => {
-                        if (typeof rolePhotoOverride === 'function') {
-                            const override = rolePhotoOverride(role);
-                            if (override) return override;
-                        }
-                        if (typeof playerPhotoSrc === 'function') return playerPhotoSrc(player);
-                        return (player && player.playerId && DB.getPlayerPhoto(player.playerId) !== DEFAULT_PLAYER) ? DB.getPlayerPhoto(player.playerId) : DEFAULT_PLAYER;
-                    };
-                    if (sImg) sImg.src = rolePhoto('striker', striker);
-                    if (nsImg) nsImg.src = rolePhoto('nonstriker', nonStriker);
-                    if (bImg) bImg.src = rolePhoto('bowler', bowler);
-
-                    // Name labels under photos
-                    const setLabel = (id, name) => { const el = document.getElementById(id); if (el) el.textContent = name || '—'; };
-                    setLabel('bm-name-striker', striker ? striker.name : 'NO PLAYER');
-                    setLabel('bm-name-nonstriker', nonStriker ? nonStriker.name : 'NO PLAYER');
-                    setLabel('bm-name-bowler', bowler ? bowler.name : 'NO BOWLER');
-
-                    // Button live labels
-                    setLabel('bm-label-striker', striker ? striker.name : '—');
-                    setLabel('bm-label-nonstriker', nonStriker ? nonStriker.name : '—');
-                    setLabel('bm-label-bowler', bowler ? bowler.name : '—');
-
-                    // Partnership label
-                    if (inn.partnerships && inn.partnerships.length > 0) {
-                        const p = inn.partnerships[inn.partnerships.length - 1];
-                        setLabel('bm-label-partner', `${p.runs || 0} off ${p.balls || 0}`);
+                    if (typeof window.syncLivePlayerPhotoSlots === 'function') {
+                        window.syncLivePlayerPhotoSlots(m);
                     }
-
-                    // Team logos
-                    const t1Logo = DB.getTeamPhoto(m.team1, m.tournamentId);
-                    const t2Logo = DB.getTeamPhoto(m.team2, m.tournamentId);
-                    const t1Img = document.getElementById('bm-photo-team1');
-                    const t2Img = document.getElementById('bm-photo-team2');
-                    if (t1Img) t1Img.src = t1Logo || DEFAULT_TEAM;
-                    if (t2Img) t2Img.src = t2Logo || DEFAULT_TEAM;
-
-                    // Team name labels
-                    const broadcastTeams = (typeof getBroadcastTeamNames === 'function')
-                        ? getBroadcastTeamNames(m)
-                        : [m.team1 || 'TEAM A', m.team2 || 'TEAM B'];
-                    setLabel('btn-team1-label-photo', broadcastTeams[0] || 'TEAM 1');
-                    setLabel('btn-team2-label-photo', broadcastTeams[1] || 'TEAM 2');
-                    setLabel('btn-team1-label', broadcastTeams[0] || 'TEAM A');
-                    setLabel('btn-team2-label', broadcastTeams[1] || 'TEAM B');
-
-                    // Header indicators
-                    setLabel('bm-vs-indicator', `${broadcastTeams[0] || 'A'} vs ${broadcastTeams[1] || 'B'}`);
-                    const scoreEl = document.getElementById('bm-score-indicator');
-                    if (scoreEl) scoreEl.textContent = `${inn.runs || 0}/${inn.wickets || 0} (${(Math.floor((inn.balls||0)/6) + '.' + ((inn.balls||0)%6))})`;
-
-                    // CRR
-                    const crr = inn.balls ? ((inn.runs / inn.balls) * 6).toFixed(2) : '0.00';
-                    setLabel('bm-crr-val', `CRR: ${crr}`);
-
-                    // OBS Preview iframe — send postMessage sync
-                    const previewIframe = document.getElementById('broadcast-preview-iframe');
-                    if (previewIframe && previewIframe.contentWindow) {
-                        previewIframe.contentWindow.postMessage({ type: 'cricpro_broadcast_cmd', payload: { cmd: 'SYNC_MATCH', data: { matchId: m.id } } }, '*');
+                    if (typeof window.forwardBroadcastToPreviews === 'function' && m) {
+                        window.forwardBroadcastToPreviews({
+                            cmd: 'SYNC_SCORE',
+                            data: { match: m },
+                            matchId: m.id,
+                            timestamp: Date.now(),
+                        });
                     }
                 }
 
@@ -1128,7 +1071,7 @@
                     if (typeof Broadcast !== 'undefined' && typeof currentMatch !== 'undefined' && currentMatch) {
                         Broadcast.send('SYNC_SCORE', { match: currentMatch });
                     }
-                    _refreshBroadcastPreview();
+                    if (typeof window.refreshBroadcastPreview === 'function') window.refreshBroadcastPreview();
                     if (typeof currentMatch !== 'undefined' && currentMatch) syncBroadcastMasterPhotos(currentMatch);
                     renderBroadcastMatchList();
                     showToast('✅ Broadcast Resynced!', 'success');
@@ -1235,6 +1178,7 @@
                     const m = DB.getMatch(matchId);
                     if (!m) { showToast('Match not found', 'error'); return; }
                     window.currentMatch = m;
+                    if (typeof currentMatch !== 'undefined') { try { currentMatch = m; } catch (_) {} }
                     
                     const url = new URL(window.location);
                     url.searchParams.set('matchId', matchId);
@@ -1243,10 +1187,26 @@
                     if (typeof renderScoring === 'function') renderScoring();
                     if (typeof renderEmbeddedScorecard === 'function') renderEmbeddedScorecard();
                     
-                    _refreshBroadcastPreview();
-                    syncBroadcastMasterPhotos(m);
+                    const sync = {
+                        cmd: 'SYNC_SCORE',
+                        data: { match: m, matchId: m.id },
+                        matchId: m.id,
+                        tournamentId: m.tournamentId || null,
+                        timestamp: Date.now(),
+                    };
+                    if (window.desktopAPI?.broadcastCommand) {
+                        window.desktopAPI.broadcastCommand(sync);
+                    }
+                    try {
+                        localStorage.setItem('cricpro_broadcast_cmd', JSON.stringify(sync));
+                    } catch (_) {}
+                    if (typeof window.forwardBroadcastToPreviews === 'function') {
+                        window.forwardBroadcastToPreviews(sync);
+                    }
+                    if (typeof window.refreshBroadcastPreview === 'function') window.refreshBroadcastPreview();
+                    if (typeof syncBroadcastMasterPhotos === 'function') syncBroadcastMasterPhotos(m);
                     renderBroadcastMatchList();
-                    showToast('🎬 Switched: ' + (m.team1||'?') + ' vs ' + (m.team2||'?'), 'success');
+                    showToast('🎬 Switched: ' + (m.team1||'?') + ' vs ' + (m.team2||'?') + ' — OBS link unchanged', 'success');
                 }
 
                 // ── Trigger helper ────────────────────────────
@@ -1500,12 +1460,16 @@
 
             <!-- Teams Panel -->
             <div id="tm-panel-teams" style="display:none">
+                <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-weight:800" onclick="openMatchDraw()">🎯 Match Draw</button>
+                    <button type="button" class="btn btn-ghost btn-sm" style="font-weight:800" onclick="openMatchDrawPreview()">👁 Show Draw</button>
+                </div>
                 <div id="tm-teams-list" style="max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px"></div>
             </div>
 
             <div class="modal-actions" style="flex-direction:column; gap:10px; margin-top: 20px;">
                 <button class="btn btn-red btn-full" id="btn-end-tournament" style="display:none">🏆 End Tournament</button>
-                <button class="btn btn-ghost btn-full" onclick="closeModal('modal-tournament-matches')">Close</button>
+                <button class="btn btn-ghost btn-full" onclick="closeTournamentHub()">Close</button>
             </div>
         </div>
     </div>
@@ -1583,8 +1547,13 @@
 
             <div class="form-group">
                 <label class="form-label">Batsman Name</label>
-                <input type="text" class="form-input" id="new-bat-name" placeholder="Enter name..." maxlength="25"
-                    list="db-players-list" />
+                <input type="text" class="form-input" id="new-bat-name" placeholder="Type or pick from squad below..." maxlength="25"
+                    list="db-players-list" oninput="applySquadNameInput(this,'batting','batsman')" />
+            </div>
+
+            <div class="form-group" style="margin-bottom:8px">
+                <label class="form-label" style="font-size:10px; opacity:0.75">Team squad — tap name</label>
+                <div id="squad-bat-opts" class="squad-quick-pick"></div>
             </div>
 
             <div class="modal-actions">
@@ -1601,6 +1570,11 @@
             <div class="modal-sub">Enter both opening batsmen details</div>
 
             <!-- Striker -->
+            <div class="form-group" style="padding-bottom:8px;border-bottom:1px solid var(--c-border)">
+                <label class="form-label" style="font-size:10px; opacity:0.75">Team squad — tap name</label>
+                <div id="squad-open-bat-opts" class="squad-quick-pick" style="margin-bottom:10px"></div>
+            </div>
+
             <div class="form-group" style="padding-bottom:12px;border-bottom:1px solid var(--c-border)">
                 <label class="form-label" style="color:var(--c-amber)">Striker</label>
                 <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -1608,7 +1582,7 @@
                         style="width:120px" />
                     <button class="btn btn-ghost btn-sm" onclick="lookupPlayerOpen(1)">🔍</button>
                     <input type="text" class="form-input" id="open-bat1-name" placeholder="Name..." style="flex:1"
-                        list="db-players-list" />
+                        list="db-players-list" oninput="applySquadNameInput(this,'batting','batsman')" />
                 </div>
             </div>
 
@@ -1620,7 +1594,7 @@
                         style="width:120px" />
                     <button class="btn btn-ghost btn-sm" onclick="lookupPlayerOpen(2)">🔍</button>
                     <input type="text" class="form-input" id="open-bat2-name" placeholder="Name..." style="flex:1"
-                        list="db-players-list" />
+                        list="db-players-list" oninput="applySquadNameInput(this,'batting','nonstriker')" />
                 </div>
             </div>
 
@@ -1648,7 +1622,7 @@
             <div class="form-group">
                 <label class="form-label">Bowler Name</label>
                 <input type="text" class="form-input" id="new-bowl-name" placeholder="Enter bowler name..."
-                    maxlength="25" list="db-players-list" />
+                    maxlength="25" list="db-players-list" oninput="applySquadNameInput(this,'bowling','bowler')" />
             </div>
 
             <div class="form-group">
@@ -1900,7 +1874,8 @@
                     </div>
                 </div>
                 <div style="display:flex; gap:12px">
-                    <button class="btn btn-primary" onclick="saveRosterFromFS()" style="padding:10px 30px; font-weight:900; border-radius:12px; letter-spacing:1px">🚀 SYNC & BROADCAST</button>
+                    <button type="button" class="btn btn-ghost" onclick="openMatchDraw()" style="padding:10px 20px; font-weight:800; border-radius:12px">🎯 Match Draw</button>
+                    <button class="btn btn-primary" onclick="saveRosterFromFS()" style="padding:10px 30px; font-weight:900; border-radius:12px; letter-spacing:1px">💾 SAVE & EXIT</button>
                 </div>
             </div>
         </header>
@@ -1944,6 +1919,7 @@
             <div id="fsr-players-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:20px">
                 <!-- Player Slots -->
             </div>
+            <datalist id="fsr-players-datalist"></datalist>
         </main>
         
         <input id="fsr-player-photo-input" type="file" accept="image/*" style="display:none" onchange="onFSRPlayerPhotoSelected(event)">
@@ -1953,15 +1929,52 @@
 
     <datalist id="db-players-list"></datalist>
 
-    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <!-- OBS Setup Guide Modal -->
+    <div class="modal-overlay" id="modal-obs-setup" style="display:none" onclick="if(event.target===this)closeObsSetupModal()">
+        <div class="modal-box" style="max-width:560px">
+            <div class="modal-title">📺 OBS Overlay — Laptop Setup</div>
+            <div class="modal-sub" style="text-align:left; line-height:1.55">
+                <p style="margin:0 0 12px"><strong>Method 1 — Window Capture</strong> (recommended)</p>
+                <ol style="margin:0 0 16px; padding-left:20px; font-size:13px">
+                    <li>Click <strong>Quick OBS Setup</strong> below — overlay window opens</li>
+                    <li>Keep that window open while you score in SLCRICKPRO</li>
+                    <li>In OBS: <strong>Sources → + → Window Capture</strong></li>
+                    <li>Select <strong>SLCRICKPRO OBS Overlay</strong></li>
+                    <li>Turn OFF capture cursor · Fit to 1920×1080 in OBS transform if needed</li>
+                </ol>
+                <p style="margin:0 0 8px"><strong>Method 2 — Browser Source (one layer)</strong></p>
+                <ol style="margin:0 0 12px; padding-left:20px; font-size:13px">
+                    <li>Copy URL · <span id="obs-setup-size-hint">1920×1080</span> · scorebar + hotkeys · <code>layer=combined</code></li>
+                    <li>OBS → Browser → paste · same Wi‑Fi · scoring laptop LAN IP</li>
+                    <li>Custom CSS: <code style="font-size:11px">body{background:rgba(0,0,0,0)!important;}</code></li>
+                    <li>SLCRICKPRO app open — score updates live</li>
+                </ol>
+                <label style="font-size:10px;opacity:0.85;color:#b39ddb">Site share (slcrickpro.live)</label>
+                <input type="text" id="obs-setup-url-website" readonly class="form-input" style="font-size:10px;font-family:monospace;margin-bottom:8px" />
+                <label style="font-size:10px;opacity:0.7">This PC / LAN</label>
+                <input type="text" id="obs-setup-url-combined" readonly class="form-input" style="font-size:10px;font-family:monospace;margin-bottom:8px" />
+                <label style="font-size:10px;opacity:0.55">Strip only (optional)</label>
+                <input type="text" id="obs-setup-url-scorebar" readonly class="form-input" style="font-size:10px;font-family:monospace;margin-bottom:8px;opacity:0.9" />
+                <input type="text" id="obs-setup-url-hotkeys" readonly style="display:none" aria-hidden="true" />
+            </div>
+            <div class="modal-actions" style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+                <button type="button" class="btn btn-primary" onclick="setupObsQuick()">⚡ Quick Setup</button>
+                <button type="button" class="btn btn-green" onclick="copyObsWebsiteUrl()">🌐 Site URL</button>
+                <button type="button" class="btn btn-ghost" onclick="copyObsCombinedUrl()">📋 LAN</button>
+                <button type="button" class="btn btn-ghost" onclick="if(window.desktopAPI&&desktopAPI.showObsGuide){desktopAPI.showObsGuide({matchId:currentMatch&&currentMatch.id,tournamentId:currentMatch&&currentMatch.tournamentId})}">🖥️ System Guide</button>
+                <button type="button" class="btn btn-ghost" onclick="closeObsSetupModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="../js/cloud-config.js"></script>
-    <script src="../js/cloud-services.js"></script>
-    <script src="../js/db.js"></script>
     <script src="../js/match-report.js"></script>
     <script src="../js/broadcast.js"></script>
+    <script src="../js/obs-setup.js"></script>
+    <script src="../js/match-draw-bridge.js"></script>
     <script src="../js/scorer.js"></script>
     <script src="../js/instant-nrr.js"></script>
     <script src="../js/match-entry.js"></script>
@@ -1973,7 +1986,11 @@
             if (tab === 'hotkeys' && typeof switchScoringTab === 'function') {
                 switchScoringTab('hotkeys');
             }
-            
+            if (typeof loadBroadcastProfileOptions === 'function') loadBroadcastProfileOptions();
+            if (typeof Broadcast !== 'undefined' && Broadcast.restoreOverlayThemeSelect) {
+                Broadcast.restoreOverlayThemeSelect();
+            }
+
             // Attach match type button listeners
             document.querySelectorAll('[data-match-type]').forEach(btn => {
                 btn.addEventListener('click', () => {

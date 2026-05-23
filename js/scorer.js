@@ -25,7 +25,8 @@ let currentPendingWicket = 0;
 let pendingBallEvent = null;
 let pendingExtraType = null;
 let _innings_ending = false; // guard to prevent double-modal
-let autoAnimationsEnabled = localStorage.getItem('cricpro_auto_anim') !== 'false';
+/** 4/6/W TV graphics — hotkeys only unless user enables auto in settings */
+let autoAnimationsEnabled = localStorage.getItem('cricpro_auto_anim') === 'true';
 
 function updateAutoAnimation(enabled) {
     autoAnimationsEnabled = enabled;
@@ -33,8 +34,53 @@ function updateAutoAnimation(enabled) {
     showToast(enabled ? '🚀 Auto-Animations Enabled' : '⏸ Auto-Animations Disabled', 'default');
 }
 
+function getBroadcastProfileSettings() {
+    try {
+        return {
+            withData: localStorage.getItem('cricpro_profile_with_data') !== 'false',
+            autoBatsman: localStorage.getItem('cricpro_auto_profile_bat') !== 'false',
+            autoBowler: localStorage.getItem('cricpro_auto_profile_bowl') !== 'false',
+        };
+    } catch (_) {
+        return { withData: true, autoBatsman: true, autoBowler: true };
+    }
+}
+
+function loadBroadcastProfileOptions() {
+    const s = getBroadcastProfileSettings();
+    const wd = document.getElementById('opt-profile-with-data');
+    const ab = document.getElementById('opt-profile-auto-bat');
+    const abl = document.getElementById('opt-profile-auto-bowl');
+    if (wd) wd.checked = s.withData;
+    if (ab) ab.checked = s.autoBatsman;
+    if (abl) abl.checked = s.autoBowler;
+}
+
+function saveBroadcastProfileOptions() {
+    const withData = document.getElementById('opt-profile-with-data')?.checked !== false;
+    const autoBatsman = document.getElementById('opt-profile-auto-bat')?.checked !== false;
+    const autoBowler = document.getElementById('opt-profile-auto-bowl')?.checked !== false;
+    localStorage.setItem('cricpro_profile_with_data', withData ? 'true' : 'false');
+    localStorage.setItem('cricpro_auto_profile_bat', autoBatsman ? 'true' : 'false');
+    localStorage.setItem('cricpro_auto_profile_bowl', autoBowler ? 'true' : 'false');
+    showToast('Profile options saved', 'success');
+}
+
+function maybeAutoBroadcastPlayerProfile(role) {
+    const s = getBroadcastProfileSettings();
+    if (role === 'bowler') {
+        if (!s.autoBowler) return;
+        setTimeout(() => broadcastBowlerProfile(), 900);
+        return;
+    }
+    if (!s.autoBatsman) return;
+    setTimeout(() => broadcastStrikerProfile(), 900);
+}
+
 let currentTournament = null;
 let _pendingTournPayload = null;
+let _fsrCurrentTeamIndex = 0;
+let _fsrActivePhotoTarget = null;
 const SCORING_AUTH_KEY = 'cricpro_scoring_auth';
 let currentOverlayTeam = null;
 let currentOverlayPlayer = null;
@@ -94,56 +140,142 @@ function playerPhotoSrc(p) {
     return DEFAULT_PLAYER_PHOTO;
 }
 
-function rolePhotoOverride(role) {
-    if (role === 'striker') return window.__photo_striker || '';
-    if (role === 'nonstriker') return window.__photo_nonstriker || '';
-    if (role === 'bowler') return window.__photo_bowler || '';
-    return '';
+const BROADCAST_PHOTO_DEFAULT = '../assets/default-player.svg';
+
+function bindPhotoSlotToPlayer(role, player) {
+    const pid = String(player?.playerId || player?.name || '');
+    const boundKey = `__photo_bound_${role}`;
+    if (window[boundKey] !== pid) {
+        window[boundKey] = pid;
+        window[`__photo_cleared_${role}`] = false;
+        if (role === 'striker') window.__photo_striker = null;
+        else if (role === 'nonstriker') window.__photo_nonstriker = null;
+        else if (role === 'bowler') window.__photo_bowler = null;
+    }
 }
 
-function setRolePhotoOverride(role, dataUrl) {
-    if (role === 'striker') window.__photo_striker = dataUrl;
-    else if (role === 'nonstriker') window.__photo_nonstriker = dataUrl;
-    else if (role === 'bowler') window.__photo_bowler = dataUrl;
+function setBroadcastPhotoPreviewEl(elId, src) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const isDefault = !src || src === BROADCAST_PHOTO_DEFAULT;
+    if (el.tagName === 'IMG') {
+        el.src = isDefault ? BROADCAST_PHOTO_DEFAULT : src;
+        return;
+    }
+    el.innerHTML = isDefault
+        ? '📷'
+        : `<img src="${src}" style="width:100%;height:100%;object-fit:contain;border-radius:10px" alt="">`;
 }
 
-function setHotkeyRoleImage(role, dataUrl) {
-    const ids = {
-        striker: 'bm-photo-striker',
-        nonstriker: 'bm-photo-nonstriker',
-        bowler: 'bm-photo-bowler'
+function syncLivePlayerPhotoSlots(m) {
+    if (!m || !m.innings) return;
+    const inn = m.innings[m.currentInnings ?? 0];
+    if (!inn) return;
+
+    const slots =
+        typeof getInningsPlayersForPhotoSlots === 'function'
+            ? getInningsPlayersForPhotoSlots(m)
+            : (() => {
+                  const sIdx = inn.currentBatsmenIdx?.[inn.strikerIdx ?? 0];
+                  const nsIdx = inn.currentBatsmenIdx?.[inn.strikerIdx === 0 ? 1 : 0];
+                  return {
+                      striker: sIdx != null ? inn.batsmen?.[sIdx] : null,
+                      nonstriker: nsIdx != null ? inn.batsmen?.[nsIdx] : null,
+                      bowler:
+                          inn.currentBowlerIdx != null
+                              ? inn.bowlers?.[inn.currentBowlerIdx]
+                              : null,
+                  };
+              })();
+
+    const uiMap = {
+        striker: {
+            imgs: ['bm-photo-striker', 'preview_striker'],
+            names: ['bm-name-striker', 'bm-label-striker'],
+        },
+        nonstriker: {
+            imgs: ['bm-photo-nonstriker', 'preview_nonstriker'],
+            names: ['bm-name-nonstriker', 'bm-label-nonstriker'],
+        },
+        bowler: {
+            imgs: ['bm-photo-bowler', 'preview_bowler'],
+            names: ['bm-name-bowler', 'bm-label-bowler'],
+        },
     };
-    const img = document.getElementById(ids[role]);
-    if (img && dataUrl) img.src = dataUrl;
-}
 
-function isRealTeamName(value) {
-    const v = String(value || '').trim();
-    return !!v && !['tbd', 'team a', 'team b', 'team 1', 'team 2', 'undefined', 'null'].includes(v.toLowerCase());
-}
-
-function getBroadcastTeamNames(m) {
-    if (!m) return ['TEAM A', 'TEAM B'];
-    const teams = [];
-    const add = (name) => {
-        const v = String(name || '').trim();
-        if (isRealTeamName(v) && !teams.includes(v)) teams.push(v);
-    };
-
-    add(m.team1);
-    add(m.team2);
-    (m.innings || []).filter(Boolean).forEach(inn => {
-        add(inn.battingTeam);
-        add(inn.bowlingTeam);
+    Object.keys(uiMap).forEach((role) => {
+        const player = slots[role];
+        if (player) bindPhotoSlotToPlayer(role, player);
+        const src =
+            typeof getBroadcastPhotoForRole === 'function'
+                ? getBroadcastPhotoForRole(role, player) || BROADCAST_PHOTO_DEFAULT
+                : player?.playerId && DB.getPlayerPhoto
+                  ? DB.getPlayerPhoto(player.playerId) || BROADCAST_PHOTO_DEFAULT
+                  : BROADCAST_PHOTO_DEFAULT;
+        uiMap[role].imgs.forEach((id) => setBroadcastPhotoPreviewEl(id, src));
+        const label = player?.name || (role === 'bowler' ? 'NO BOWLER' : 'NO PLAYER');
+        uiMap[role].names.forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = label;
+        });
+        if (role === 'striker' || role === 'nonstriker') {
+            if (!window[`__photo_cleared_${role}`] && src !== BROADCAST_PHOTO_DEFAULT) {
+                if (role === 'striker') window.__photo_striker = src;
+                else window.__photo_nonstriker = src;
+            }
+        } else if (role === 'bowler' && !window.__photo_cleared_bowler && src !== BROADCAST_PHOTO_DEFAULT) {
+            window.__photo_bowler = src;
+        }
     });
-    add(m.battingFirst);
-    add(m.fieldingFirst);
 
-    return [
-        teams[0] || m.team1 || 'TEAM A',
-        teams[1] || m.team2 || 'TEAM B'
-    ];
+    if (inn.currentPartnership || (inn.partnerships && inn.partnerships.length)) {
+        const p = inn.currentPartnership || inn.partnerships[inn.partnerships.length - 1];
+        const el = document.getElementById('bm-label-partner');
+        if (el) el.textContent = `${p.runs || 0} off ${p.balls || 0}`;
+    }
+
+    const t1Logo = DB.getTeamPhoto(m.team1, m.tournamentId);
+    const t2Logo = DB.getTeamPhoto(m.team2, m.tournamentId);
+    const t1Img = document.getElementById('bm-photo-team1');
+    const t2Img = document.getElementById('bm-photo-team2');
+    if (t1Img) t1Img.src = t1Logo || '../assets/default-team.svg';
+    if (t2Img) t2Img.src = t2Logo || '../assets/default-team.svg';
+
+    const setTeamLbl = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    setTeamLbl('btn-team1-label-photo', m.team1 || 'TEAM 1');
+    setTeamLbl('btn-team2-label-photo', m.team2 || 'TEAM 2');
+    setTeamLbl('btn-team1-label', m.team1 || 'TEAM A');
+    setTeamLbl('btn-team2-label', m.team2 || 'TEAM 2');
+    const vsEl = document.getElementById('bm-vs-indicator');
+    if (vsEl) vsEl.textContent = `${m.team1 || 'A'} vs ${m.team2 || 'B'}`;
+    const scoreEl = document.getElementById('bm-score-indicator');
+    if (scoreEl) {
+        scoreEl.textContent = `${inn.runs || 0}/${inn.wickets || 0} (${formatOvers(inn.balls || 0, m.ballsPerOver || 6)})`;
+    }
+    const crr = inn.balls ? ((inn.runs / inn.balls) * 6).toFixed(2) : '0.00';
+    const crrEl = document.getElementById('bm-crr-val');
+    if (crrEl) crrEl.textContent = `CRR: ${crr}`;
 }
+
+function clearPlayerPhotoSlot(role) {
+    if (!['striker', 'nonstriker', 'bowler'].includes(role)) return;
+    window[`__photo_cleared_${role}`] = true;
+    if (role === 'striker') window.__photo_striker = null;
+    else if (role === 'nonstriker') window.__photo_nonstriker = null;
+    else window.__photo_bowler = null;
+    const m = currentMatch || window.currentMatch;
+    if (m) syncLivePlayerPhotoSlots(m);
+    if (typeof showToast === 'function') {
+        showToast('Photo hidden on overlay only (database unchanged)', 'default');
+    }
+}
+
+window.syncLivePlayerPhotoSlots = syncLivePlayerPhotoSlots;
+window.syncBroadcastMasterPhotos = syncLivePlayerPhotoSlots;
+window.clearPlayerPhotoSlot = clearPlayerPhotoSlot;
 
 document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -193,9 +325,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         return; // STOP HERE
     }
 
-    // SYNC FIRST: ensure we have latest cloud data before rendering or resolving direct links
+    // Sync in background — do not block scheduling UI
     if (typeof window.pullGlobalData === 'function') {
-        await window.pullGlobalData();
+        window.pullGlobalData().catch(() => {});
     }
 
     const tf = document.getElementById('tourn-format');
@@ -206,10 +338,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Ensure Single Match form is properly visible on load
-    toggleMatchConfig(true);
-
-    renderResumeMatches();
+    const bootSetup = () => {
+        if (!mId && !tId) selectMatchType('tournament');
+        else selectMatchType('single');
+        renderResumeMatches();
+    };
+    bootSetup();
+    if (window.SLCRICK_DESKTOP) {
+        window.addEventListener('slcrick-db-ready', () => renderResumeMatches());
+    }
 
     // Auto-refresh Open Match list every 10 seconds (slightly slower to avoid spamming)
     setInterval(() => {
@@ -251,13 +388,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// ── GLOBAL HOOK: expose renderResumeMatches so db.js can call it after cloud sync ──
-window.renderResumeMatches = function() {
-    if (typeof renderResumeMatchesImpl === 'function') {
-        renderResumeMatchesImpl();
-    }
-};
-
 function getScoringAuthMap() {
     try {
         return JSON.parse(localStorage.getItem(SCORING_AUTH_KEY) || '{}');
@@ -279,6 +409,7 @@ function setTournamentAuthorized(tournamentId, token, expiresInMs) {
     };
     saveScoringAuthMap(map);
 }
+window.setTournamentAuthorized = setTournamentAuthorized;
 
 function getTournamentToken(tournamentId) {
     if (!tournamentId) return null;
@@ -291,12 +422,190 @@ function getTournamentToken(tournamentId) {
 function isTournamentAuthorized(tournamentId) {
     return !!getTournamentToken(tournamentId);
 }
+window.isTournamentAuthorized = isTournamentAuthorized;
+
+/** In-hub session only (cleared when tournament dashboard closes). */
+const TOURNAMENT_SESSION_AUTH_MS = 1000 * 60 * 60 * 4;
+
+function clearTournamentAuthorization(tournamentId) {
+    if (!tournamentId) return;
+    const map = getScoringAuthMap();
+    if (map[tournamentId]) {
+        delete map[tournamentId];
+        saveScoringAuthMap(map);
+    }
+}
+window.clearTournamentAuthorization = clearTournamentAuthorization;
+
+function isTournamentHubSessionActive(tournamentId) {
+    return _tournamentUnlockedThisVisit === tournamentId;
+}
+
+function markTournamentSessionUnlocked(tournamentId) {
+    if (!tournamentId) return;
+    _tournamentUnlockedThisVisit = tournamentId;
+    setTournamentAuthorized(tournamentId, 'session', TOURNAMENT_SESSION_AUTH_MS);
+}
+
+function closeTournamentHub() {
+    if (currentTournament?.id) {
+        clearTournamentAuthorization(currentTournament.id);
+        if (_tournamentUnlockedThisVisit === currentTournament.id) _tournamentUnlockedThisVisit = null;
+    }
+    currentTournament = null;
+    closeModal('modal-tournament-matches');
+}
+window.closeTournamentHub = closeTournamentHub;
+
+let _loginPendingAction = null;
+/** Set after password OK; cleared when tournament dashboard is closed. */
+let _tournamentUnlockedThisVisit = null;
+
+function tournamentHasPassword(t) {
+    if (!t) return false;
+    return !!(t.scoringPassword || t.password || t.isLocked);
+}
+window.tournamentHasPassword = tournamentHasPassword;
+
+function matchNeedsPassword(m, t) {
+    if (!m) return false;
+    if (m.scoringPassword || m.password || m.isLocked) return true;
+    if (m.tournamentId && t) return tournamentHasPassword(t);
+    return false;
+}
+
+function repairTournamentPasswordCache(t) {
+    if (!t?.id || !window.DB) return t;
+    const stored = localStorage.getItem(`tourn_pw_${t.id}`);
+    if (stored && !t.scoringPassword && !t.password) {
+        t.scoringPassword = stored;
+        try {
+            DB.saveTournament(t, true, { skipPublish: true, skipForceUpdate: true });
+        } catch (_) {}
+    }
+    return t;
+}
+
+function showTournamentLoginScreen(t, pending) {
+    if (!t) return;
+    t = repairTournamentPasswordCache(t);
+    _loginPendingAction = pending || { type: 'hub' };
+    currentTournament = t;
+    const titleEl = document.getElementById('login-match-title');
+    const subEl = document.getElementById('login-match-sub');
+    if (titleEl) titleEl.textContent = t.name || 'Tournament';
+    if (subEl) {
+        subEl.textContent = pending?.type === 'match'
+            ? 'Enter the tournament scoring password to start or resume this match.'
+            : 'Enter the tournament scoring password every time you open this dashboard.';
+    }
+    const pwEl = document.getElementById('login-password');
+    if (pwEl) pwEl.value = '';
+    const hint = document.getElementById('login-desktop-hint');
+    if (hint) hint.style.display = window.SLCRICK_DESKTOP ? 'block' : 'none';
+    showScreen('login');
+    setTimeout(() => pwEl?.focus(), 80);
+}
+window.showTournamentLoginScreen = showTournamentLoginScreen;
+
+function showMatchLoginScreen(m, pending) {
+    if (!m) return;
+    _loginPendingAction = pending || { type: 'match', matchId: m.id };
+    currentMatch = m;
+    currentTournament = m.tournamentId ? DB.getTournament(m.tournamentId) : null;
+    const titleEl = document.getElementById('login-match-title');
+    const subEl = document.getElementById('login-match-sub');
+    if (titleEl) titleEl.textContent = `${m.team1 || 'Team A'} vs ${m.team2 || 'Team B'}`;
+    if (subEl) subEl.textContent = 'Enter the scoring password for this match.';
+    const pwEl = document.getElementById('login-password');
+    if (pwEl) pwEl.value = '';
+    showScreen('login');
+    setTimeout(() => pwEl?.focus(), 80);
+}
+window.showMatchLoginScreen = showMatchLoginScreen;
+
+function openTournamentHubAfterAuth(t) {
+    if (!t) return;
+    currentTournament = t;
+    const title = document.getElementById('tm-title');
+    if (title) title.textContent = currentTournament.name;
+    const modal = document.getElementById('modal-tournament-matches');
+    if (modal) modal.style.display = 'flex';
+    switchTournamentTab('matches');
+}
+
+async function ensureTournamentAccess(tournamentId, pending) {
+    if (!tournamentId) return true;
+    let t = DB.getTournament(tournamentId);
+    if (!t && typeof window.pullGlobalData === 'function') {
+        await window.pullGlobalData();
+        t = DB.getTournament(tournamentId);
+    }
+    if (!t || !tournamentHasPassword(t)) return true;
+    if (isTournamentHubSessionActive(tournamentId)) return true;
+    showTournamentLoginScreen(t, pending || { type: 'hub' });
+    return false;
+}
+window.ensureTournamentAccess = ensureTournamentAccess;
+
+async function completeLoginSuccess(actionIn) {
+    const action = actionIn || _loginPendingAction;
+    _loginPendingAction = null;
+    const t = currentTournament;
+    const m = currentMatch;
+
+    try {
+        if (action?.type === 'match' && action.matchId) {
+            showScreen('setup');
+            currentTournament = null;
+            if (typeof onResumeOrStart === 'function') {
+                await onResumeOrStart(action.matchId, action.tournamentId || t?.id || '', !!action.isStart);
+            }
+            return;
+        }
+
+        if (t) {
+            showScreen('setup');
+            openTournamentHubAfterAuth(t);
+            return;
+        }
+
+        if (m) {
+            showScreen('setup');
+            if (typeof loadMatch === 'function') loadMatch(m);
+        }
+    } catch (e) {
+        console.error('[Login] completeLoginSuccess failed', e);
+        showScreen('setup');
+        if (t) {
+            try {
+                openTournamentHubAfterAuth(t);
+            } catch (e2) {
+                console.error('[Login] hub open failed', e2);
+            }
+        }
+        showToast('Opened dashboard — if blank, click Dashboard again', 'default');
+    }
+}
 
 // ========== SCREEN ==========
 function showScreen(name) {
-    document.querySelectorAll('.scorer-screen').forEach(s => s.style.display = 'none');
+    document.querySelectorAll('.scorer-screen').forEach((s) => {
+        s.style.display = 'none';
+        s.classList.remove('active');
+    });
     const el = document.getElementById('screen-' + name);
-    if (el) el.style.display = 'block';
+    if (el) {
+        el.style.display = 'block';
+        el.classList.add('active');
+    }
+    if (name !== 'login') {
+        const login = document.getElementById('screen-login');
+        if (login) {
+            login.style.display = 'none';
+            login.classList.remove('active');
+        }
+    }
 }
 
 function handleBack() {
@@ -325,9 +634,9 @@ function selectMatchType(type) {
     if (btnTourn) btnTourn.classList.toggle('active', type === 'tournament');
     if (btnNRR) btnNRR.classList.toggle('active', type === 'instant-nrr');
     
-    const tournSection = document.getElementById('tournament-setup-section') || document.getElementById('new-tournament-form');
+    const tournSection = document.getElementById('tournament-setup-section');
     if (tournSection) {
-        tournSection.style.display = type === 'tournament' ? '' : 'none';
+        tournSection.style.display = type === 'tournament' ? 'block' : 'none';
     }
     
     const matchConfigCard = document.getElementById('match-config-card');
@@ -354,7 +663,8 @@ function toggleOfficialSettings(val) {
 }
 
 function onTournamentSelect(val) {
-    document.getElementById('new-tournament-form').style.display = val === 'new' ? '' : 'none';
+    const form = document.getElementById('new-tournament-form');
+    if (form) form.style.display = val === 'new' ? 'block' : 'none';
     toggleMatchConfig(val !== 'new');
 }
 
@@ -408,23 +718,33 @@ function renderResumeMatchesImpl() {
     const container = document.getElementById('resume-matches-list');
     if (!container) return;
 
+    const db = window.DB;
+    if (!db?.getMatches) {
+        if (typeof window.SLCRICK_renderResumeList === 'function') {
+            window.SLCRICK_renderResumeList();
+            return;
+        }
+    }
+
     // 1. Get ALL matches and filter for displayable ones
-    const allMatches = DB.getMatches();
+    const allMatches = db ? db.getMatches() : [];
     const pausedMatches = allMatches.filter(m => m.status === 'paused' || m.status === 'live');
     const scheduledMatches = allMatches.filter(m => (!m.tournamentId) && (m.status === 'scheduled' || m.status === 'setup')).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-    // Improved tournament filtering: include 'scheduled' for newly created locally
-    const tourns = DB.getTournaments().filter(t => ['requested', 'approved', 'active', 'scheduled', 'setup'].includes(t.status));
+    const tourns = (db ? db.getTournaments() : []).filter((t) => t && t.id && t.status !== 'completed' && t.status !== 'cancelled');
     
-    const requests = DB.getRequests().filter(r => r.type === 'tournament' && r.status === 'pending');
+    const requests = db ? db.getRequests().filter(r => r.type === 'tournament' && r.status === 'pending') : [];
 
     if (!pausedMatches.length && !tourns.length && !requests.length && !scheduledMatches.length) {
-        const isSyncing = !window._isGlobalSyncCompleted;
+        const isSyncing =
+            !window.SLCRICK_DESKTOP &&
+            window.SLCRICK_SYNC?.isEnabled?.() &&
+            !window._isGlobalSyncCompleted;
         container.innerHTML = `
             <div style="color:var(--c-muted);font-size:14px;padding:32px 20px;text-align:center;background:rgba(255,255,255,0.015);border-radius:18px;border:1px dashed rgba(255,255,255,0.1); margin-bottom:15px">
                 ${isSyncing ? 
                     '<span class="syncing-animate" style="display:inline-block;margin-bottom:12px;font-size:28px">🔄</span><br><b style="color:#fff">Synchronizing with Cloud...</b>' : 
-                    '<div style="font-size:24px;margin-bottom:8px">📭</div><b>No Active Tournaments or Matches</b><p style="font-size:12px;opacity:0.6;margin-top:4px">Create a new tournament above to get started</p>'}
+                    '<div style="font-size:24px;margin-bottom:8px">📭</div><b>No Active Tournaments or Matches</b><p style="font-size:12px;opacity:0.6;margin-top:4px">Select <b>Tournament Match</b>, add teams, then Schedule — matches appear here</p>'}
             </div>`;
         return;
     }
@@ -439,30 +759,34 @@ function renderResumeMatchesImpl() {
         html += `<div style="font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:2px; color:var(--c-primary); margin:20px 0 12px 10px; opacity:0.8">🏆 YOUR TOURNAMENTS</div>`;
         
         sortedTourns.forEach(t => {
-            const hasPw = (t.scoringPassword || t.password || t.isLocked);
+            const hasPw = !!(t.scoringPassword || t.password || t.isLocked);
             let statusBadge = '';
-            let btnLabel = 'Manage Hub';
-            
-            if (t.status === 'requested') statusBadge = `<span style="font-size:10px; background:rgba(255,193,7,0.2); color:#ffc107; padding:2px 8px; border-radius:100px; font-weight:800">PENDING APPROVAL</span>`;
-            else if (t.status === 'completed') statusBadge = `<span style="font-size:10px; background:rgba(0,230,118,0.2); color:#00e676; padding:2px 8px; border-radius:100px; font-weight:800">COMPLETED</span>`;
-            else statusBadge = `<span style="font-size:10px; background:rgba(var(--c-primary-rgb),0.2); color:var(--c-primary); padding:2px 8px; border-radius:100px; font-weight:800">READY TO SCORE</span>`;
+
+            if (t.status === 'requested') {
+                statusBadge = `<span style="font-size:10px; background:rgba(255,193,7,0.2); color:#ffc107; padding:2px 8px; border-radius:100px; font-weight:800">PENDING APPROVAL</span>`;
+            } else if (t.status === 'completed') {
+                statusBadge = `<span style="font-size:10px; background:rgba(0,230,118,0.2); color:#00e676; padding:2px 8px; border-radius:100px; font-weight:800">COMPLETED</span>`;
+            } else {
+                statusBadge = `<span style="font-size:10px; background:rgba(var(--c-primary-rgb),0.15); color:var(--c-primary); padding:2px 8px; border-radius:100px; font-weight:800">READY TO SCORE</span>`;
+            }
+
+            const matchTotal = t.matches ? t.matches.length : 0;
+            const fmtLabel = capitalize((t.format || 'league').replace(/_/g, ' '));
 
             html += `
-                <div class="resume-card" style="border-left: 4px solid var(--c-primary); background:rgba(255,255,255,0.02); margin-bottom:12px; padding:20px; transition:all 0.3s ease">
-                    <div class="resume-card-info" style="flex:1">
-                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px">
+                <div class="resume-card resume-card-tournament" style="border-left:4px solid var(--c-primary); margin-bottom:0; padding:18px 20px">
+                    <div class="resume-card-info" style="flex:1; min-width:0">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap">
                             ${statusBadge}
-                            ${hasPw ? `<span style="font-size:10px; background:rgba(0,0,0,0.3); color:#ffc107; padding:2px 8px; border-radius:100px; font-weight:800">🔒 SECURE</span>` : ''}
+                            ${hasPw ? `<span style="font-size:10px; background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:100px; font-weight:800">🔒 SECURE</span>` : ''}
                         </div>
-                        <h4 style="font-size:20px; font-weight:950; letter-spacing:-0.5px; margin-bottom:4px">${t.name}</h4>
-                        <div style="font-size:12px; opacity:0.6; display:flex; gap:12px">
-                            <span>Format: ${capitalize(t.format || 'League')}</span>
-                            <span>Matches: ${t.matches ? t.matches.length : 0}</span>
+                        <h4 style="font-size:20px; font-weight:950; letter-spacing:-0.5px; margin:0 0 6px; line-height:1.2">${typeof escapeHTML === 'function' ? escapeHTML(t.name) : t.name}</h4>
+                        <div style="font-size:12px; color:var(--c-muted); display:flex; gap:14px; flex-wrap:wrap">
+                            <span>Format: ${typeof escapeHTML === 'function' ? escapeHTML(fmtLabel) : fmtLabel}</span>
+                            <span>Matches: ${matchTotal}</span>
                         </div>
                     </div>
-                    <div style="display:flex; flex-direction:column; gap:8px">
-                        <button class="btn btn-primary btn-sm" style="font-weight:800; border-radius:10px" onclick="openTournamentHub('${t.id}')">Dashboard</button>
-                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" style="font-weight:800; border-radius:10px; flex-shrink:0" onclick="openTournamentHub('${t.id}')">Dashboard</button>
                 </div>
             `;
         });
@@ -534,6 +858,14 @@ function renderResumeMatchesImpl() {
     container.innerHTML = html;
 }
 
+window.renderResumeMatches = function () {
+    if (typeof window.SLCRICK_renderResumeList === 'function') {
+        window.SLCRICK_renderResumeList();
+    } else {
+        renderResumeMatchesImpl();
+    }
+};
+
 async function submitMatchRequest() {
     const name = document.getElementById('req-name').value.trim();
     const pw = document.getElementById('req-password').value.trim();
@@ -563,20 +895,14 @@ async function submitMatchRequest() {
 
 function authorizeTournamentLocally(tournamentId) {
     if (!tournamentId) return false;
-
-    // Check if we have a stored password for this tournament
-    const storedPw = localStorage.getItem(`tourn_pw_${tournamentId}`);
-    if (storedPw) {
-        setTournamentAuthorized(tournamentId, 'local-token', 1000 * 60 * 60 * 24);
-        return true;
-    }
-
+    if (isTournamentAuthorized(tournamentId)) return true;
     const t = DB.getTournament(tournamentId);
     if (!t) return false;
-    const pw = t.scoringPassword || t.password;
-    if (!pw) return false;
-    setTournamentAuthorized(tournamentId, 'local-token', 1000 * 60 * 60 * 24);
-    return true;
+    if (!tournamentHasPassword(t)) {
+        setTournamentAuthorized(tournamentId, 'open', TOURNAMENT_SESSION_AUTH_MS);
+        return true;
+    }
+    return false;
 }
 
 function openScorerDashboard(matchId) {
@@ -661,11 +987,11 @@ function switchTournamentTab(tab) {
 
 async function openTournamentHub(id) {
     if (!id) return;
-    let t = DB.getTournament(id);
+    let t = window.DB.getTournament(id);
     if (!t) {
         if (typeof window.pullGlobalData === 'function') {
             await window.pullGlobalData();
-            t = DB.getTournament(id);
+            t = window.DB.getTournament(id);
         }
     }
     if (!t) {
@@ -673,14 +999,20 @@ async function openTournamentHub(id) {
         return;
     }
 
-    // PASSWORD BYPASSED
-    currentTournament = t;
-    document.getElementById('tm-title').textContent = currentTournament.name;
-    document.getElementById('modal-tournament-matches').style.display = 'flex';
-    
-    // Reset to matches tab
-    switchTournamentTab('matches');
+    if (tournamentHasPassword(t)) {
+        if (isTournamentHubSessionActive(id)) {
+            openTournamentHubAfterAuth(t);
+            return;
+        }
+        _tournamentUnlockedThisVisit = null;
+        showTournamentLoginScreen(t, { type: 'hub' });
+        return;
+    }
+
+    openTournamentHubAfterAuth(t);
 }
+window._openTournamentHubReal = openTournamentHub;
+window.openTournamentHub = openTournamentHub;
 
 async function promptTournamentLogin() {
     const tId = await showInputModal('Enter Tournament ID:', '');
@@ -731,8 +1063,8 @@ function renderTournamentMatches() {
             subInfo = `Match ${index + 1} · Completed`;
             cardStyle = 'opacity: 0.8;';
         } else {
-            statusBadge = `<span class="badge badge-amber" style="font-size:10px">Scheduled</span>`;
-            btn = `<button class="btn btn-primary btn-sm" onclick="onResumeOrStart('${m.id}', '${m.tournamentId || ''}', true)">Start Match</button>`;
+            statusBadge = `<span class="badge badge-amber" style="font-size:10px">📅 Scheduled</span>`;
+            btn = `<button class="btn btn-primary btn-sm" onclick="onResumeOrStart('${m.id}', '${m.tournamentId || ''}', true)">▶ Start Match</button>`;
         }
 
         html += `<div class="resume-card" style="margin-bottom:12px; align-items: center; ${cardStyle}; padding: 16px">
@@ -861,15 +1193,6 @@ function endTournamentManually(tournId) {
         t.status = 'completed';
         DB.saveTournament(t);
 
-        // Sync to backend/cloud
-        if (typeof syncToDB === 'function') {
-            syncToDB('tournament', { ...t, id: t.id });
-        }
-        // Emit globalUpdate so ongoing.js & other tabs refresh standings/NRR instantly
-        if (typeof socket !== 'undefined' && socket && socket.connected) {
-            socket.emit('globalUpdate', { type: 'tournament_completed', id: t.id });
-        }
-
         showToast('🏆 Tournament COMPLETED! Standings finalized.', 'success');
         closeModal('modal-tournament-matches');
         
@@ -922,105 +1245,229 @@ function startOfficialMatch(mId) {
 }
 
 async function loginToMatch() {
+    const unlockBtn = document.getElementById('btn-login-unlock');
+    if (unlockBtn?.disabled) return;
     const pw = document.getElementById('login-password').value.trim();
     if (!pw) { showToast('Password required!', 'error'); return; }
+    if (unlockBtn) {
+        unlockBtn.disabled = true;
+        unlockBtn.textContent = 'Checking…';
+    }
 
-    // Use the globally exposed BACKEND_BASE_URL (set in db.js)
-    const baseUrl = BACKEND_BASE_URL || window.BACKEND_BASE_URL || window.location.origin;
     const tournamentId = currentTournament?.id || currentMatch?.tournamentId || null;
+    const matchId = currentMatch?.id || _loginPendingAction?.matchId || null;
 
-    // ── STEP 1: LOCAL PLAINTEXT CHECK (works for creator's device) ──────────
-    if (!tournamentId) {
-        // Single match: check local plain-text password
-        const localPw = currentMatch?.scoringPassword || currentMatch?.password;
-        if (localPw && pw === localPw) {
-            showToast('✅ Access Granted!', 'success');
-            loadMatch(currentMatch);
+    const pendingAction = _loginPendingAction || { type: 'hub' };
+
+    const grantAccess = async (meta = {}) => {
+        try {
+            if (tournamentId) {
+                try {
+                    localStorage.setItem(`tourn_pw_${tournamentId}`, pw);
+                } catch (_) {}
+                const tRec = DB.getTournament(tournamentId);
+                if (tRec) {
+                    tRec.scoringPassword = pw;
+                    DB.saveTournament(tRec, true, { skipPublish: true });
+                    currentTournament = tRec;
+                }
+                markTournamentSessionUnlocked(tournamentId);
+                if (meta.token) {
+                    setTournamentAuthorized(tournamentId, meta.token, meta.expiresInMs || TOURNAMENT_SESSION_AUTH_MS);
+                } else {
+                    setTournamentAuthorized(tournamentId, 'session', TOURNAMENT_SESSION_AUTH_MS);
+                }
+            }
+            showToast('✅ Password accepted', 'success');
+            await completeLoginSuccess(pendingAction);
+        } finally {
+            if (unlockBtn) {
+                unlockBtn.disabled = false;
+                unlockBtn.textContent = '🔓 Unlock & Continue';
+            }
+        }
+    };
+
+    const tryIds = [];
+    if (tournamentId) tryIds.push(tournamentId);
+    if (matchId && !tryIds.includes(matchId)) tryIds.push(matchId);
+
+    for (const id of tryIds) {
+        if (window.SLCRICK_SYNC?.verifyLocalPassword) {
+            const local = window.SLCRICK_SYNC.verifyLocalPassword(id, pw);
+            if (local.ok) {
+                await grantAccess({});
+                return;
+            }
+        }
+        const stored = localStorage.getItem(`tourn_pw_${id}`);
+        if (stored && String(stored).trim() === pw) {
+            await grantAccess({});
             return;
         }
-    } else {
-        // Tournament match: check local tournament password
-        const localT = DB.getTournament(tournamentId);
-        const localPw = localT?.scoringPassword || localT?.password;
-        if (localPw && pw === localPw) {
-            localStorage.setItem(`tourn_pw_${tournamentId}`, pw);
-            setTournamentAuthorized(tournamentId, 'local-token', 1000 * 60 * 60 * 24);
-            showToast('✅ Access Granted!', 'success');
-            if (currentTournament && !currentMatch) {
-                openTournamentHub(currentTournament.id);
-                currentTournament = null;
-                showScreen('setup');
-            } else if (currentMatch) {
-                loadMatch(currentMatch);
-            }
+        const tObj = id.startsWith('MATCH') ? DB.getMatch(id) : DB.getTournament(id);
+        const tPw = tObj?.scoringPassword || tObj?.password;
+        if (tPw && String(tPw).trim() === pw) {
+            await grantAccess({});
+            return;
+        }
+        if (window.SLCRICK_DESKTOP && !tPw && (tObj?.isLocked || tournamentHasPassword(tObj)) && pw === 'offline') {
+            await grantAccess({});
             return;
         }
     }
 
-    // ── STEP 2: CLOUD BCRYPT CHECK (works for any device — password was hashed on save) ──
-    try {
-        const type = tournamentId ? 'tournament' : 'match';
-        const id = tournamentId || currentMatch?.id;
-        if (!id) { showToast('No match/tournament selected', 'error'); return; }
-
-        showToast('🔐 Verifying password...', 'default');
-
-        const response = await fetch(baseUrl + '/api/handshake', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, type, password: pw.trim() })
-        });
-
-        if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            const msg = errData.error || 'Server error. Sync failed?';
-            showToast(`❌ ${msg}`, 'error');
-            return;
-        }
-        const result = await response.json();
-
-        if (result.ok) {
-            showToast('✅ Access Granted!', 'success');
-            
-            // Record this grant locally
-            const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
-            grants[id] = true;
-            localStorage.setItem('cricpro_grants', JSON.stringify(grants));
-
-            if (type === 'tournament') {
-                // Store password for future local auth attempt
-                localStorage.setItem(`tourn_pw_${id}`, pw);
-                setTournamentAuthorized(id, result.token || 'cloud-verified', 1000 * 60 * 60 * 24);
-                if (result.token) {
-                    localStorage.setItem('cricpro_token', result.token);
-                    if (result.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + result.expiresInMs).toString());
-                }
-                if (currentTournament) {
-                    openTournamentHub(currentTournament.id);
-                    currentTournament = null;
-                } else {
-                    showScreen('setup');
-                }
-                if (currentMatch) loadMatch(currentMatch);
-            } else {
-                if (currentMatch) loadMatch(currentMatch);
-                else {
-                    // If we just had an ID, try to find and load it
-                    const m = DB.getMatch(id);
-                    if (m) loadMatch(m);
-                }
+    for (const id of tryIds) {
+        if (typeof DB.handshake !== 'function') continue;
+        try {
+            const res = await DB.handshake(id, pw);
+            if (res?.ok) {
+                await grantAccess({ token: res.token, expiresInMs: res.expiresInMs });
+                return;
             }
-        } else {
-            showToast('❌ Wrong password! Try again.', 'error');
-            document.getElementById('login-password').value = '';
-            document.getElementById('login-password').focus();
+        } catch (e) {
+            console.warn('[Login] handshake error', id, e);
         }
-    } catch (e) {
-        console.error('Cloud auth error', e);
-        showToast('⚠️ Could not reach server. Check connection.', 'error');
+    }
+
+    const hint =
+        window.SLCRICK_DESKTOP && !document.getElementById('tourn-scoring-password')?.value
+            ? ' Desktop tournaments often use password: offline'
+            : '';
+    showToast('❌ Wrong password.' + hint, 'error');
+    const pwEl = document.getElementById('login-password');
+    if (pwEl) {
+        pwEl.value = '';
+        pwEl.focus();
+    }
+    if (unlockBtn) {
+        unlockBtn.disabled = false;
+        unlockBtn.textContent = '🔓 Unlock & Continue';
     }
 }
+window.loginToMatch = loginToMatch;
 
+
+/**
+ * Schedule tournament from the tournament form (site + desktop).
+ * Ensures tournament mode even if user did not click "Tournament Match" tab first.
+ */
+async function scheduleTournamentFromForm() {
+    if (window.SLCRICK_DESKTOP && typeof window.scheduleTournamentNow === 'function') {
+        return window.scheduleTournamentNow();
+    }
+    try {
+    selectMatchType('tournament');
+    currentMatchType = 'tournament';
+
+    const teamLines = (document.getElementById('tourn-teams')?.value || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const uniqueTeams = [...new Set(teamLines)];
+    let tName = document.getElementById('tourn-name')?.value.trim();
+    let scoringPw = document.getElementById('tourn-scoring-password')?.value.trim();
+    const overs = parseInt(document.getElementById('tourn-overs')?.value) || 20;
+    const bpo = parseInt(document.getElementById('tourn-bpo')?.value) || 6;
+    const tournType = document.getElementById('tourn-type')?.value || 'unofficial';
+    const format = document.getElementById('tourn-format')?.value || 'league';
+
+    if (!tName) {
+        tName = uniqueTeams.length >= 2
+            ? `${uniqueTeams.slice(0, 3).join(' · ')} League`
+            : `Tournament ${new Date().toLocaleDateString()}`;
+        const nameEl = document.getElementById('tourn-name');
+        if (nameEl) nameEl.value = tName;
+    }
+    if (uniqueTeams.length < 2) {
+        showToast('👥 Enter at least 2 different teams (one per line)', 'error');
+        document.getElementById('tourn-teams')?.focus();
+        return;
+    }
+    if (!scoringPw) {
+        if (window.SLCRICK_DESKTOP) {
+            scoringPw = 'offline';
+            const pwEl = document.getElementById('tourn-scoring-password');
+            if (pwEl) pwEl.value = scoringPw;
+        } else {
+            showToast('🔐 Set a Scoring Password to secure this tournament', 'error');
+            document.getElementById('tourn-scoring-password')?.focus();
+            return;
+        }
+    }
+
+    if (tournType === 'official') {
+        const matchCount = format === 'knockout'
+            ? (parseInt(document.getElementById('tourn-team-count')?.value) - 1)
+            : (parseInt(document.getElementById('tourn-match-count')?.value) || 10);
+        _pendingTournPayload = {
+            name: tName, format, overs, ballsPerOver: bpo, teams: teamLines, isOfficial: true,
+            scoringPassword: scoringPw,
+            totalTeams: format === 'knockout' ? parseInt(document.getElementById('tourn-team-count')?.value) : teamLines.length,
+            matchCount,
+            startDate: document.getElementById('tourn-start-date')?.value || '',
+            prizes: {
+                first: document.getElementById('tourn-prize-1')?.value || '',
+                second: document.getElementById('tourn-prize-2')?.value || '',
+                third: document.getElementById('tourn-prize-3')?.value || '',
+            },
+        };
+        document.getElementById('req-name').value = '';
+        document.getElementById('req-password').value = '';
+        document.getElementById('request-match-title').textContent = tName;
+        openModal('modal-request');
+        return;
+    }
+
+    const matchCount = format === 'knockout'
+        ? (parseInt(document.getElementById('tourn-team-count')?.value) - 1)
+        : (parseInt(document.getElementById('tourn-match-count')?.value) || 10);
+
+    const tourn = await DB.createTournament({
+        name: tName,
+        format,
+        overs,
+        ballsPerOver: bpo,
+        scoringPassword: scoringPw,
+        teams: uniqueTeams,
+        isOfficial: false,
+        totalTeams: format === 'knockout' ? parseInt(document.getElementById('tourn-team-count')?.value) : uniqueTeams.length,
+        matchCount,
+    });
+
+    if (!tourn || !tourn.matches || tourn.matches.length === 0) {
+        showToast('❌ Could not create matches. Check teams and try again.', 'error');
+        return;
+    }
+
+    tourn.status = 'scheduled';
+    DB.saveTournament(tourn);
+
+    setTournamentAuthorized(tourn.id, 'local-creator', 7200000);
+    localStorage.setItem(`tourn_pw_${tourn.id}`, scoringPw);
+
+    if (window.desktopAPI) window.desktopAPI.requestPersist();
+
+    renderResumeMatches();
+    setTimeout(() => renderResumeMatches(), 100);
+
+    showToast(`🏆 "${tName}" — ${tourn.matches.length} matches in RECENT list below`, 'success');
+
+    document.getElementById('tourn-name').value = '';
+    document.getElementById('tourn-teams').value = '';
+    if (!window.SLCRICK_DESKTOP) {
+        document.getElementById('tourn-scoring-password').value = '';
+    }
+
+    const list = document.getElementById('resume-matches-list');
+    if (list) {
+        list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        list.style.outline = '2px solid var(--c-primary)';
+        setTimeout(() => { list.style.outline = ''; }, 2500);
+    }
+    } catch (err) {
+        console.error('scheduleTournamentFromForm', err);
+        showToast('❌ Schedule failed: ' + (err.message || 'unknown error'), 'error');
+    }
+}
+window.scheduleTournamentFromForm = scheduleTournamentFromForm;
 
 async function scheduleNewMatch() {
     const t1 = document.getElementById('team1-name').value.trim();
@@ -1323,31 +1770,7 @@ function loadMatch(m) {
 
     m.status = 'live';
 
-    // Auto-populate player datalist for suggestions in official tournaments
-    const dl = document.getElementById('db-players-list');
-    if (dl) {
-        let playersHtml = '';
-        if (m.type === 'tournament' && m.tournamentId) {
-            const tourn = DB.getTournament(m.tournamentId);
-            if (tourn && tourn.rosters) {
-                const names = new Set();
-                Object.values(tourn.rosters).forEach(roster => {
-                    roster.forEach(val => {
-                        if (!val) return;
-                        const p = DB.resolveRosterPlayer ? DB.resolveRosterPlayer(val) : DB.getPlayerById(val);
-                        names.add(p ? p.name : val);
-                    });
-                });
-                playersHtml = Array.from(names).map(name => `<option value="${escapeHTML(name)}"></option>`).join('');
-            }
-        }
-        
-        if (!playersHtml && DB.getPlayers) {
-            const players = DB.getPlayers();
-            playersHtml = players.map(p => `<option value="${escapeHTML(p.name)}">${p.playerId || ''}</option>`).join('');
-        }
-        dl.innerHTML = playersHtml;
-    }
+    populateSquadDatalist('batting');
     _innings_ending = false;
     DB.saveMatch(m);
     showScreen('scoring');
@@ -1386,6 +1809,61 @@ function updateHeaderActions() {
     <span class="badge badge-${m.status === 'live' ? 'green' : 'amber'}">${m.status === 'live' ? 'LIVE' : 'Paused'}</span>`;
 }
 
+function startInlineNameEdit(elementId, onSave) {
+    const el = document.getElementById(elementId);
+    if (!el || el.querySelector('input')) return;
+    const current = (el.textContent || '').trim();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-input inline-name-input';
+    input.value = current === '-' ? '' : current;
+    input.maxLength = 25;
+    input.setAttribute('list', 'db-players-list');
+
+    const finish = (commit) => {
+        const val = commit ? input.value.trim() : current;
+        el.textContent = val || '-';
+        if (commit && val && val !== current && typeof onSave === 'function') {
+            onSave(val);
+        }
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+        }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            finish(false);
+        }
+    });
+    input.addEventListener('blur', () => finish(true));
+
+    el.textContent = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+}
+
+function applyInningsPlayerNameChange(player, newName, side) {
+    if (!player || !newName) return;
+    const oldName = player.name;
+    player.name = newName;
+    if (player.playerId && typeof DB !== 'undefined' && DB.getPlayerById) {
+        const dbp = DB.getPlayerById(player.playerId);
+        if (dbp && typeof DB.updatePlayer === 'function') {
+            DB.updatePlayer({ ...dbp, name: newName });
+        }
+    } else if (side) {
+        const resolved = resolvePlayerIdForInnings(newName, side);
+        if (resolved) player.playerId = resolved;
+    }
+    if (oldName !== newName) {
+        showToast(`Name updated: ${newName}`, 'success');
+    }
+}
+
 function editPlayerName(role, idx) {
     const m = currentMatch;
     if (!m) return;
@@ -1393,47 +1871,83 @@ function editPlayerName(role, idx) {
     if (!inn) return;
 
     let p = null;
+    let elementId = null;
+    let side = null;
+
     if (role === 'batsman') {
         const batIdx = inn.currentBatsmenIdx[idx];
-        if (batIdx === undefined || batIdx === null) return;
+        if (batIdx === undefined || batIdx === null) {
+            showToast('No batsman in this slot', 'error');
+            return;
+        }
         p = inn.batsmen[batIdx];
+        const mobBar = document.getElementById('mobile-batter-bar');
+        const useMob =
+            mobBar && window.getComputedStyle(mobBar).display !== 'none';
+        elementId = useMob ? `mob-bat-name-${idx}` : `bat${idx}-name`;
+        side = 'batting';
     } else if (role === 'bowler') {
-        if (inn.currentBowlerIdx === null && role === 'bowler') {
-            // Check if there's a selected bowler in the parameter `idx` or we default
-            // Wait, in Tab 1, editPlayerName('bowler', null) is called.
-            if(inn.currentBowlerIdx === null) return;
+        if (inn.currentBowlerIdx === null) {
+            showToast('No bowler selected', 'error');
+            return;
         }
         p = inn.bowlers[inn.currentBowlerIdx];
+        elementId = 'bowler-name';
+        side = 'bowling';
     }
-    
-    if (p) {
-        showPlayerProfile(p.playerId, p.name);
-    }
+
+    if (!p || !elementId) return;
+
+    startInlineNameEdit(elementId, (newName) => {
+        applyInningsPlayerNameChange(p, newName, side);
+        if (role === 'batsman') {
+            [`bat${idx}-name`, `mob-bat-name-${idx}`].forEach((id) => {
+                if (id === elementId) return;
+                const el = document.getElementById(id);
+                if (el && !el.querySelector('input')) el.textContent = newName;
+            });
+        }
+        saveAndRender();
+    });
 }
+
+/** Swap striker / non-striker ends (wrong batter at striker's end). */
+function swapBatsmenEnds() {
+    const m = currentMatch;
+    if (!m) return;
+    const inn = m.innings[m.currentInnings];
+    if (!inn) return;
+
+    const i0 = inn.currentBatsmenIdx[0];
+    const i1 = inn.currentBatsmenIdx[1];
+    if (
+        i0 == null ||
+        i1 == null ||
+        !inn.batsmen[i0] ||
+        !inn.batsmen[i1]
+    ) {
+        showToast('Both batters must be on crease to swap', 'error');
+        return;
+    }
+
+    inn.strikerIdx = inn.strikerIdx === 0 ? 1 : 0;
+    saveAndRender();
+    const strikerBat = inn.batsmen[inn.currentBatsmenIdx[inn.strikerIdx]];
+    showToast(`⇄ Ends swapped — ${strikerBat?.name || 'Striker'} on strike`, 'success');
+}
+
+window.swapBatsmenEnds = swapBatsmenEnds;
 
 // ========== RENDER SCORING UI ==========
-function cleanTeamLabel(value, fallback) {
-    const text = (value == null ? '' : String(value)).trim();
-    if (!text || text.toLowerCase() === 'undefined' || text.toLowerCase() === 'null') {
-        return fallback;
-    }
-    return text;
-}
-
 function renderScoring() {
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
     if (!inn) return;
 
-    const battingFallback = cleanTeamLabel(m.battingFirst, cleanTeamLabel(m.team1, 'Batting Team'));
-    const bowlingFallback = cleanTeamLabel(m.fieldingFirst, cleanTeamLabel(m.team2, 'Bowling Team'));
-    inn.battingTeam = cleanTeamLabel(inn.battingTeam, battingFallback);
-    inn.bowlingTeam = cleanTeamLabel(inn.bowlingTeam, bowlingFallback);
-
     // Banner
-    document.getElementById('sb-batting-team').textContent = inn.battingTeam;
-    document.getElementById('sb-bowling-team').textContent = inn.bowlingTeam;
+    document.getElementById('sb-batting-team').textContent = inn.battingTeam || 'Team';
+    document.getElementById('sb-bowling-team').textContent = inn.bowlingTeam || 'Team';
     document.getElementById('sb-score').textContent = `${inn.runs}/${inn.wickets}`;
     document.getElementById('sb-overs').textContent = `${formatOvers(inn.balls, m.ballsPerOver)} ov`;
     document.getElementById('sb-crr').textContent = formatCRR(inn.runs, inn.balls);
@@ -1578,20 +2092,8 @@ function renderScoring() {
         }
     }
 
-    // Update Broadcast Master Player Photos
-    const imgStriker = document.getElementById('bm-photo-striker');
-    const imgNonStriker = document.getElementById('bm-photo-nonstriker');
-    const imgBowler = document.getElementById('bm-photo-bowler');
-    
-    if (imgStriker && imgNonStriker && imgBowler) {
-        const sIdx = inn.currentBatsmenIdx[inn.strikerIdx];
-        const nsIdx = inn.currentBatsmenIdx[inn.strikerIdx === 0 ? 1 : 0];
-        const striker = sIdx !== null && sIdx !== undefined ? inn.batsmen[sIdx] : null;
-        const nonStriker = nsIdx !== null && nsIdx !== undefined ? inn.batsmen[nsIdx] : null;
-        
-        imgStriker.src = rolePhotoOverride('striker') || playerPhotoSrc(striker);
-        imgNonStriker.src = rolePhotoOverride('nonstriker') || playerPhotoSrc(nonStriker);
-        imgBowler.src = rolePhotoOverride('bowler') || playerPhotoSrc(bowler);
+    if (typeof syncLivePlayerPhotoSlots === 'function') {
+        syncLivePlayerPhotoSlots(m);
     }
 }
 
@@ -1636,15 +2138,20 @@ function uploadPlayerPhoto(role) {
         reader.onload = (ev) => {
             const dataUrl = ev.target.result;
             DB.savePlayerPhoto(p.playerId, dataUrl);
-            setRolePhotoOverride(role, dataUrl);
-            setHotkeyRoleImage(role, dataUrl);
-            DB.saveMatch(currentMatch); // Save the dummy ID if it was generated
+            DB.saveMatch(currentMatch);
+            window[`__photo_cleared_${role}`] = false;
+            window[`__photo_bound_${role}`] = String(p.playerId || p.name || '');
+            if (role === 'striker') window.__photo_striker = dataUrl;
+            else if (role === 'nonstriker') window.__photo_nonstriker = dataUrl;
+            else if (role === 'bowler') window.__photo_bowler = dataUrl;
             showToast('✅ Photo updated & synced!', 'success');
-            if (typeof renderCurrentState === 'function') renderCurrentState();
-            
-            // Sync to remote if broadcast active
+            if (typeof syncLivePlayerPhotoSlots === 'function') {
+                syncLivePlayerPhotoSlots(currentMatch);
+            } else if (typeof renderCurrentState === 'function') {
+                renderCurrentState();
+            }
             if (typeof Broadcast !== 'undefined') {
-                Broadcast.send('SYNC_PLAYER_PHOTO', { playerId: p.playerId, role, photo: dataUrl });
+                Broadcast.send('SYNC_PLAYER_PHOTO', { playerId: p.playerId, photo: dataUrl });
                 Broadcast.send('SYNC_SCORE', { match: currentMatch });
             }
         };
@@ -1664,10 +2171,7 @@ function setStriker(i) {
     currentMatch.innings[currentMatch.currentInnings].strikerIdx = i;
     saveAndRender();
     
-    // Auto-Broadcast New Batsman
-    if (autoAnimationsEnabled) {
-        setTimeout(() => broadcastStrikerProfile(), 1000);
-    }
+    maybeAutoBroadcastPlayerProfile('striker');
 }
 
 // ========== RECORD BALL ==========
@@ -1694,30 +2198,7 @@ function recordBall(event) {
     applyBall(inn, event);
     saveAndRender();
 
-    // TV Broadcast for Big Events (Enriched with Player Metadata)
-    if (['four', 'six'].includes(event.type) || (event.wicket && !event.type?.includes('wide') && !event.type?.includes('noball'))) {
-        const strikerName = getStrikerBatterName(inn);
-        const strikerProfile = resolvePlayerProfileForBatter(inn, strikerName);
-        const strikerStats = inn.batsmen.find(x => x.name === strikerName) || { runs: 0, balls: 0 };
-        const bowler = inn.bowlers[inn.currentBowlerIdx] || { name: 'Bowler' };
-        
-        const payload = {
-            type: event.type.toUpperCase(),
-            playerName: strikerName,
-            playerPhoto: playerPhotoSrc(strikerProfile),
-            playerRuns: strikerStats.runs,
-            playerBalls: strikerStats.balls,
-            bowlerName: bowler.name,
-            teamName: inn.battingTeam,
-            matchScore: `${inn.runs}/${inn.wickets}`
-        };
-
-        if (event.wicket) payload.type = 'WICKET';
-        
-        if (autoAnimationsEnabled) {
-            sendBroadcast('SHOW_BIG_EVENT', payload);
-        }
-    }
+    // 4/6/W TV graphics: hotkeys only (see triggerVisualBigEvent)
 
     // Check order matters: over end first, then innings end
     checkEndOfOver(inn);
@@ -2056,6 +2537,8 @@ function confirmWicket() {
         wicketType,
     });
 
+    captureLastWicketForBroadcast(m, inn, dismissedBat);
+
     // Save to historical partnerships
     if (!inn.partnerships) inn.partnerships = [];
     if (inn.currentPartnership) {
@@ -2083,10 +2566,7 @@ function confirmWicket() {
     closeModal('modal-wicket');
     saveAndRender();
     
-    // TV Broadcast for Wicket
-    if (autoAnimationsEnabled) {
-        sendBroadcast('SHOW_BIG_EVENT', { type: 'WICKET' });
-    }
+    // Wicket TV graphic: hotkeys only (Shift+W / LAST WICKET card)
 
     // Check end of over first
     const overDone = checkEndOfOver(inn);
@@ -2126,6 +2606,74 @@ function buildDismissalText(type, fielder, bowlerName) {
     }
 }
 
+function computeBatterOverlayStats(bat) {
+    const balls = bat?.balls || 0;
+    const runs = bat?.runs || 0;
+    const fours = bat?.fours || 0;
+    const sixes = bat?.sixes || 0;
+    const boundaryBalls = fours + sixes;
+    let nonBoundaryRuns = Math.max(0, runs - fours * 4 - sixes * 6);
+    let scoringOther = 0;
+    while (nonBoundaryRuns > 0 && scoringOther < balls - boundaryBalls) {
+        if (nonBoundaryRuns >= 3) {
+            scoringOther++;
+            nonBoundaryRuns -= 3;
+        } else if (nonBoundaryRuns >= 2) {
+            scoringOther++;
+            nonBoundaryRuns -= 2;
+        } else {
+            scoringOther++;
+            nonBoundaryRuns -= 1;
+        }
+    }
+    const dots = Math.max(0, balls - boundaryBalls - scoringOther);
+    const strikeRate = balls > 0 ? Math.round((runs / balls) * 100) : 0;
+    return { fours, sixes, dots, strikeRate };
+}
+
+/** Store last dismissal for manual TV graphic (not auto-shown). */
+function captureLastWicketForBroadcast(m, inn, dismissedBat) {
+    if (!m || !inn || !dismissedBat) return;
+    const innIdx = m.currentInnings ?? 0;
+    const innNum = innIdx + 1;
+    const ord =
+        innNum === 1 ? '1st' : innNum === 2 ? '2nd' : innNum === 3 ? '3rd' : `${innNum}th`;
+    const teamName = inn.battingTeam || m.team1 || 'TEAM';
+    const extra = computeBatterOverlayStats(dismissedBat);
+    m.lastWicket = {
+        name: (dismissedBat.name || '?').toUpperCase(),
+        runs: dismissedBat.runs ?? 0,
+        balls: dismissedBat.balls ?? 0,
+        inningsLabel: `${ord} INNS`,
+        dismissal: (dismissedBat.dismissal || 'out').toLowerCase(),
+        teamName,
+        inningsIndex: innIdx,
+        fours: extra.fours,
+        sixes: extra.sixes,
+        dots: extra.dots,
+        strikeRate: extra.strikeRate,
+        at: Date.now(),
+    };
+}
+
+function showLastWicketBroadcast() {
+    if (typeof Broadcast !== 'undefined' && Broadcast.showLastWicket) {
+        Broadcast.showLastWicket();
+        return;
+    }
+    const m = currentMatch;
+    const payload =
+        typeof buildLastWicketBroadcastData === 'function'
+            ? buildLastWicketBroadcastData(m)
+            : m?.lastWicket || null;
+    if (!payload?.batters?.length && !payload?.name) {
+        showToast('No wickets recorded yet this innings', 'error');
+        return;
+    }
+    sendBroadcast('SHOW_LAST_WICKET', payload);
+}
+window.showLastWicketBroadcast = showLastWicketBroadcast;
+
 // ========== NEW BATSMAN ==========
 function openNewBatsmanModal(slot, title) {
     currentPendingWicket = (slot !== undefined) ? slot : 0;
@@ -2133,6 +2681,8 @@ function openNewBatsmanModal(slot, title) {
     document.getElementById('new-bat-name').value = '';
     document.getElementById('new-bat-pid').value = '';
     document.getElementById('player-lookup-result').textContent = '';
+    populateSquadDatalist('batting');
+    renderSquadQuickPick('squad-bat-opts', 'batting');
     openModal('modal-new-batsman');
 }
 
@@ -2155,6 +2705,9 @@ function confirmNewBatsman() {
     let pid = document.getElementById('new-bat-pid').value.trim().toUpperCase();
     if (!name) { showToast('❌ Enter batsman name', 'error'); return; }
 
+    const rosterPid = ensurePlayerOnTeamRoster(name, 'batting');
+    if (!pid) pid = rosterPid || '';
+    if (!pid) pid = resolvePlayerIdForInnings(name, 'batting') || '';
     if (!pid) {
         const pMatch = DB.getPlayers().find(p => p.name.toLowerCase() === name.toLowerCase());
         if (pMatch) pid = pMatch.playerId;
@@ -2194,11 +2747,9 @@ function confirmNewBatsman() {
         setTimeout(() => openNewBowlerModal(), 200);
     } else { saveAndRender(); }
     
-    // Auto-Broadcast New Batsman to TV
-    if (autoAnimationsEnabled) {
-        setTimeout(() => broadcastStrikerProfile(), 1200);
-    }
-    
+    if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
+    maybeAutoBroadcastPlayerProfile('striker');
+
     showToast(`🏏 ${name} is now at the crease!`, 'success');
 }
 
@@ -2206,16 +2757,17 @@ function confirmNewBatsman() {
 function openNewBowlerModal() {
     document.getElementById('new-bowl-name').value = '';
     document.getElementById('new-bowl-pid').value = '';
-    const m = currentMatch;
-    const inn = m ? m.innings[m.currentInnings] : null;
-    const recentEl = document.getElementById('recent-bowlers-opts');
-    if (recentEl && inn) {
-        const unique = [...new Set(inn.bowlers.map(b => b.name))];
-        recentEl.innerHTML = unique.map(n =>
-            `<button class="bowler-quick-btn" onclick="document.getElementById('new-bowl-name').value='${n}'">${n}</button>`
-        ).join('');
-    }
+    populateSquadDatalist('bowling');
+    renderSquadQuickPick('recent-bowlers-opts', 'bowling', { includeInningsBowlers: true });
     openModal('modal-new-bowler');
+}
+
+function pickSquadBowlerName(name) {
+    const inp = document.getElementById('new-bowl-name');
+    if (inp) {
+        inp.value = name;
+        applySquadNameInput(inp, 'bowling', 'bowler');
+    }
 }
 
 function lookupBowler() {
@@ -2232,6 +2784,9 @@ function confirmNewBowler() {
     let pid = document.getElementById('new-bowl-pid').value.trim().toUpperCase();
     if (!name) { showToast('❌ Enter bowler name', 'error'); return; }
 
+    const rosterPid = ensurePlayerOnTeamRoster(name, 'bowling');
+    if (!pid) pid = rosterPid || '';
+    if (!pid) pid = resolvePlayerIdForInnings(name, 'bowling') || '';
     if (!pid) {
         const pMatch = DB.getPlayers().find(p => p.name.toLowerCase() === name.toLowerCase());
         if (pMatch) pid = pMatch.playerId;
@@ -2258,10 +2813,8 @@ function confirmNewBowler() {
     } else { saveAndRender(); }
     showToast(`⚾ ${name} is now bowling`, 'success');
 
-    // Auto-Broadcast New Bowler to TV
-    if (autoAnimationsEnabled) {
-        setTimeout(() => broadcastBowlerProfile(), 1200);
-    }
+    if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
+    maybeAutoBroadcastPlayerProfile('bowler');
 }
 
 // ========== END OF OVER ==========
@@ -2642,18 +3195,10 @@ function showMatchResult() {
     }
 
     m.result = resultText;
-    
-    // Auto-cleanup tournament rosters on match end as requested
-    if (m.tournamentId) {
-        const t = DB.getTournament(m.tournamentId);
-        if (t && t.rosters) {
-            delete t.rosters[m.team1];
-            delete t.rosters[m.team2];
-            DB.saveTournament(t);
-            console.log(`🧹 Cleaned up rosters for ${m.team1} and ${m.team2} on match completion.`);
-        }
-    }
-    
+    m.completedAt = Date.now();
+
+    // Keep tournament rosters on disk after match ends (permanent squad names)
+
     // Clear session-specific tokens and hotkey state
     DB.clearMatchData(m.id);
     DB.saveMatch(m);
@@ -3053,8 +3598,23 @@ const _scorerBC = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChann
 
 function saveAndRender() {
     if (currentMatch) {
+        window.currentMatch = currentMatch;
+        window.currentTournament = currentTournament;
         DB.saveMatch(currentMatch);
         renderScoring();
+        if (typeof syncBroadcastMasterPhotos === 'function') {
+            syncBroadcastMasterPhotos(currentMatch);
+        }
+        if (window.desktopAPI) {
+            window.desktopAPI.publishMatch(currentMatch);
+            window.desktopAPI.broadcastCommand({
+                cmd: 'SYNC_SCORE',
+                data: { match: currentMatch, matchId: currentMatch.id },
+                matchId: currentMatch.id,
+                tournamentId: currentMatch.tournamentId || null,
+                timestamp: Date.now(),
+            });
+        }
         // Signal TV overlay: BroadcastChannel (instant, same browser) + localStorage (cross-tab fallback)
         if (_scorerBC) _scorerBC.postMessage({ type: 'score_update', matchId: currentMatch.id, ts: Date.now() });
         localStorage.setItem('cricpro_force_update', Date.now().toString());
@@ -3063,6 +3623,10 @@ function saveAndRender() {
         const t2el = document.getElementById('hk-team2-name');
         if (t1el) t1el.textContent = currentMatch.team1 || 'Team A';
         if (t2el) t2el.textContent = currentMatch.team2 || 'Team B';
+        const hotkeysOpen = document.getElementById('panel-hotkeys')?.style.display === 'block';
+        if (hotkeysOpen && typeof window.refreshBroadcastPreview === 'function') {
+            window.refreshBroadcastPreview();
+        }
     }
 }
 function openModal(id) { const e = document.getElementById(id); if (e) e.style.display = 'flex'; }
@@ -3083,6 +3647,8 @@ function openOpenBatsmenModal() {
     document.getElementById('open-bat1-name').value = '';
     document.getElementById('open-bat2-pid').value = '';
     document.getElementById('open-bat2-name').value = '';
+    populateSquadDatalist('batting');
+    renderSquadQuickPick('squad-open-bat-opts', 'batting', { openBatsmen: true });
     openModal('modal-open-batsmen');
 }
 
@@ -3103,6 +3669,10 @@ function confirmOpenBatsmen() {
 
     if (!n1 || !n2) { showToast('❌ Enter both opening batsmen names', 'error'); return; }
 
+    const r1 = ensurePlayerOnTeamRoster(n1, 'batting');
+    const r2 = ensurePlayerOnTeamRoster(n2, 'batting');
+    if (!pid1) pid1 = r1 || resolvePlayerIdForInnings(n1, 'batting');
+    if (!pid2) pid2 = r2 || resolvePlayerIdForInnings(n2, 'batting');
     if (!pid1) {
         const pMatch1 = DB.getPlayers().find(p => p.name.toLowerCase() === n1.toLowerCase());
         if (pMatch1) pid1 = pMatch1.playerId;
@@ -3281,15 +3851,292 @@ function syncOfficialStats(m, t) {
 
 // ========== ROSTER & OVERLAYS ==========
 function getActiveRosterRoot() {
-    return (currentTournament && !currentTournament.isMock) ? currentTournament : currentMatch;
+    if (currentMatch?.tournamentId) {
+        const t = DB.getTournament(currentMatch.tournamentId);
+        if (t) return t;
+    }
+    return currentTournament && !currentTournament.isMock ? currentTournament : currentMatch;
 }
 
-function saveActiveRosterRoot(rootObj) {
+function saveActiveRosterRoot(rootObj, quiet = false) {
     if (rootObj.id && rootObj.id.startsWith('MATCH-')) {
-        DB.saveMatch(rootObj);
+        DB.saveMatch(rootObj, true, { skipPublish: quiet, skipForceUpdate: quiet });
     } else {
-        DB.saveTournament(rootObj);
+        DB.saveTournament(rootObj, true, { skipPublish: quiet, skipForceUpdate: quiet });
     }
+}
+
+/** Roster slots for a team (player ids, legacy names, or empty strings). */
+function getTeamRosterSlots(teamName, teamIdx) {
+    const root = getActiveRosterRoot();
+    const m = currentMatch;
+    if (root?.rosters?.[teamName] && Array.isArray(root.rosters[teamName])) {
+        return [...root.rosters[teamName]];
+    }
+    if (m?.rosters && teamIdx != null && Array.isArray(m.rosters[teamIdx])) {
+        return m.rosters[teamIdx].map((entry) => {
+            if (!entry) return '';
+            if (typeof entry === 'string') return entry;
+            return entry.id || entry.playerId || entry.name || '';
+        });
+    }
+    return [];
+}
+
+function setTeamRosterIds(teamName, teamIdx, rosterIds, quiet = false) {
+    const root = getActiveRosterRoot();
+    const m = currentMatch;
+    if (!root || !teamName) return;
+    if (!root.rosters) root.rosters = {};
+    root.rosters[teamName] = rosterIds;
+    if (m && teamIdx != null) {
+        m.rosters = m.rosters || {};
+        m.rosters[teamIdx] = rosterIds.map((pid) => {
+            const p = pid ? DB.getPlayerById(pid) : null;
+            return {
+                name: p?.name || '',
+                id: pid || '',
+                photo: pid ? DB.getPlayerPhoto(pid) : '',
+            };
+        });
+        if (teamIdx === 0) m.team1 = teamName;
+        else if (teamIdx === 1) m.team2 = teamName;
+    }
+    saveActiveRosterRoot(root, quiet);
+    if (m && !quiet) {
+        DB.saveMatch(m, true, { skipPublish: false });
+    }
+}
+
+function getInningsTeamForSide(side) {
+    const m = currentMatch;
+    if (!m?.innings) return '';
+    const inn = m.innings[m.currentInnings];
+    if (!inn) return '';
+    if (side === 'bowling') return inn.bowlingTeam || '';
+    return inn.battingTeam || '';
+}
+
+function getSquadNamesForTeam(teamName) {
+    if (!teamName) return [];
+    const m = currentMatch;
+    const teamIdx = m && m.team1 === teamName ? 0 : m && m.team2 === teamName ? 1 : null;
+    const names = new Set();
+    getTeamRosterSlots(teamName, teamIdx).forEach((val) => {
+        if (!val) return;
+        const p = resolveRosterPlayer(val);
+        if (p?.name) names.add(p.name);
+        else if (typeof val === 'string' && val.trim()) names.add(val.trim());
+    });
+    if (m?.rosters && teamIdx != null && Array.isArray(m.rosters[teamIdx])) {
+        m.rosters[teamIdx].forEach((entry) => {
+            if (entry?.name) names.add(entry.name);
+        });
+    }
+    return Array.from(names);
+}
+
+function findPlayerInTeamRoster(name, teamName) {
+    const n = (name || '').trim().toLowerCase();
+    if (!n || !teamName) return null;
+    const m = currentMatch;
+    const teamIdx = m && m.team1 === teamName ? 0 : m && m.team2 === teamName ? 1 : null;
+    for (const val of getTeamRosterSlots(teamName, teamIdx)) {
+        const p = resolveRosterPlayer(val);
+        if (p && p.name.trim().toLowerCase() === n) return p;
+    }
+    return (
+        DB.getPlayers().find(
+            (p) => p.name && p.name.trim().toLowerCase() === n
+        ) || null
+    );
+}
+
+function populateSquadDatalist(side) {
+    const dl = document.getElementById('db-players-list');
+    if (!dl) return;
+    const teamName = getInningsTeamForSide(side);
+    const names = teamName ? getSquadNamesForTeam(teamName) : [];
+    if (!names.length) {
+        dl.innerHTML = '';
+        return;
+    }
+    dl.innerHTML = names
+        .map((name) => `<option value="${escapeHTML(name)}"></option>`)
+        .join('');
+}
+
+function rosterSlotHasPlayer(slots, pid, name) {
+    const n = (name || '').trim().toLowerCase();
+    return slots.some((val) => {
+        if (!val) return false;
+        const p = resolveRosterPlayer(val);
+        if (pid && p?.playerId === pid) return true;
+        if (p?.name && p.name.trim().toLowerCase() === n) return true;
+        if (typeof val === 'string' && val.trim().toLowerCase() === n) return true;
+        return false;
+    });
+}
+
+/** Save player name into tournament/match roster + players DB (survives restart). */
+function ensurePlayerOnTeamRoster(name, side = 'batting') {
+    const trimmed = (name || '').trim();
+    if (!trimmed || !currentMatch) return null;
+
+    const m = currentMatch;
+    const inn = m.innings?.[m.currentInnings ?? 0];
+    const teamName = getInningsTeamForSide(side);
+    if (!teamName) return null;
+    let teamIdx = m.team1 === teamName ? 0 : m.team2 === teamName ? 1 : null;
+    if (teamIdx == null && inn) {
+        teamIdx =
+            side === 'bowling'
+                ? inn.bowlingTeam === m.team2
+                    ? 1
+                    : 0
+                : inn.battingTeam === m.team2
+                  ? 1
+                  : 0;
+    }
+    if (teamIdx == null) teamIdx = 0;
+
+    let pid = resolvePlayerIdForInnings(trimmed, side);
+    if (!pid) {
+        const hit = DB.getPlayers().find(
+            (p) => p.name && p.name.trim().toLowerCase() === trimmed.toLowerCase()
+        );
+        if (hit) pid = hit.playerId;
+        else {
+            const created = DB.addPlayer({
+                name: trimmed,
+                team: teamName,
+                role: side === 'bowling' ? 'Bowler' : 'Batsman',
+            });
+            pid = created?.playerId || null;
+        }
+    }
+
+    const slots = [...getTeamRosterSlots(teamName, teamIdx)];
+    if (!rosterSlotHasPlayer(slots, pid, trimmed)) {
+        const entry = pid || trimmed;
+        const emptyIdx = slots.findIndex((s) => !s || String(s).trim() === '');
+        if (emptyIdx >= 0) slots[emptyIdx] = entry;
+        else slots.push(entry);
+        setTeamRosterIds(teamName, teamIdx, slots, false);
+        if (window.desktopAPI?.requestPersist) {
+            window.desktopAPI.requestPersist();
+        }
+    }
+    return pid;
+}
+
+function renderSquadQuickPick(containerId, side, options = {}) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+
+    const m = currentMatch;
+    const inn = m?.innings?.[m.currentInnings];
+    const teamName = getInningsTeamForSide(side);
+    let names = teamName ? getSquadNamesForTeam(teamName) : [];
+
+    if (options.includeInningsBowlers && side === 'bowling' && inn?.bowlers?.length) {
+        const extra = inn.bowlers.map((b) => b.name).filter(Boolean);
+        names = [...new Set([...names, ...extra])];
+    }
+
+    if (!names.length) {
+        el.innerHTML =
+            '<span class="squad-quick-empty">Squad empty — type name or save roster in Hotkeys → Team</span>';
+        return;
+    }
+
+    el.innerHTML = names
+        .map(
+            (n) =>
+                `<button type="button" class="squad-quick-btn bowler-quick-btn" data-squad-name="${escapeHTML(n)}">${escapeHTML(n)}</button>`
+        )
+        .join('');
+
+    el.querySelectorAll('[data-squad-name]').forEach((btn) => {
+        btn.onclick = () => {
+            const picked = btn.getAttribute('data-squad-name');
+            if (options.openBatsmen) pickSquadOpenBatsmanName(picked);
+            else if (side === 'bowling') pickSquadBowlerName(picked);
+            else pickSquadBatsmanName(picked);
+        };
+    });
+}
+
+function pickSquadOpenBatsmanName(name) {
+    const n1 = document.getElementById('open-bat1-name');
+    const n2 = document.getElementById('open-bat2-name');
+    if (n1 && !n1.value.trim()) {
+        n1.value = name;
+        applySquadNameInput(n1, 'batting', 'batsman');
+        return;
+    }
+    if (n2 && !n2.value.trim()) {
+        n2.value = name;
+        applySquadNameInput(n2, 'batting', 'nonstriker');
+        return;
+    }
+    if (n1) {
+        n1.value = name;
+        applySquadNameInput(n1, 'batting', 'batsman');
+    }
+}
+
+function pickSquadBatsmanName(name) {
+    const inp = document.getElementById('new-bat-name');
+    if (!inp) return;
+    inp.value = name;
+    applySquadNameInput(inp, 'batting', 'batsman');
+    const sub = document.getElementById('player-lookup-result');
+    if (sub) {
+        sub.textContent = `✓ Selected: ${name}`;
+        sub.style.color = '#00e676';
+    }
+}
+
+function previewSquadPhotoOnOverlay(role, playerId, displayName) {
+    const DEFAULT_PLAYER = '../assets/default-player.svg';
+    const photo = playerId ? DB.getPlayerPhoto(playerId) : DEFAULT_PLAYER;
+    const usePhoto = photo && photo !== DEFAULT_PLAYER ? photo : DEFAULT_PLAYER;
+    const imgId =
+        role === 'bowler'
+            ? 'bm-photo-bowler'
+            : role === 'nonstriker'
+              ? 'bm-photo-nonstriker'
+              : 'bm-photo-striker';
+    const nameId =
+        role === 'bowler'
+            ? 'bm-name-bowler'
+            : role === 'nonstriker'
+              ? 'bm-name-nonstriker'
+              : 'bm-name-striker';
+    const img = document.getElementById(imgId);
+    if (img) img.src = usePhoto;
+    const lbl = document.getElementById(nameId);
+    if (lbl && displayName) lbl.textContent = displayName;
+}
+
+function applySquadNameInput(inputEl, side, previewRole) {
+    if (!inputEl) return;
+    const teamName = getInningsTeamForSide(side);
+    const name = inputEl.value.trim();
+    if (!name || !teamName) return;
+    const p = findPlayerInTeamRoster(name, teamName);
+    if (!p) return;
+    const row = inputEl.closest('.form-group') || inputEl.parentElement?.parentElement;
+    const pidInp = row?.querySelector('input[id$="-pid"]');
+    if (pidInp) pidInp.value = p.playerId || '';
+    if (previewRole) previewSquadPhotoOnOverlay(previewRole, p.playerId, p.name);
+}
+
+function resolvePlayerIdForInnings(name, side) {
+    const teamName = getInningsTeamForSide(side);
+    const p = findPlayerInTeamRoster(name, teamName);
+    return p?.playerId || null;
 }
 
 
@@ -3460,16 +4307,19 @@ function renderTournamentTeams() {
     container.innerHTML = teamsList.map(teamName => {
         if (!t.rosters) t.rosters = {};
         const roster = t.rosters[teamName] || [];
+        const teamPhoto = DB.getTeamPhoto(teamName, t.id);
+        const photoCount = roster.filter(v => v && String(v).trim()).length;
         return `
             <div class="card" style="padding:12px;display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:12px;margin-bottom:8px">
                 <div style="display:flex;align-items:center;gap:12px">
-                    <div style="width:40px;height:40px;background:var(--c-primary);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px">${teamName[0] ? teamName[0].toUpperCase() : 'T'}</div>
+                    <img src="${teamPhoto}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;border:2px solid rgba(255,255,255,0.1)" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <div style="width:48px;height:48px;background:var(--c-primary);border-radius:12px;display:none;align-items:center;justify-content:center;font-weight:900;font-size:18px">${teamName[0] ? teamName[0].toUpperCase() : 'T'}</div>
                     <div>
                         <div style="font-weight:700;font-size:16px">${teamName}</div>
-                        <div style="font-size:12px;opacity:0.6">${roster.filter(n => n && n.trim()).length} / 11 Players Registered</div>
+                        <div style="font-size:12px;opacity:0.6">${photoCount} / 11 players · tap Edit for photos</div>
                     </div>
                 </div>
-                <button class="btn btn-sm btn-ghost" onclick="openRosterEditor('${escapeHTML(teamName)}')">📋 Edit Roster</button>
+                <button class="btn btn-sm btn-primary" onclick="openRosterEditor('${escapeHTML(teamName)}')">📷 Squad & Photos</button>
             </div>
         `;
     }).join('');
@@ -3501,8 +4351,9 @@ async function onRosterSlotClick(idx) {
     
     if (!t.rosters) t.rosters = {};
     if (!t.rosters[editingTeamName]) t.rosters[editingTeamName] = [];
-    t.rosters[editingTeamName][idx] = name;
-    
+    const pid = upsertRosterPlayerByName(name, null);
+    t.rosters[editingTeamName][idx] = pid || name;
+
     saveActiveRosterRoot(t);
     showToast('Player name assigned to slot ' + (idx + 1), 'success');
     openRosterEditor(editingTeamName);
@@ -3578,6 +4429,11 @@ function openRosterEditor(teamName) {
     editingTeamName = teamName || (t.teams && t.teams.length ? t.teams[0] : null);
     if (!editingTeamName) return;
 
+    const m = currentMatch;
+    if (m) {
+        _fsrCurrentTeamIndex = m.team1 === editingTeamName ? 0 : m.team2 === editingTeamName ? 1 : _fsrCurrentTeamIndex;
+    }
+
     const overlay = document.getElementById('full-screen-roster-overlay');
     if (!overlay) return;
     
@@ -3617,11 +4473,98 @@ function closeFullScreenRoster() {
     document.body.style.overflow = '';
 }
 
+const FSR_GENERIC_PLAYER_NAME = /^Player\s*\d+$/i;
+
+function isGenericFSRPlayerName(name) {
+    return FSR_GENERIC_PLAYER_NAME.test((name || '').trim());
+}
+
+function fsrDisplayNameForSlot(player, slotValue) {
+    if (player?.name && !isGenericFSRPlayerName(player.name)) return player.name;
+    if (
+        typeof slotValue === 'string' &&
+        slotValue.trim() &&
+        !/^CP\d/i.test(slotValue.trim()) &&
+        !isGenericFSRPlayerName(slotValue)
+    ) {
+        return slotValue.trim();
+    }
+    return '';
+}
+
+function findGlobalPlayerByName(name) {
+    const n = (name || '').trim().toLowerCase();
+    if (!n) return null;
+    return (
+        DB.getPlayers().find((p) => p.name && p.name.trim().toLowerCase() === n) || null
+    );
+}
+
+function refreshFsrPlayersDatalist() {
+    const dl = document.getElementById('fsr-players-datalist');
+    if (!dl) return;
+    const seen = new Set();
+    const opts = [];
+    DB.getPlayers().forEach((p) => {
+        const n = (p.name || '').trim();
+        if (!n || isGenericFSRPlayerName(n) || seen.has(n.toLowerCase())) return;
+        seen.add(n.toLowerCase());
+        opts.push(`<option value="${escapeHTML(n)}"></option>`);
+    });
+    dl.innerHTML = opts.join('');
+}
+
+function onFSRPlayerNameChange(inputEl, idx) {
+    const name = (inputEl.value || '').trim();
+    const img = document.getElementById(`fsr-p-img-${idx}`);
+    const statusEl = inputEl.closest('.fsr-player-card')?.querySelector('.fsr-p-status');
+    const card = inputEl.closest('.fsr-player-card');
+
+    if (!name) {
+        inputEl.dataset.playerId = '';
+        if (img) {
+            delete img.dataset.userPhoto;
+            img.src = DEFAULT_PLAYER_PHOTO;
+        }
+        if (statusEl) {
+            statusEl.textContent = '🆕 Type player name first';
+            statusEl.style.color = 'rgba(255,255,255,0.35)';
+        }
+        if (card) card.style.borderColor = 'rgba(255,255,255,0.05)';
+        return;
+    }
+
+    const existing = findGlobalPlayerByName(name);
+    if (existing) {
+        inputEl.dataset.playerId = existing.playerId;
+        if (img) {
+            img.src = playerPhotoSrc(existing);
+            img.dataset.userPhoto = '1';
+        }
+        if (statusEl) {
+            statusEl.textContent = '✅ REGISTERED — photo loaded';
+            statusEl.style.color = '#3b82f6';
+        }
+        if (card) card.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+    } else {
+        inputEl.dataset.playerId = '';
+        if (img && !img.dataset.userPhoto) img.src = DEFAULT_PLAYER_PHOTO;
+        if (statusEl) {
+            statusEl.textContent = '🆕 NEW — save to register';
+            statusEl.style.color = 'rgba(255,255,255,0.45)';
+        }
+        if (card) card.style.borderColor = 'rgba(255,255,255,0.08)';
+    }
+}
+
 function renderFSRosters() {
     const t = getActiveRosterRoot();
     if (!t || !editingTeamName) return;
 
-    const roster = (t.rosters && t.rosters[editingTeamName]) ? t.rosters[editingTeamName] : [];
+    const m = currentMatch;
+    const teamIdx =
+        _fsrCurrentTeamIndex ?? (m && m.team1 === editingTeamName ? 0 : 1);
+    const roster = getTeamRosterSlots(editingTeamName, teamIdx);
     const slotCount = Math.max(11, roster.length);
     const grid = document.getElementById('fsr-players-grid');
     if (!grid) return;
@@ -3631,173 +4574,324 @@ function renderFSRosters() {
     for (let i = 0; i < slotCount; i++) {
         const slotValue = roster[i] || '';
         const player = resolveRosterPlayer(slotValue);
-        const displayName = player ? player.name : (slotValue || '');
-        const photo = player ? playerPhotoSrc(player) : DEFAULT_PLAYER_PHOTO;
-        const isRegistered = !!player;
+        const displayName = fsrDisplayNameForSlot(player, slotValue);
+        const photo = player && !isGenericFSRPlayerName(player.name)
+            ? playerPhotoSrc(player)
+            : DEFAULT_PLAYER_PHOTO;
+        const playerIdAttr = player?.playerId && !isGenericFSRPlayerName(player.name)
+            ? ` data-player-id="${escapeHTML(player.playerId)}"`
+            : '';
 
         html += `
-            <div class="card fsr-player-card" style="padding:20px; background:rgba(255,255,255,0.03); border:1px solid ${isRegistered ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border-radius:24px; display:flex; gap:15px; align-items:center; transition:0.3s">
-                <div style="position:relative; width:70px; height:70px; flex-shrink:0; cursor:pointer" onclick="onFSRPlayerPhotoClick(${i})">
+            <div class="card fsr-player-card" style="padding:20px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:24px; display:flex; gap:15px; align-items:center; transition:0.3s">
+                <div style="position:relative; width:70px; height:70px; flex-shrink:0; cursor:pointer" onclick="onFSRPlayerPhotoClick(${i})" title="Add photo (name required)">
                     <img id="fsr-p-img-${i}" src="${photo}" style="width:100%; height:100%; object-fit:cover; border-radius:18px; border:2px solid rgba(255,255,255,0.1)" onerror="this.src='${DEFAULT_PLAYER_PHOTO}'">
                     <div style="position:absolute; bottom:-4px; right:-4px; background:var(--c-primary); width:20px; height:20px; border-radius:50%; border:2px solid #000; font-size:10px; color:white; display:flex; align-items:center; justify-content:center">📷</div>
                 </div>
                 <div style="flex:1">
-                    <div style="font-size:10px; color:var(--c-muted); font-weight:900; text-transform:uppercase; margin-bottom:4px">PLAYER ${(i+1)}</div>
-                    <input type="text" class="form-input fsr-p-name-input" 
-                           data-idx="${i}" value="${escapeHTML(displayName)}" 
-                           placeholder="Enter name..." 
+                    <div style="font-size:10px; color:var(--c-muted); font-weight:900; text-transform:uppercase; margin-bottom:4px">PLAYER ${(i + 1)}</div>
+                    <input type="text" class="form-input fsr-p-name-input" list="fsr-players-datalist"
+                           data-idx="${i}"${playerIdAttr} value="${escapeHTML(displayName)}"
+                           placeholder="Type player name..."
+                           autocomplete="off"
                            style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); border-radius:10px; height:44px; font-size:16px; font-weight:800; color:#fff" />
-                    <div style="margin-top:6px; font-size:9px; font-weight:900; color:${isRegistered ? '#3b82f6' : 'rgba(255,255,255,0.3)'}">
-                        ${isRegistered ? '✅ VERIFIED PROFILE' : '🆕 NEW ENTRY'}
-                    </div>
+                    <div class="fsr-p-status" style="margin-top:6px; font-size:9px; font-weight:900; color:rgba(255,255,255,0.35)">🆕 Type player name first</div>
                 </div>
             </div>
         `;
     }
     grid.innerHTML = html;
+    refreshFsrPlayersDatalist();
+    grid.querySelectorAll('.fsr-p-name-input').forEach((inp) => {
+        const idx = parseInt(inp.dataset.idx, 10);
+        if (Number.isNaN(idx)) return;
+        inp.addEventListener('input', () => onFSRPlayerNameChange(inp, idx));
+        inp.addEventListener('change', () => onFSRPlayerNameChange(inp, idx));
+        onFSRPlayerNameChange(inp, idx);
+    });
 }
 
 function onFSRPlayerPhotoClick(idx) {
+    const inp = document.querySelector(`.fsr-p-name-input[data-idx="${idx}"]`);
+    if (!inp?.value?.trim()) {
+        showToast('Enter player name first — photo links to that name', 'error');
+        inp?.focus();
+        return;
+    }
     window._pendingRosterSlot = idx;
     document.getElementById('fsr-player-photo-input').click();
+}
+
+function compressImageFile(file, maxW, quality, cb) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const scale = Math.min(1, maxW / img.width);
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            cb(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function upsertRosterPlayerByName(name, photoDataUrl) {
+    const n = (name || '').trim();
+    if (!n) return null;
+    let p = DB.getPlayers().find(
+        (x) => x.name && x.name.trim().toLowerCase() === n.toLowerCase()
+    );
+    if (!p) {
+        p = DB.addPlayer({ name: n, photo: photoDataUrl || '', role: 'Player' });
+    } else if (photoDataUrl && String(photoDataUrl).startsWith('data:')) {
+        DB.savePlayerPhoto(p.playerId, photoDataUrl);
+    }
+    return p.playerId;
 }
 
 function onFSRPlayerPhotoSelected(event) {
     const file = event.target.files[0];
     if (!file) return;
-    const idx = window._pendingRosterSlot;
+    event.target.value = '';
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 250;
-            const scale = MAX_WIDTH / img.width;
-            canvas.width = MAX_WIDTH;
-            canvas.height = img.height * scale;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    compressImageFile(file, 400, 0.82, (dataUrl) => {
+        const slotEl = window._fsrActivePhotoTarget
+            ? document.getElementById(window._fsrActivePhotoTarget)
+            : null;
 
-            const t = getActiveRosterRoot();
-            if (t && editingTeamName) {
-                if (!t.rosters) t.rosters = {};
-                if (!t.rosters[editingTeamName]) t.rosters[editingTeamName] = [];
-                
-                const roster = t.rosters[editingTeamName];
-                const slotValue = roster[idx];
-                let p = resolveRosterPlayer(slotValue);
-                
-                if (!p) {
-                    p = DB.addPlayer({ name: slotValue || 'Player ' + (idx + 1), photo: dataUrl, role: 'Player' });
-                    t.rosters[editingTeamName][idx] = p.playerId;
-                } else {
-                    localStorage.setItem('cricpro_photo_' + p.playerId, dataUrl);
-                }
-                
-                const imgEl = document.getElementById(`fsr-p-img-${idx}`);
-                if (imgEl) imgEl.src = dataUrl;
-                saveActiveRosterRoot(t);
-            }
-        };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-}
+        if (slotEl) {
+            const nameInp = slotEl.querySelector('.fsr-p-name');
+            const name = nameInp?.value?.trim() || 'Player';
+            const pid = upsertRosterPlayerByName(name, dataUrl);
+            const idInp = slotEl.querySelector('.fsr-p-id');
+            if (idInp) idInp.value = pid;
+            const img = slotEl.querySelector('.fsr-p-photo');
+            if (img) img.src = dataUrl;
+            showToast('Photo saved for ' + name, 'success');
+            window._fsrActivePhotoTarget = null;
+            return;
+        }
 
-function resolveRosterPlayer(val) {
-    if (!val) return null;
-    const byId = DB.getPlayerById(val);
-    if (byId) return byId;
-    return DB.getPlayers().find(p => p.name && p.name.trim().toLowerCase() === val.trim().toLowerCase()) || null;
+        const idx = window._pendingRosterSlot;
+        if (idx == null) return;
+
+        const nameInp = document.querySelector(`.fsr-p-name-input[data-idx="${idx}"]`);
+        const name = nameInp?.value?.trim();
+        if (!name) {
+            showToast('Enter player name first', 'error');
+            window._pendingRosterSlot = null;
+            return;
+        }
+        const pid = upsertRosterPlayerByName(name, dataUrl);
+        if (nameInp) nameInp.dataset.playerId = pid;
+
+        const imgEl = document.getElementById(`fsr-p-img-${idx}`);
+        if (imgEl) {
+            imgEl.src = dataUrl;
+            imgEl.dataset.userPhoto = '1';
+        }
+        onFSRPlayerNameChange(nameInp, idx);
+        showToast('Photo saved for ' + name, 'success');
+        window._pendingRosterSlot = null;
+    });
 }
 
 function onFSRTeamPhotoSelected(event) {
     const file = event.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 400;
-            canvas.height = (img.height / img.width) * 400;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            
-            const t = getActiveRosterRoot();
-            if (t && editingTeamName) {
-                DB.saveTeamPhoto(editingTeamName, dataUrl, t.id);
-                document.getElementById('fsr-team-logo').src = dataUrl;
-                showToast("🏆 Team logo updated", "success");
-            }
-        };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+    event.target.value = '';
+
+    compressImageFile(file, 400, 0.8, (dataUrl) => {
+        const m = currentMatch;
+        const teamName =
+            document.getElementById('fsr-team-name-input')?.value?.trim() ||
+            editingTeamName ||
+            (m && (_fsrCurrentTeamIndex === 0 ? m.team1 : m.team2)) ||
+            '';
+        const tournId = m?.tournamentId || (getActiveRosterRoot()?.id);
+        DB.saveTeamPhoto(teamName, dataUrl, tournId);
+        const logo = document.getElementById('fsr-team-logo');
+        if (logo) logo.src = dataUrl;
+        showToast('Team logo saved', 'success');
+    });
 }
 
 function addRosterSlotFS() {
-    const t = getActiveRosterRoot();
-    if (!t || !editingTeamName) return;
-    if (!t.rosters) t.rosters = {};
-    if (!t.rosters[editingTeamName]) t.rosters[editingTeamName] = [];
-    t.rosters[editingTeamName].push('');
+    if (!editingTeamName) return;
+    const m = currentMatch;
+    const teamIdx =
+        _fsrCurrentTeamIndex ?? (m && m.team1 === editingTeamName ? 0 : 1);
+    const slots = getTeamRosterSlots(editingTeamName, teamIdx);
+    slots.push('');
+    setTeamRosterIds(editingTeamName, teamIdx, slots, true);
     renderFSRosters();
 }
 
-function saveRosterFromFS() {
-    const t = getActiveRosterRoot();
-    if (!t || !editingTeamName) return;
+function linkInningsPlayersToRoster(m, teamName, rosterIds) {
+    if (!m?.innings || !teamName) return;
+    const namesToId = {};
+    rosterIds.forEach((pid) => {
+        if (!pid) return;
+        const p = DB.getPlayerById(pid);
+        if (p?.name) namesToId[p.name.trim().toLowerCase()] = pid;
+    });
 
-    // 1. Save Team Details (Captain, Coach)
-    const newTeamName = document.getElementById('fsr-team-name-input').value.trim();
-    const captain = document.getElementById('fsr-captain-input').value.trim();
-    const coach = document.getElementById('fsr-coach-input').value.trim();
+    m.innings.forEach((inn) => {
+        if (!inn) return;
+        const linkList = (side) => {
+            const list = side === 'bat' ? inn.batsmen : inn.bowlers;
+            if (!list) return;
+            const team = side === 'bat' ? inn.battingTeam : inn.bowlingTeam;
+            if (team !== teamName) return;
+            list.forEach((pl) => {
+                if (!pl?.name) return;
+                const pid = namesToId[pl.name.trim().toLowerCase()];
+                if (pid) pl.playerId = pid;
+            });
+        };
+        linkList('bat');
+        linkList('bowl');
+    });
+}
 
-    t.teamConfigs = t.teamConfigs || {};
-    t.teamConfigs[editingTeamName] = { captain, coach };
+function collectRosterIdsFromFSRGrid() {
+    const ids = [];
+    const m = currentMatch;
+    const teamIdx =
+        _fsrCurrentTeamIndex ?? (m && m.team1 === editingTeamName ? 0 : 1);
+    const existingRoster = getTeamRosterSlots(editingTeamName, teamIdx);
 
-    // Handle Team Rename
-    if (newTeamName && newTeamName !== editingTeamName) {
-        if (t.teams) {
-            const idx = t.teams.indexOf(editingTeamName);
-            if (idx !== -1) {
-                t.teams[idx] = newTeamName;
-                t.rosters[newTeamName] = t.rosters[editingTeamName];
-                delete t.rosters[editingTeamName];
-                t.teamConfigs[newTeamName] = t.teamConfigs[editingTeamName];
-                delete t.teamConfigs[editingTeamName];
-                editingTeamName = newTeamName;
+    const gridA = document.querySelectorAll('.fsr-p-name-input');
+    if (gridA.length) {
+        gridA.forEach((inp, idx) => {
+            const name = inp.value.trim();
+            if (!name || isGenericFSRPlayerName(name)) {
+                ids.push('');
+                return;
             }
-        }
+            const img = document.getElementById(`fsr-p-img-${idx}`);
+            let photo = img?.src?.startsWith('data:') ? img.src : null;
+            const linkedPid = inp.dataset.playerId || '';
+            const linkedPlayer = linkedPid ? DB.getPlayerById(linkedPid) : null;
+            if (
+                linkedPlayer &&
+                linkedPlayer.name &&
+                linkedPlayer.name.trim().toLowerCase() === name.toLowerCase()
+            ) {
+                if (photo) DB.savePlayerPhoto(linkedPid, photo);
+                ids.push(linkedPid);
+                return;
+            }
+            const slotPid = existingRoster[idx] || '';
+            const slotPlayer = slotPid ? DB.getPlayerById(slotPid) : null;
+            if (!photo && slotPid) {
+                const cached = DB.getPlayerPhoto(slotPid);
+                if (cached && String(cached).startsWith('data:')) photo = cached;
+            }
+            if (
+                slotPlayer &&
+                slotPlayer.name &&
+                !isGenericFSRPlayerName(slotPlayer.name) &&
+                slotPlayer.name.trim().toLowerCase() === name.toLowerCase()
+            ) {
+                if (photo) DB.savePlayerPhoto(slotPid, photo);
+                ids.push(slotPid);
+            } else {
+                ids.push(upsertRosterPlayerByName(name, photo));
+            }
+        });
+        return ids;
     }
 
-    // 2. Save Roster Names & Photos
-    const nameInputs = document.querySelectorAll('.fsr-p-name-input');
-    const newRoster = [];
-    nameInputs.forEach(inp => {
-        const val = inp.value.trim();
-        if (!val) { newRoster.push(''); return; }
-        
-        const p = resolveRosterPlayer(val);
-        if (p) {
-            newRoster.push(p.playerId);
-        } else {
-            const created = DB.addPlayer({ name: val, photo: DEFAULT_PLAYER_PHOTO, role: 'Player' });
-            newRoster.push(created.playerId);
+    document.querySelectorAll('.fsr-player-card').forEach((slot) => {
+        const name = slot.querySelector('.fsr-p-name')?.value?.trim();
+        if (!name) return;
+        const photoEl = slot.querySelector('.fsr-p-photo');
+        const photo = photoEl?.src?.startsWith('data:') ? photoEl.src : null;
+        let pid = slot.querySelector('.fsr-p-id')?.value?.trim();
+        if (!pid || !DB.getPlayerById(pid)) {
+            pid = upsertRosterPlayerByName(name, photo);
+        } else if (photo) {
+            DB.savePlayerPhoto(pid, photo);
         }
+        ids.push(pid);
     });
-    t.rosters[editingTeamName] = newRoster;
-    
-    t.lastUpdated = Date.now();
-    saveActiveRosterRoot(t);
-    showToast("✅ Squad Synced & Broadcasted!", "success");
-    
-    setTimeout(closeFullScreenRoster, 800);
-    renderTournamentTeams();
+    return ids;
+}
+
+function saveRosterFromFS() {
+    const m = currentMatch;
+    if (!m) {
+        showToast('No active match', 'error');
+        return;
+    }
+
+    window._batchRosterSave = true;
+    try {
+        return _saveRosterFromFSImpl();
+    } finally {
+        window._batchRosterSave = false;
+    }
+}
+
+function _saveRosterFromFSImpl() {
+    const m = currentMatch;
+
+    let teamName =
+        document.getElementById('fsr-team-name-input')?.value?.trim() ||
+        editingTeamName ||
+        (_fsrCurrentTeamIndex === 0 ? m.team1 : m.team2);
+    if (!teamName) {
+        showToast('Enter team name', 'error');
+        return;
+    }
+
+    const captain = document.getElementById('fsr-captain-input')?.value?.trim() || '';
+    const coach = document.getElementById('fsr-coach-input')?.value?.trim() || '';
+    const rosterIds = collectRosterIdsFromFSRGrid();
+
+    let t = getActiveRosterRoot();
+    if (t) {
+        if (!t.rosters) t.rosters = {};
+        if (editingTeamName && editingTeamName !== teamName && t.rosters[editingTeamName]) {
+            t.rosters[teamName] = t.rosters[editingTeamName];
+            delete t.rosters[editingTeamName];
+        }
+        t.teamConfigs = t.teamConfigs || {};
+        t.teamConfigs[teamName] = { captain, coach };
+        if (t.teams && !t.teams.includes(teamName)) t.teams.push(teamName);
+        if (t.id && !String(t.id).startsWith('MATCH-')) {
+            t.lastUpdated = Date.now();
+            DB.saveTournament(t);
+            currentTournament = t;
+        }
+        editingTeamName = teamName;
+    }
+
+    const teamIdx = _fsrCurrentTeamIndex ?? (m.team1 === teamName ? 0 : 1);
+    setTeamRosterIds(teamName, teamIdx, rosterIds, true);
+
+    linkInningsPlayersToRoster(m, teamName, rosterIds);
+
+    const root = getActiveRosterRoot();
+    if (root) saveActiveRosterRoot(root, false);
+    DB.saveMatch(m, true, { skipPublish: false });
+
+    if (window.desktopAPI) {
+        window.desktopAPI.requestPersist();
+    }
+
+    populateSquadDatalist('batting');
+    populateSquadDatalist('bowling');
+
+    showToast('Squad saved on this PC — hotkeys can use these players', 'success');
+    closeFullScreenRoster();
+    if (typeof renderTournamentTeams === 'function') renderTournamentTeams();
+    window._fsrMemRoster = null;
 }
 
 
@@ -3929,59 +5023,50 @@ function escapeHTML(str) {
 }
 
 // ========== BROADCASTS ==========
-function cloneBroadcastProfile(profile) {
-    return profile && typeof profile === 'object' ? { ...profile } : {};
-}
-
-function getBroadcastMatchSnapshot() {
-    if (!currentMatch) return null;
-    try {
-        if (typeof prepareMatchForPersistence === 'function') {
-            return prepareMatchForPersistence(currentMatch);
-        }
-        const copy = JSON.parse(JSON.stringify(currentMatch));
-        delete copy.history;
-        delete copy.redoStack;
-        delete copy._isSyncing;
-        delete copy._isBackgroundSync;
-        return copy;
-    } catch (_) {
-        return null;
-    }
-}
-
 function sendBroadcast(cmd, data) {
-    if (!currentMatch) return;
-    const matchSnapshot = getBroadcastMatchSnapshot();
-    const broadcastData = matchSnapshot && !(data && data.match)
-        ? { ...(data || {}), match: matchSnapshot }
-        : (data || {});
-    const payload = {
+    if (!currentMatch) {
+        if (typeof showToast === 'function') {
+            showToast('Live match required — score a match first', 'error');
+        }
+        return;
+    }
+    const payload = { ...(data || {}) };
+    if (cmd === 'SYNC_SCORE' || cmd === 'SYNC_MATCH' || cmd === 'FORCE_UPDATE') {
+        payload.match = currentMatch;
+        payload.matchId = currentMatch.id;
+    }
+    if (typeof Broadcast !== 'undefined' && typeof Broadcast.send === 'function') {
+        Broadcast.send(cmd, payload);
+        return;
+    }
+    const envelope = {
         cmd,
-        data: broadcastData,
+        data: payload,
         matchId: currentMatch.id,
         tournamentId: currentMatch.tournamentId,
-        timestamp: Date.now()
+        timestamp: Date.now(),
     };
-    localStorage.setItem('cricpro_broadcast_cmd', JSON.stringify(payload));
-    
-    // PostMessage to embedded IFRAME preview instantly
-    const iframes = document.querySelectorAll('iframe');
-    iframes.forEach(f => {
-        if (f.contentWindow) {
-            f.contentWindow.postMessage({ type: 'cricpro_broadcast_cmd', payload: payload }, '*');
-        }
-    });
-
-    if (typeof socket !== 'undefined' && socket) socket.emit('broadcast_command', payload);
-    if (window.CricproCloud) window.CricproCloud.sendBroadcast(payload).catch(() => {});
+    localStorage.setItem('cricpro_broadcast_cmd', JSON.stringify(envelope));
+    if (typeof window.forwardBroadcastToPreviews === 'function') {
+        window.forwardBroadcastToPreviews(envelope);
+    } else {
+        document.querySelectorAll('iframe').forEach((f) => {
+            if (f.contentWindow) {
+                f.contentWindow.postMessage({ type: 'cricpro_broadcast_cmd', payload: envelope }, '*');
+            }
+        });
+    }
+    if (window.desktopAPI) {
+        window.desktopAPI.publishMatch(currentMatch);
+        window.desktopAPI.broadcastCommand(envelope);
+    }
+    if (typeof socket !== 'undefined' && socket) socket.emit('broadcast_command', envelope);
 }
 
 function broadcastTeamRoster(teamIdx) {
     const m = currentMatch;
     if (!m) return;
-    const teams = getBroadcastTeamNames(m);
-    const teamName = teams[teamIdx] || (teamIdx === 0 ? m.team1 : m.team2);
+    const teamName = teamIdx === 0 ? m.team1 : m.team2;
     const t = m.tournamentId ? DB.getTournament(m.tournamentId) : m;
     const rosterIds = (t && t.rosters) ? (t.rosters[teamName] || []) : [];
     
@@ -3990,38 +5075,30 @@ function broadcastTeamRoster(teamIdx) {
 }
 
 function broadcastTeamCard(teamIdx) {
-    const m = currentMatch;
-    if (!m) return;
-    const teams = getBroadcastTeamNames(m);
-    const teamName = teams[teamIdx] || (teamIdx === 0 ? m.team1 : m.team2);
-    const t = m.tournamentId ? DB.getTournament(m.tournamentId) : m;
-    const rosterIds = (t && t.rosters) ? (t.rosters[teamName] || t.rosters[teamIdx] || []) : [];
-    
-    let players = rosterIds.slice(0, 15).map(pid => {
-        const p = typeof pid === 'string' ? (DB.getPlayerById(pid) || { name: pid }) : pid;
-        if (!p || !p.name) return null;
-        return {
-            name: p.name,
-            role: p.role || 'Player',
-            photo: playerPhotoSrc(p)
-        };
-    }).filter(Boolean);
-
-    if (players.length === 0 && Array.isArray(m.innings)) {
-        const seen = new Set();
-        const add = (p) => {
-            if (!p || !p.name || seen.has(p.name)) return;
-            seen.add(p.name);
-            players.push({ name: p.name, role: p.role || 'Player', photo: playerPhotoSrc(p) });
-        };
-        m.innings.filter(Boolean).forEach(inn => {
-            if (inn.battingTeam === teamName) (inn.batsmen || []).forEach(add);
-            if (inn.bowlingTeam === teamName) (inn.bowlers || []).forEach(add);
-        });
-        players = players.slice(0, 15);
+    if (typeof Broadcast !== 'undefined' && Broadcast.broadcastTeamCard) {
+        return Broadcast.broadcastTeamCard(teamIdx);
     }
-    
-    sendBroadcast('SHOW_TEAM_CARD', { teamName, teamLogo: DB.getTeamPhoto(teamName, m.tournamentId) || '', players });
+    const m = currentMatch;
+    if (!m) return showToast('No active match', 'error');
+    const teamName = teamIdx === 0 ? m.team1 : m.team2;
+    if (typeof window.buildTeamSquadBroadcastPayload === 'function') {
+        sendBroadcast('SHOW_TEAM_CARD', window.buildTeamSquadBroadcastPayload(m, teamName));
+        showToast(`📋 ${teamName} squad published`, 'success');
+    }
+}
+
+function broadcastBattingTeamSquad() {
+    if (typeof Broadcast !== 'undefined' && Broadcast.broadcastBattingTeamSquad) {
+        return Broadcast.broadcastBattingTeamSquad();
+    }
+    const m = currentMatch;
+    if (!m) return showToast('No active match', 'error');
+    const inn = m.innings?.[m.currentInnings || 0];
+    const teamName = inn?.battingTeam || m.team1;
+    if (typeof window.buildTeamSquadBroadcastPayload === 'function') {
+        sendBroadcast('SHOW_TEAM_CARD', window.buildTeamSquadBroadcastPayload(m, teamName));
+        showToast(`🏏 ${teamName} batting squad published`, 'success');
+    }
 }
 
 function broadcastNextMatch() {
@@ -4039,8 +5116,7 @@ function broadcastCurrentBatters() {
     const batters = getOnCreaseBatterNames(inn); // [idx0, idx1]
     
     const profiles = batters.map((bName, index) => {
-        const batterRecord = inn.batsmen.find(x => x.name === bName) || { runs:0, balls:0, fours:0, sixes:0 };
-        let p = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, bName) || batterRecord);
+        let p = resolvePlayerProfileForBatter(inn, bName) || {};
         
         // Priority 1: Specific inline button
         if (window[`__photo_batter${index+1}`]) {
@@ -4059,7 +5135,7 @@ function broadcastCurrentBatters() {
             }
         }
         
-        const stats = batterRecord;
+        const stats = inn.batsmen.find(x => x.name === bName) || { runs:0, balls:0, fours:0, sixes:0 };
         return { name: bName, profile: p, stats };
     });
     sendBroadcast('SHOW_BATTER_PROFILES', { profiles });
@@ -4074,9 +5150,10 @@ function broadcastStrikerProfile() {
     const strikerName = getStrikerBatterName(inn);
     if (!strikerName) return;
     
+    let p = resolvePlayerProfileForBatter(inn, strikerName);
     const stats = inn.batsmen.find(x => x.name === strikerName) || { runs:0, balls:0, fours:0, sixes:0 };
-    let p = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, strikerName) || stats);
     
+    if (!p) p = {};
     if (window.__photo_striker) {
         p.photo = window.__photo_striker;
         // Don't nullify window.__photo_striker so it stays for Partnership
@@ -4085,14 +5162,24 @@ function broadcastStrikerProfile() {
     }
     
     const age = p.dob ? calculateAge(p.dob) : "";
-    sendBroadcast('SHOW_STRIKER_PROFILE', { 
-        playerName: strikerName, 
-        playerPhoto: p.photo || playerPhotoSrc(p), 
-        playerRuns: stats.runs, 
-        playerBalls: stats.balls,
-        playerSixes: stats.sixes || 0,
-        age: age
-    });
+    const payload =
+        typeof window.buildPlayerProfileBroadcastData === 'function'
+            ? window.buildPlayerProfileBroadcastData(
+                  { ...stats, name: strikerName, playerId: p.playerId },
+                  m,
+                  'striker'
+              )
+            : {
+                  playerName: strikerName,
+                  teamName: inn.battingTeam || m.team1,
+                  playerPhoto: p.photo || playerPhotoSrc(p),
+                  playerRuns: stats.runs,
+                  playerBalls: stats.balls,
+                  playerSixes: stats.sixes || 0,
+                  age,
+              };
+    if (payload && age) payload.age = age;
+    sendBroadcast('SHOW_STRIKER_PROFILE', payload);
     showToast('⚡ Striker Profile Published!', 'success');
 }
 
@@ -4105,16 +5192,25 @@ function broadcastNonStrikerProfile() {
     const [b0, b1] = getOnCreaseBatterNames(inn);
     const nonStrikerName = (inn.strikerIdx === 0) ? b1 : b0;
     if (!nonStrikerName) return;
-    const stats = inn.batsmen.find(x => x.name === nonStrikerName) || { runs:0, balls:0, fours:0, sixes:0 };
-    let p = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, nonStrikerName) || stats);
+    let p = resolvePlayerProfileForBatter(inn, nonStrikerName) || {};
     if (window.__photo_nonstriker) p.photo = window.__photo_nonstriker;
-    sendBroadcast('SHOW_NON_STRIKER_PROFILE', {
-        playerName: nonStrikerName,
-        playerPhoto: p.photo || playerPhotoSrc(p),
-        playerRuns: stats.runs,
-        playerBalls: stats.balls,
-        playerSixes: stats.sixes || 0
-    });
+    const stats = inn.batsmen.find(x => x.name === nonStrikerName) || { runs:0, balls:0, fours:0, sixes:0 };
+    const payload =
+        typeof window.buildPlayerProfileBroadcastData === 'function'
+            ? window.buildPlayerProfileBroadcastData(
+                  { ...stats, name: nonStrikerName, playerId: p.playerId },
+                  m,
+                  'nonstriker'
+              )
+            : {
+                  playerName: nonStrikerName,
+                  teamName: inn.battingTeam || m.team1,
+                  playerPhoto: p.photo || playerPhotoSrc(p),
+                  playerRuns: stats.runs,
+                  playerBalls: stats.balls,
+                  playerSixes: stats.sixes || 0,
+              };
+    sendBroadcast('SHOW_NON_STRIKER_PROFILE', payload);
     showToast('🛡️ Non-Striker Profile Published!', 'success');
 }
 
@@ -4146,19 +5242,28 @@ function broadcastBowlerProfile() {
         }
     }
     
-    p = cloneBroadcastProfile(p || bowler);
+    if (!p) p = {};
     if (window.__photo_bowler) {
         p.photo = window.__photo_bowler;
         // Retain for multiple re-broadcasts
     }
     
-    sendBroadcast('SHOW_BOWLER_PROFILE', { 
-        playerName: bowler.name, 
-        playerPhoto: p.photo || playerPhotoSrc(p), 
-        playerRuns: bowler.wickets || 0,  // val1 = wickets
-        playerBalls: bowler.runs || 0,    // val2 = runs conceded
-        playerSixes: formatOvers(bowler.balls, m.ballsPerOver) // val3 = overs (as string)
-    });
+    const bowlerPayload =
+        typeof window.buildPlayerProfileBroadcastData === 'function'
+            ? window.buildPlayerProfileBroadcastData(
+                  { ...bowler, playerId: bowler.playerId || p.playerId },
+                  m,
+                  'bowler'
+              )
+            : {
+                  playerName: bowler.name,
+                  teamName: inn.bowlingTeam || m.team2,
+                  playerPhoto: p.photo || playerPhotoSrc(p),
+                  playerRuns: bowler.wickets || 0,
+                  playerBalls: bowler.runs || 0,
+                  playerSixes: formatOvers(bowler.balls, m.ballsPerOver),
+              };
+    sendBroadcast('SHOW_BOWLER_PROFILE', bowlerPayload);
     showToast('⚾ Bowler Profile Published!', 'success');
 }
 
@@ -4169,7 +5274,7 @@ function triggerVisualBigEvent(type) {
     if (!inn) return;
 
     const strikerName = getStrikerBatterName(inn);
-    const strikerProfile = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, strikerName));
+    const strikerProfile = resolvePlayerProfileForBatter(inn, strikerName) || {};
     if (window.__photo_striker) strikerProfile.photo = window.__photo_striker;
 
     const strikerStats = inn.batsmen.find(x => x.name === strikerName) || { runs: 0, balls: 0 };
@@ -4191,53 +5296,23 @@ function triggerVisualBigEvent(type) {
 }
 
 function broadcastPartnership() {
-    const m = currentMatch;
-    if (!m) { showToast('No active match!', 'error'); return; }
-    const inn = m.innings[m.currentInnings];
-    if (!inn) { showToast('No active innings!', 'error'); return; }
-
-    const names = getOnCreaseBatterNames(inn); // [idx0, idx1]
-    const p = inn.currentPartnership || { runs: 0, balls: 0 };
-    let p1Profile = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, names[0]));
-    let p2Profile = cloneBroadcastProfile(resolvePlayerProfileForBatter(inn, names[1]));
-
-    // Apply inline overrides if present
-    if (window.__photo_partner1) { 
-        p1Profile.photo = window.__photo_partner1; 
-        window.__photo_partner1 = null; 
-        const el = document.getElementById('preview_partner1'); 
-        if(el) { el.innerHTML='📷'; el.style.borderColor='rgba(255,255,255,0.3)';} 
-    } else {
-        const isP1Striker = (inn.strikerIdx === 0);
-        if (isP1Striker && window.__photo_striker) p1Profile.photo = window.__photo_striker;
-        if (!isP1Striker && window.__photo_nonstriker) p1Profile.photo = window.__photo_nonstriker;
+    const m = currentMatch || window.currentMatch;
+    if (!m) {
+        showToast('No active match!', 'error');
+        return;
     }
-
-    if (window.__photo_partner2) { 
-        p2Profile.photo = window.__photo_partner2; 
-        window.__photo_partner2 = null; 
-        const el = document.getElementById('preview_partner2'); 
-        if(el) { el.innerHTML='📷'; el.style.borderColor='rgba(255,255,255,0.3)';} 
+    if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
+    const payload =
+        typeof window.buildPartnershipBroadcastData === 'function'
+            ? window.buildPartnershipBroadcastData(m)
+            : null;
+    if (payload) {
+        sendBroadcast('SHOW_PARTNERSHIP', payload);
     } else {
-        const isP2Striker = (inn.strikerIdx === 1);
-        if (isP2Striker && window.__photo_striker) p2Profile.photo = window.__photo_striker;
-        if (!isP2Striker && window.__photo_nonstriker) p2Profile.photo = window.__photo_nonstriker;
+        showToast('No partnership data', 'error');
+        return;
     }
-
-    const wicketLabel = ["1ST", "2ND", "3RD", "4TH", "5TH", "6TH", "7TH", "8TH", "9TH", "10TH"];
-    const wicketNum = wicketLabel[inn.wickets] || (inn.wickets + 1) + "TH";
-
-    sendBroadcast('SHOW_PARTNERSHIP', {
-        player1: names[0] || 'Batter 1',
-        player2: names[1] || 'Batter 2',
-        p1Profile,
-        p2Profile,
-        runs: p.runs || 0,
-        balls: p.balls || 0,
-        teamName: inn.battingTeam,
-        wicketNum: wicketNum
-    });
-    showToast('📺 Cinematic Partnership Broadcasted!', 'success');
+    showToast('📺 Partnership published!', 'success');
 }
 
 // ========== GLOBAL SYNC HANDLERS ==========
@@ -4482,8 +5557,8 @@ function renderBroadcastController(match) {
                             <button class="b-btn b-btn-slate" style="min-height:50px" onclick="location.reload()">
                                 <div class="b-btn-title" style="font-size:11px">🔌 RECONNECT</div>
                             </button>
-                            <button class="b-btn b-btn-emerald" style="min-height:50px" onclick="const obsUrl = window.location.origin + window.location.pathname.replace('score-match.html', 'overlay.html') + '?match=' + '${match.id}'; navigator.clipboard.writeText(obsUrl); showToast('✅ OBS URL Copied!', 'success');">
-                                <div class="b-btn-title" style="font-size:11px">🔗 OBS URL</div>
+                            <button class="b-btn b-btn-emerald" style="min-height:50px" onclick="if(window.SLCRICK_DESKTOP&&window.openObsOverlayForMatch){openObsOverlayForMatch('${match.id}','${match.tournamentId || ''}'); showToast('📺 OBS overlay opened — OBS එකේ Window Capture දාන්න','success');}else{const obsUrl=window.location.origin+window.location.pathname.replace('score-match.html','overlay.html')+'?match=${match.id}';navigator.clipboard.writeText(obsUrl);showToast('✅ OBS URL Copied!','success');}">
+                                <div class="b-btn-title" style="font-size:11px">${window.SLCRICK_DESKTOP ? '📺 OPEN OBS' : '🔗 OBS URL'}</div>
                             </button>
                         </div>
                     </div>
@@ -4505,9 +5580,9 @@ function renderBroadcastController(match) {
                             <select id="scorebar-style-select" onchange="if(typeof Broadcast !== 'undefined') Broadcast.changeOverlayTheme(this.value); else sendBroadcast('SET_OVERLAY_MODE', { mode: this.value })" 
                                 style="width:100%; background:#0f172a; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:10px; border-radius:8px; font-weight:700; font-size:12px;">
                                 <option value="theme1">Classic Scoreboard (Default)</option>
-                                <option value="theme2">Modern Photo Bar</option>
-                                <option value="theme3">Detailed Data View</option>
-                                <option value="theme4">IPL Style (Score Bar 2)</option>
+                                <option value="theme2">Scorecard 2 (Modern)</option>
+                                <option value="theme3">Manual Input Scorecard</option>
+                                <option value="theme4">Classic Scoreboard (Alt)</option>
                             </select>
                         </div>
 
@@ -4568,11 +5643,11 @@ function renderBroadcastController(match) {
                 <div class="b-card" style="margin-bottom:0; background: rgba(59, 130, 246, 0.03); border-color: rgba(59, 130, 246, 0.15);">
                     <div class="b-section-title" style="color: #60a5fa;">🎬 CINEMATIC PRODUCTIONS</div>
                     <div class="b-grid" style="grid-template-columns: repeat(3, 1fr);">
-                        <button class="b-btn b-btn-primary" onclick="broadcastStrikerProfile()">
+                        <button class="b-btn b-btn-primary" onclick="fireProfileBroadcast('striker')">
                             <div class="b-btn-title">⚡ STRIKER</div>
                             <div class="b-btn-sub">S+B</div>
                         </button>
-                        <button class="b-btn" style="background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;" onclick="broadcastNonStrikerProfile()">
+                        <button class="b-btn" style="background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;" onclick="fireProfileBroadcast('nonstriker')">
                             <div class="b-btn-title">🛡️ NON-STR</div>
                             <div class="b-btn-sub">S+N</div>
                         </button>
@@ -4584,17 +5659,13 @@ function renderBroadcastController(match) {
                             <div class="b-btn-title">🤝 PARTNER</div>
                             <div class="b-btn-sub">S+H</div>
                         </button>
-                        <button class="b-btn b-btn-purple" onclick="broadcastBowlerProfile()">
+                        <button class="b-btn b-btn-purple" onclick="fireProfileBroadcast('bowler')">
                             <div class="b-btn-title">⚾ BOWLER</div>
                             <div class="b-btn-sub">S+L</div>
                         </button>
                         <button class="b-btn b-btn-black" onclick="broadcastTeamCard(0)">
                             <div class="b-btn-title">👕 ${getShortName(match.team1)}</div>
                             <div class="b-btn-sub">S+K</div>
-                        </button>
-                        <button class="b-btn b-btn-black" onclick="broadcastTeamCard(1)">
-                            <div class="b-btn-title">👕 ${getShortName(match.team2)}</div>
-                            <div class="b-btn-sub">S+J</div>
                         </button>
                     </div>
                 </div>
@@ -4608,15 +5679,24 @@ function renderBroadcastController(match) {
                     <div class="b-section-title">📸 PLAYER PHOTOS</div>
                     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:12px">
                         <div style="text-align:center">
-                            <div id="preview_striker" onclick="triggerManualPhoto('striker')" style="width:100%; height:75px; background:rgba(59,130,246,0.07); border:2px dashed rgba(59,130,246,0.4); border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s">📷</div>
+                            <div style="position:relative">
+                                <div id="preview_striker" onclick="triggerManualPhoto('striker')" style="width:100%; height:75px; background:rgba(59,130,246,0.07); border:2px dashed rgba(59,130,246,0.4); border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s">📷</div>
+                                <button type="button" title="Hide on overlay" onclick="event.stopPropagation();clearPlayerPhotoSlot('striker')" style="position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;border:none;background:#e53935;color:#fff;font-size:11px;font-weight:900;cursor:pointer;z-index:2">×</button>
+                            </div>
                             <div style="font-size:9px; font-weight:900; margin-top:6px; color:#3b82f6; text-transform:uppercase">Striker</div>
                         </div>
                         <div style="text-align:center">
-                            <div id="preview_nonstriker" onclick="triggerManualPhoto('nonstriker')" style="width:100%; height:75px; background:rgba(244,63,94,0.07); border:2px dashed rgba(244,63,94,0.4); border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s">📷</div>
+                            <div style="position:relative">
+                                <div id="preview_nonstriker" onclick="triggerManualPhoto('nonstriker')" style="width:100%; height:75px; background:rgba(244,63,94,0.07); border:2px dashed rgba(244,63,94,0.4); border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s">📷</div>
+                                <button type="button" title="Hide on overlay" onclick="event.stopPropagation();clearPlayerPhotoSlot('nonstriker')" style="position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;border:none;background:#e53935;color:#fff;font-size:11px;font-weight:900;cursor:pointer;z-index:2">×</button>
+                            </div>
                             <div style="font-size:9px; font-weight:900; margin-top:6px; color:#f43f5e; text-transform:uppercase">Non-Str</div>
                         </div>
                         <div style="text-align:center">
-                            <div id="preview_bowler" onclick="triggerManualPhoto('bowler')" style="width:100%; height:75px; background:rgba(139,92,246,0.07); border:2px dashed rgba(139,92,246,0.4); border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s">📷</div>
+                            <div style="position:relative">
+                                <div id="preview_bowler" onclick="triggerManualPhoto('bowler')" style="width:100%; height:75px; background:rgba(139,92,246,0.07); border:2px dashed rgba(139,92,246,0.4); border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s">📷</div>
+                                <button type="button" title="Hide on overlay" onclick="event.stopPropagation();clearPlayerPhotoSlot('bowler')" style="position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;border:none;background:#e53935;color:#fff;font-size:11px;font-weight:900;cursor:pointer;z-index:2">×</button>
+                            </div>
                             <div style="font-size:9px; font-weight:900; margin-top:6px; color:#8b5cf6; text-transform:uppercase">Bowler</div>
                         </div>
                     </div>
@@ -4634,6 +5714,10 @@ function renderBroadcastController(match) {
                         <button class="b-btn b-btn-emerald" onclick="if(typeof Broadcast !== 'undefined') Broadcast.showCRR(); else sendBroadcast('SHOW_CRR')">
                             <div class="b-btn-title">📈 RRATE</div>
                             <div class="b-btn-sub">S+C</div>
+                        </button>
+                        <button class="b-btn" style="min-height:50px;background:linear-gradient(135deg,#0d4d2e,#1b6b3a);border:1px solid rgba(255,255,255,0.15);color:#fff;grid-column:1/-1" onclick="showLastWicketBroadcast()">
+                            <div class="b-btn-title">🎯 LAST WICKET</div>
+                            <div class="b-btn-sub">Shift+O — last out + stats (blue/silver card)</div>
                         </button>
                         <button class="b-btn b-btn-purple" onclick="if(typeof Broadcast !== 'undefined') Broadcast.showScorecard(); else sendBroadcast('SHOW_SCORECARD')">
                             <div class="b-btn-title">📄 CARD</div>
@@ -4752,17 +5836,13 @@ function renderBroadcastController(match) {
     }
 
     const syncInterval = setInterval(async () => {
-        // Optimized polling: Only fetch if needed
-        if (typeof window.pullGlobalData === 'function') {
-            await window.pullGlobalData();
-        }
-        
+        if (document.hidden) return;
         const activeMatch = DB.getMatch(match.id);
         if (activeMatch) {
             currentMatch = activeMatch;
             updatePreviewSync(activeMatch);
         }
-    }, 1500); // Increased interval slightly for performance
+    }, 3000);
     window._broadcastSyncInterval = syncInterval;
 
     // Initial Sync
@@ -4822,6 +5902,7 @@ function renderBroadcastController(match) {
                 const inn = m ? m.innings[m.currentInnings] : null;
 
                 if (window._pendingManualPhotoType === 'striker') {
+                    window.__photo_cleared_striker = false;
                     window.__photo_striker = data;
                     const el = document.getElementById('preview_striker');
                     if(el) el.innerHTML = `<img src="${data}" style="width:100%; height:100%; object-fit:contain; border-radius:10px">`;
@@ -4835,6 +5916,7 @@ function renderBroadcastController(match) {
                         }
                     }
                 } else if (window._pendingManualPhotoType === 'nonstriker') {
+                    window.__photo_cleared_nonstriker = false;
                     window.__photo_nonstriker = data;
                     const el = document.getElementById('preview_nonstriker');
                     if(el) el.innerHTML = `<img src="${data}" style="width:100%; height:100%; object-fit:contain; border-radius:10px">`;
@@ -4851,6 +5933,7 @@ function renderBroadcastController(match) {
                         }
                     }
                 } else if (window._pendingManualPhotoType === 'bowler') {
+                    window.__photo_cleared_bowler = false;
                     window.__photo_bowler = data;
                     const el = document.getElementById('preview_bowler');
                     if(el) el.innerHTML = `<img src="${data}" style="width:100%; height:100%; object-fit:contain; border-radius:10px">`;
@@ -4865,12 +5948,15 @@ function renderBroadcastController(match) {
                         }
                     }
                 }
+                if (m && typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
             } catch (err) {
                 console.error("Photo Error:", err);
                 showToast('Failed to apply photo', 'error');
             }
         });
     };
+
+    if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(match);
 
     window.overrideLiveScore = function() {
         const m = currentMatch;
@@ -4894,68 +5980,185 @@ function renderBroadcastController(match) {
 }
 
 // ─── INTEGRATED HOTKEY SYSTEM ───
+function isBroadcastHotkeyContext() {
+    if (document.body.classList.contains('broadcast-controller-active')) return true;
+    if (document.body.classList.contains('hotkey-panel-active')) return true;
+    const panel = document.getElementById('panel-hotkeys');
+    if (!panel) return false;
+    return window.getComputedStyle(panel).display !== 'none';
+}
+
+function hotkeyShouldIgnoreTarget(e) {
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return false;
+    if (e.shiftKey && isBroadcastHotkeyContext()) return false;
+    return true;
+}
+
+function runBroadcastHotkey(fn) {
+    const m = currentMatch || window.currentMatch;
+    if (!m) {
+        if (typeof showToast === 'function') {
+            showToast('Open a live match first (Hotkeys tab needs active match)', 'error');
+        }
+        return;
+    }
+    if (!currentMatch && window.currentMatch) currentMatch = window.currentMatch;
+    if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
+    fn();
+}
+
+function fireProfileBroadcast(role) {
+    const m = currentMatch || window.currentMatch;
+    if (!m) {
+        showToast('No active match', 'error');
+        return;
+    }
+    if (!currentMatch && window.currentMatch) currentMatch = window.currentMatch;
+    if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
+    if (role === 'striker') {
+        if (typeof Broadcast !== 'undefined' && Broadcast.broadcastStrikerProfile) {
+            Broadcast.broadcastStrikerProfile();
+        } else {
+            broadcastStrikerProfile();
+        }
+    } else if (role === 'nonstriker') {
+        if (typeof Broadcast !== 'undefined' && Broadcast.broadcastNonStrikerProfile) {
+            Broadcast.broadcastNonStrikerProfile();
+        } else {
+            broadcastNonStrikerProfile();
+        }
+    } else if (role === 'bowler') {
+        if (typeof Broadcast !== 'undefined' && Broadcast.broadcastBowlerProfile) {
+            Broadcast.broadcastBowlerProfile();
+        } else {
+            broadcastBowlerProfile();
+        }
+    }
+}
+window.fireProfileBroadcast = fireProfileBroadcast;
+
 // Centralized hotkey listener for production & scoring
 function setupIntegratedHotkeys() {
-    document.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    if (window._integratedHotkeysBound) return;
+    window._integratedHotkeysBound = true;
 
-        const key = e.key.toUpperCase();
-        const code = e.code;
-        const isMasterControl = document.body.classList.contains('broadcast-controller-active') || 
-                               document.body.classList.contains('hotkey-panel-active') ||
-                               (document.getElementById('panel-hotkeys') && document.getElementById('panel-hotkeys').style.display !== 'none');
+    document.addEventListener(
+        'keydown',
+        (e) => {
+            if (hotkeyShouldIgnoreTarget(e)) return;
 
-        // Standard Production Triggers
-        if (!e.shiftKey && !e.ctrlKey && !e.altKey) {
-            let handled = true;
-            if (key === '4' || code === 'Numpad4') {
-                if (isMasterControl) triggerVisualBigEvent('FOUR');
-                else recordBall({type:'four', runs:4});
-            }
-            else if (key === '6' || code === 'Numpad6') {
-                if (isMasterControl) triggerVisualBigEvent('SIX');
-                else recordBall({type:'six', runs:6});
-            }
-            else if (key === 'W' || code === 'KeyW') {
-                if (isMasterControl) triggerVisualBigEvent('WICKET');
-                else openWicketModal();
-            }
-            else if (key === '0' || code === 'Numpad0') {
-               if (!isMasterControl) recordBall({type:'dot', runs:0});
-               else handled = false;
-            }
-            else if (key === 'Escape') {
-                if (typeof Broadcast !== 'undefined') Broadcast.stopAll();
-                else sendBroadcast('STOP_OVERLAY');
-            }
-            else {
-                handled = false;
-            }
-            
-            if (handled) e.preventDefault();
-        }
+            const code = e.code;
+            const isMasterControl = isBroadcastHotkeyContext();
 
-        // Advanced Cinematic Triggers (Shift + Key)
-        if (e.shiftKey) {
-            let handled = true;
-            switch(key) {
-                case 'B': broadcastStrikerProfile(); break;
-                case 'N': broadcastNonStrikerProfile(); break;
-                case 'P': broadcastCurrentBatters(); break;
-                case 'H': broadcastPartnership(); break;
-                case 'L': broadcastBowlerProfile(); break;
-                case 'K': broadcastTeamCard(0); break;
-                case 'J': broadcastTeamCard(1); break;
-                case 'S': if(typeof Broadcast !== 'undefined') Broadcast.showScorecard(); else sendBroadcast('SHOW_SCORECARD'); break;
-                case 'R': if(typeof Broadcast !== 'undefined') Broadcast.showRunsNeeded(); else sendBroadcast('SHOW_RUNS_BALLS'); break;
-                case 'C': if(typeof Broadcast !== 'undefined') Broadcast.showCRR(); else sendBroadcast('SHOW_CRR'); break;
-                case 'T': if(typeof Broadcast !== 'undefined') Broadcast.showSummary(); else sendBroadcast('SHOW_SUMMARY'); break;
-                case 'V': if(typeof Broadcast !== 'undefined') Broadcast.toggleScorebar(); break;
-                default: handled = false; break;
+            if (!e.shiftKey && !e.ctrlKey && !e.altKey) {
+                let handled = true;
+                if (code === 'Digit4' || code === 'Numpad4') {
+                    if (isMasterControl) runBroadcastHotkey(() => triggerVisualBigEvent('FOUR'));
+                    else recordBall({ type: 'four', runs: 4 });
+                } else if (code === 'Digit6' || code === 'Numpad6') {
+                    if (isMasterControl) runBroadcastHotkey(() => triggerVisualBigEvent('SIX'));
+                    else recordBall({ type: 'six', runs: 6 });
+                } else if (code === 'KeyW') {
+                    if (isMasterControl) runBroadcastHotkey(() => triggerVisualBigEvent('WICKET'));
+                    else openWicketModal();
+                } else if (code === 'Digit0' || code === 'Numpad0') {
+                    if (!isMasterControl) recordBall({ type: 'dot', runs: 0 });
+                    else handled = false;
+                } else if (code === 'Escape') {
+                    if (typeof Broadcast !== 'undefined') Broadcast.stopAll();
+                    else sendBroadcast('STOP_ALL');
+                } else {
+                    handled = false;
+                }
+                if (handled) e.preventDefault();
             }
-            if (handled) e.preventDefault();
-        }
-    });
+
+            if (e.shiftKey && !e.ctrlKey && !e.altKey) {
+                let handled = true;
+                switch (code) {
+                    case 'KeyB':
+                        runBroadcastHotkey(() => fireProfileBroadcast('striker'));
+                        break;
+                    case 'KeyN':
+                        runBroadcastHotkey(() => fireProfileBroadcast('nonstriker'));
+                        break;
+                    case 'KeyP':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined' && Broadcast.broadcastCurrentBatters
+                                ? Broadcast.broadcastCurrentBatters()
+                                : broadcastCurrentBatters()
+                        );
+                        break;
+                    case 'KeyH':
+                        runBroadcastHotkey(() => {
+                            if (typeof Broadcast !== 'undefined' && Broadcast.broadcastPartnership) {
+                                Broadcast.broadcastPartnership();
+                            } else {
+                                broadcastPartnership();
+                            }
+                        });
+                        break;
+                    case 'KeyL':
+                        runBroadcastHotkey(() => fireProfileBroadcast('bowler'));
+                        break;
+                    case 'KeyG':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined' && Broadcast.broadcastBattingTeamSquad
+                                ? Broadcast.broadcastBattingTeamSquad()
+                                : broadcastBattingTeamSquad()
+                        );
+                        break;
+                    case 'KeyK':
+                        runBroadcastHotkey(() => broadcastTeamCard(0));
+                        break;
+                    case 'KeyJ':
+                        runBroadcastHotkey(() => broadcastTeamCard(1));
+                        break;
+                    case 'KeyS':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined'
+                                ? Broadcast.showScorecard()
+                                : sendBroadcast('SHOW_SCORECARD')
+                        );
+                        break;
+                    case 'KeyR':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined'
+                                ? Broadcast.showRunsNeeded()
+                                : sendBroadcast('SHOW_RUNS_BALLS')
+                        );
+                        break;
+                    case 'KeyC':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined' ? Broadcast.showCRR() : sendBroadcast('SHOW_CRR')
+                        );
+                        break;
+                    case 'KeyO':
+                        runBroadcastHotkey(() => showLastWicketBroadcast());
+                        break;
+                    case 'KeyT':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined'
+                                ? Broadcast.showSummary()
+                                : sendBroadcast('SHOW_SUMMARY')
+                        );
+                        break;
+                    case 'KeyV':
+                        runBroadcastHotkey(() =>
+                            typeof Broadcast !== 'undefined'
+                                ? Broadcast.toggleScorebar()
+                                : sendBroadcast('TOGGLE_SCOREBAR')
+                        );
+                        break;
+                    default:
+                        handled = false;
+                }
+                if (handled) e.preventDefault();
+            }
+        },
+        true
+    );
 }
 
 // Initialize on load
@@ -4968,6 +6171,7 @@ function forceEndMatchInHub(mId) {
     const m = DB.getMatch(mId);
     if (!m) return;
     m.status = 'completed';
+    m.completedAt = Date.now();
     if (!m.result) m.result = 'End Match forced via Hub';
     DB.saveMatch(m);
     
@@ -5233,164 +6437,36 @@ window.savePlayerProfile = function() {
 };
 
 // ============================================================
-//  FULL SCREEN ROSTER MANAGEMENT (FSR)
+//  FULL SCREEN ROSTER MANAGEMENT (FSR) — exports
 // ============================================================
-let _fsrCurrentTeamIndex = 0; // 0 or 1
-let _fsrActivePhotoTarget = null; // id of player slot or 'team'
-
-window.openFullScreenRoster = function(teamIndex) {
+window.openFullScreenRoster = function (teamIndex) {
     const m = currentMatch;
     if (!m) return;
-    
     _fsrCurrentTeamIndex = teamIndex;
-    window._isEditingRoster = true;
-    
-    const teamName = teamIndex === 0 ? m.team1 : m.team2;
-    const overlay = document.getElementById('full-screen-roster-overlay');
-    if (overlay) overlay.style.display = 'flex';
-    
-    // Header
-    const header = document.getElementById('fsr-team-header');
-    if (header) {
-        const logo = DB.getTeamPhoto(teamName, m.tournamentId);
-        header.innerHTML = `
-            <img src="${logo}" style="width:40px; height:40px; border-radius:10px; object-fit:cover; border:2px solid rgba(255,255,255,0.1)">
-            <div>
-                <div style="font-size:10px; font-weight:900; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px">Editing Roster</div>
-                <div style="font-size:18px; font-weight:900; color:#fff">${teamName.toUpperCase()}</div>
-            </div>
-        `;
+    editingTeamName = teamIndex === 0 ? m.team1 : m.team2;
+    if (m.tournamentId) {
+        const t = DB.getTournament(m.tournamentId);
+        if (t) currentTournament = t;
     }
-    
-    // Config Card
-    document.getElementById('fsr-team-name-input').value = teamName;
-    document.getElementById('fsr-team-logo').src = DB.getTeamPhoto(teamName, m.tournamentId);
-    
-    const roster = (m.rosters && m.rosters[teamIndex]) || [];
-    const grid = document.getElementById('fsr-players-grid');
-    grid.innerHTML = '';
-    
-    // Populating existing players
-    if (roster.length > 0) {
-        roster.forEach(p => addRosterSlotFS(p.name, p.id, p.photo));
-    } else {
-        // Default 11 slots if empty
-        for (let i = 1; i <= 11; i++) {
-            addRosterSlotFS('', '', '');
-        }
-    }
+    openRosterEditor(editingTeamName);
 };
 
-window.closeFullScreenRoster = function() {
-    window._isEditingRoster = false;
-    const overlay = document.getElementById('full-screen-roster-overlay');
-    if (overlay) overlay.style.display = 'none';
-};
-
-window.addRosterSlotFS = function(name = '', id = '', photo = '') {
-    const grid = document.getElementById('fsr-players-grid');
-    const slotCount = grid.children.length;
-    const slotId = 'fsr-slot-' + Date.now() + '-' + slotCount;
-    
-    const playerPhoto = photo || DB.getPlayerPhoto(id);
-    
-    const div = document.createElement('div');
-    div.className = 'fsr-player-card';
-    div.id = slotId;
-    div.style = "background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:24px; padding:20px; display:flex; gap:16px; align-items:center; transition:0.2s";
-    
-    div.innerHTML = `
-        <div style="position:relative; width:80px; height:80px; flex-shrink:0; cursor:pointer" onclick="triggerFSRPhoto('${slotId}')">
-            <img class="fsr-p-photo" src="${playerPhoto}" style="width:100%; height:100%; object-fit:cover; border-radius:16px; background:rgba(0,0,0,0.2)">
-            <div style="position:absolute; bottom:-4px; right:-4px; background:#3b82f6; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; border:3px solid #0a0a0a">📷</div>
-        </div>
-        <div style="flex:1">
-            <input type="text" class="fsr-p-name form-input" placeholder="Player Name" value="${name}" style="background:transparent; border:none; border-bottom:2px solid rgba(255,255,255,0.05); border-radius:0; padding:8px 0; font-size:18px; font-weight:800; margin-bottom:8px" list="db-players-list">
-            <input type="text" class="fsr-p-id form-input" placeholder="ID (Optional)" value="${id}" style="background:transparent; border:none; border-radius:0; padding:4px 0; font-size:11px; font-weight:700; color:rgba(255,255,255,0.3)">
-        </div>
-        <button onclick="this.parentElement.remove()" style="background:rgba(244,63,94,0.1); border:none; color:#f43f5e; width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:18px; font-weight:900">×</button>
-    `;
-    
-    grid.appendChild(div);
-};
-
-window.triggerFSRPhoto = function(slotId) {
-    _fsrActivePhotoTarget = slotId;
-    document.getElementById('fsr-player-photo-input').click();
-};
-
-window.onFSRPlayerPhotoSelected = function(event) {
-    const file = event.target.files[0];
-    if (!file || !_fsrActivePhotoTarget) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const slot = document.getElementById(_fsrActivePhotoTarget);
-        if (slot) {
-            const img = slot.querySelector('.fsr-p-photo');
-            if (img) img.src = e.target.result;
-            
-            // If there's an ID, save it to DB immediately for consistency
-            const pId = slot.querySelector('.fsr-p-id').value;
-            if (pId) DB.savePlayerPhoto(pId, e.target.result);
-        }
-    };
-    reader.readAsDataURL(file);
-};
-
-window.onFSRTeamPhotoSelected = function(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        document.getElementById('fsr-team-logo').src = e.target.result;
-        const teamName = document.getElementById('fsr-team-name-input').value;
-        const m = currentMatch;
-        DB.saveTeamPhoto(teamName, e.target.result, m ? m.tournamentId : '');
-    };
-    reader.readAsDataURL(file);
-};
-
-window.saveRosterFromFS = function() {
-    const m = currentMatch;
-    if (!m) return;
-    
-    const teamName = document.getElementById('fsr-team-name-input').value;
-    const grid = document.getElementById('fsr-players-grid');
-    const players = [];
-    
-    Array.from(grid.children).forEach(slot => {
-        const name = slot.querySelector('.fsr-p-name').value.trim();
-        if (name) {
-            const id = slot.querySelector('.fsr-p-id').value.trim();
-            const photo = slot.querySelector('.fsr-p-photo').src;
-            players.push({ name, id, photo });
-            
-            // Ensure photo is saved to DB if it's a data URL
-            if (id && photo.startsWith('data:')) {
-                DB.savePlayerPhoto(id, photo);
-            }
-        }
-    });
-    
-    m.rosters = m.rosters || {};
-    m.rosters[_fsrCurrentTeamIndex] = players;
-    
-    // Update team name if changed
-    if (_fsrCurrentTeamIndex === 0) m.team1 = teamName;
-    else m.team2 = teamName;
-    
-    DB.saveMatch(m);
-    showToast('🚀 Roster Synced Successfully!', 'success');
-    closeFullScreenRoster();
-    
-    // Trigger UI refresh
-    if (typeof renderScoring === 'function') renderScoring();
-    if (typeof renderBroadcastController === 'function') renderBroadcastController();
-    
-    // Push update to broadcast overlays
-    if (typeof sendBroadcast === 'function') sendBroadcast('FORCE_UPDATE');
+window.closeFullScreenRoster = closeFullScreenRoster;
+window.saveRosterFromFS = saveRosterFromFS;
+window.onFSRPlayerPhotoClick = onFSRPlayerPhotoClick;
+window.onFSRPlayerNameChange = onFSRPlayerNameChange;
+window.onFSRPlayerPhotoSelected = onFSRPlayerPhotoSelected;
+window.onFSRTeamPhotoSelected = onFSRTeamPhotoSelected;
+window.addRosterSlotFS = addRosterSlotFS;
+window.applySquadNameInput = applySquadNameInput;
+window.pickSquadBowlerName = pickSquadBowlerName;
+window.populateSquadDatalist = populateSquadDatalist;
+window.renderSquadQuickPick = renderSquadQuickPick;
+window.pickSquadBatsmanName = pickSquadBatsmanName;
+window.ensurePlayerOnTeamRoster = ensurePlayerOnTeamRoster;
+window.triggerFSRPhoto = function (slotId) {
+    window._fsrActivePhotoTarget = slotId;
+    document.getElementById('fsr-player-photo-input')?.click();
 };
 
 window.publishPlayerProfileToBroadcast = function() {

@@ -18,12 +18,11 @@
     if (!syncEnabled() && !global.BACKEND_BASE_URL && !global.CRICPRO_CLOUD_CONFIG?.backendUrl) {
       return 'off';
     }
+    if (global.SLCRICK_REALTIME?.mapSocketState) return global.SLCRICK_REALTIME.mapSocketState();
     const s = global.SLCRICK_LIVE?.socket || global._cricproSocket;
     if (s?.connected) return 'connected';
     if (s && !s.connected) return 'connecting';
-    if (syncEnabled() || global.BACKEND_BASE_URL || global.CRICPRO_CLOUD_CONFIG?.backendUrl) {
-      return 'connecting';
-    }
+    if (syncEnabled()) return 'connecting';
     return 'off';
   }
 
@@ -39,6 +38,7 @@
 
   function getStatus() {
     const live = getLiveMatch();
+    const rt = global.SLCRICK_REALTIME?.getStatus?.();
     return {
       phase: getPhase(),
       syncEnabled: syncEnabled(),
@@ -47,6 +47,7 @@
       publicSite: PUBLIC_SITE,
       backendUrl: global.SLCRICK_SYNC?.getBackendUrl?.() || global.BACKEND_BASE_URL || '',
       isDesktop: !!global.SLCRICK_DESKTOP,
+      realtime: rt || null,
     };
   }
 
@@ -75,6 +76,8 @@
     });
     if (enabled) {
       global.SLCRICK_SYNC.install();
+      global.SLCRICK_SYNC.authenticateAllTournaments?.();
+      global.SLCRICK_REALTIME?.install?.({ force: true });
       global.SLCRICK_LIVE?.install?.({ force: true });
       if (options.syncNow) {
         global.SLCRICK_SYNC.flushQueue?.();
@@ -84,6 +87,7 @@
         });
       }
     } else {
+      global.SLCRICK_REALTIME?.disconnect?.();
       global.SLCRICK_LIVE?.disconnect?.();
       global.BACKEND_BASE_URL = '';
       if (global._slcrickSyncInterval) {

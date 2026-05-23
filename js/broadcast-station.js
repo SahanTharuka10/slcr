@@ -31,6 +31,10 @@
   }
 
   function stripHeight(theme) {
+    return 1080;
+  }
+
+  function stripOnlyHeight(theme) {
     return theme === 'theme2' ? 120 : theme === 'theme3' ? 90 : 280;
   }
 
@@ -118,17 +122,124 @@
     return null;
   }
 
+  function siteOverlayUrl(match, extra) {
+    const L = liveApi();
+    if (!L || !match) return '';
+    const theme = getTheme();
+    if (L.buildShareOverlayUrl) {
+      return L.buildShareOverlayUrl(match.id, theme, match.tournamentId) + (extra || '');
+    }
+    return L.buildOverlayUrl({
+      matchId: match.id,
+      layer: 'combined',
+      extra: 'theme=' + encodeURIComponent(theme) + (extra || ''),
+      useLocalPreview: false,
+    });
+  }
+
   function overlayUrl(match, extra, useLocal) {
     const L = liveApi();
     if (!L || !match) return '';
     const theme = getTheme();
+    if (!useLocal) return siteOverlayUrl(match, extra);
     return L.buildOverlayUrl({
       tournamentId: match.tournamentId,
       matchId: match.id,
-      layer: 'scorebar',
-      extra: 'strip=1&theme=' + encodeURIComponent(theme) + (extra || ''),
-      useLocalPreview: !!useLocal,
+      layer: 'combined',
+      extra: 'theme=' + encodeURIComponent(theme) + (extra || ''),
+      useLocalPreview: true,
     });
+  }
+
+  async function fetchObsUrls(match) {
+    if (!match) return null;
+    const theme = getTheme();
+    if (global.desktopAPI?.getObsBrowserUrls) {
+      return global.desktopAPI.getObsBrowserUrls({
+        matchId: match.id,
+        tournamentId: match.tournamentId,
+        layer: 'combined',
+        theme,
+      });
+    }
+    const L = liveApi();
+    const website =
+      L?.buildOverlayUrl({
+        tournamentId: match.tournamentId,
+        matchId: match.id,
+        layer: 'combined',
+        extra: 'theme=' + encodeURIComponent(theme),
+      }) || '';
+    return { local: website, lan: null, website, lanIp: null, port: null };
+  }
+
+  async function updateObsUrlFields(match) {
+    const urls = await fetchObsUrls(match);
+    if (!urls) return;
+
+    const lanEl = document.getElementById('bs-url-overlay-lan');
+    const localEl = document.getElementById('bs-url-overlay-local');
+    const webEl = document.getElementById('bs-url-overlay');
+    const lanBlock = document.getElementById('bs-obs-lan-block');
+    const localBlock = document.getElementById('bs-obs-local-block');
+    const quick = document.getElementById('bs-obs-quick-url');
+    const quickCode = document.getElementById('bs-obs-quick-code');
+    const quickLabel = document.getElementById('bs-obs-quick-label');
+    const lanHint = document.getElementById('bs-obs-lan-hint');
+    const previewActions = document.getElementById('bs-preview-actions');
+    const isDesktop = !!global.SLCRICK_DESKTOP;
+
+    if (lanEl) lanEl.value = urls.lan || '';
+    if (localEl) localEl.value = urls.local || '';
+    if (webEl) webEl.value = urls.website || '';
+
+    if (lanBlock) lanBlock.hidden = !isDesktop || !urls.lan;
+    if (localBlock) localBlock.hidden = !isDesktop;
+    if (previewActions) previewActions.hidden = !isDesktop || !match;
+    if (quick) {
+      quick.hidden = !isDesktop || !match;
+      const show = urls.lan || urls.local;
+      if (quickCode && show) quickCode.textContent = urls.lan || urls.local;
+      if (quickLabel) {
+        quickLabel.textContent = urls.lan
+          ? `OBS LAN (${urls.lanIp || 'Wi‑Fi'})`
+          : 'OBS (this PC)';
+      }
+    }
+    if (lanHint && urls.lan && urls.lanIp) {
+      lanHint.innerHTML =
+        `OBS → Sources → + → <strong>Browser</strong> → paste URL · <strong>1920×1080</strong> (scorebar + hotkeys) · ` +
+        `scoring laptop IP <strong>${esc(urls.lanIp)}</strong> · port <strong>${urls.port || '?'}</strong> · same Wi‑Fi · <code>layer=combined</code>`;
+    }
+
+    const hotEl = document.getElementById('bs-url-hotkeys');
+    if (hotEl) {
+      hotEl.value = urls.lan || urls.local || urls.website || '';
+    }
+  }
+
+  function copyText(text, label) {
+    if (!text) {
+      showToast?.('No URL — select a match first', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(
+      () => showToast?.((label || 'OBS URL') + ' copied', 'success'),
+      () => showToast?.(text, 'default')
+    );
+  }
+
+  async function copyObsUrl(kind) {
+    const match = getSelectedMatch();
+    if (!match) {
+      showToast?.('Select a match first', 'error');
+      return;
+    }
+    const urls = await fetchObsUrls(match);
+    if (!urls) return;
+    if (kind === 'local') copyText(urls.local, 'This PC URL');
+    else if (kind === 'website') copyText(urls.website, 'Website URL');
+    else copyText(urls.lan || urls.local, urls.lan ? 'LAN OBS URL' : 'OBS URL');
   }
 
   function formatTime(ts) {
@@ -170,9 +281,14 @@
     const pills = document.getElementById('bs-status-pills');
     if (pills) {
       const ws = st.websocket || 'off';
+      const rt = st.realtime || {};
+      const reconnect =
+        rt.reconnectAttempt > 0 ? ` · retry #${rt.reconnectAttempt}` : '';
+      const mode =
+        rt.state === 'degraded' ? 'REST fallback' : ws === 'connected' ? 'Live WS' : ws;
       pills.innerHTML = `
         <span class="bs-chip ${st.syncEnabled ? 'bs-chip--ok' : 'bs-chip--off'}">Publish ${st.syncEnabled ? 'ON' : 'OFF'}</span>
-        <span class="bs-chip ${ws === 'connected' ? 'bs-chip--ok' : ws === 'connecting' ? 'bs-chip--warn' : 'bs-chip--off'}">Socket ${ws}</span>
+        <span class="bs-chip ${ws === 'connected' ? 'bs-chip--ok' : ws === 'connecting' ? 'bs-chip--warn' : 'bs-chip--off'}">${mode}${reconnect}</span>
         <span class="bs-chip ${st.liveMatch ? 'bs-chip--ok' : 'bs-chip--off'}">${st.liveMatch ? 'ON AIR' : 'Idle'}</span>`;
     }
 
@@ -197,10 +313,13 @@
         wsInd.textContent = 'WebSocket live';
         wsInd.className = 'bs-ws-badge bs-ws-badge--live';
       } else if (ws === 'connecting') {
-        wsInd.textContent = 'Connecting…';
+        const rt = st.realtime || {};
+        wsInd.textContent = rt.reconnectAttempt
+          ? `Reconnecting (#${rt.reconnectAttempt})…`
+          : 'Connecting…';
         wsInd.className = 'bs-ws-badge';
       } else {
-        wsInd.textContent = 'Polling / offline';
+        wsInd.textContent = st.realtime?.state === 'degraded' ? 'REST fallback' : 'Offline';
         wsInd.className = 'bs-ws-badge';
       }
     }
@@ -238,7 +357,14 @@
       <div><dt>Last update</dt><dd>${formatTime(match.lastUpdated)}</dd></div>
       <div><dt>Publish</dt><dd>${st.syncEnabled ? 'ON → website' : 'OFF (local only)'}</dd></div>
       <div><dt>API target</dt><dd>${esc(api)}</dd></div>
-      <div><dt>Last sync</dt><dd>${syncCfg?.lastSyncAt ? formatTime(syncCfg.lastSyncAt) : '—'}</dd></div>`;
+      <div><dt>Last sync</dt><dd>${syncCfg?.lastSyncAt ? formatTime(syncCfg.lastSyncAt) : '—'}</dd></div>
+      <div><dt>Share link (site)</dt><dd><code style="font-size:11px;word-break:break-all">${esc(
+        siteOverlayUrl(match)
+      )}</code></div>
+      <div><dt>OBS size</dt><dd>1920×1080 · <code>layer=combined</code> · Publish ON</dd></div>
+      <div><dt>Ongoing page</dt><dd><code style="font-size:11px">${esc(
+        (linkApi()?.PUBLIC_SITE || 'https://slcrickpro.live') + '/pages/ongoing-matches.html'
+      )}</code></dd></div>`;
   }
 
   function renderMatchHero(match) {
@@ -252,6 +378,83 @@
         <span>${esc(scoreLine(match))}</span>
         <span class="bs-studio-live">${statusLabel(match)}</span>
       </div>`;
+  }
+
+  async function fetchCloudLiveMatches() {
+    const api = liveApi()?.backendUrl?.() || global.CRICPRO_CLOUD_CONFIG?.backendUrl || '';
+    if (!api) return [];
+    try {
+      const r = await fetch(`${api.replace(/\/$/, '')}/live-matches`, { cache: 'no-store' });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : data.matches || [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function renderLiveShareBoard() {
+    const board = document.getElementById('bs-live-share-board');
+    const list = document.getElementById('bs-live-share-list');
+    if (!board || !list) return;
+
+    const st = linkApi()?.getStatus?.() || {};
+    const localLive = (global.DB?.getMatches?.() || []).filter(
+      (m) => m && (statusKey(m) === 'live' || statusKey(m) === 'paused')
+    );
+    const cloudLive = await fetchCloudLiveMatches();
+    const seen = new Set();
+    const merged = [];
+    [...localLive, ...cloudLive].forEach((m) => {
+      if (!m?.id || seen.has(m.id)) return;
+      seen.add(m.id);
+      merged.push(m);
+    });
+
+    const show = st.syncEnabled || merged.length > 0;
+    board.hidden = !show;
+    if (!show) return;
+
+    if (!merged.length) {
+      list.innerHTML =
+        '<p class="bs-rail-desc">No live matches on cloud. Desktop → Publish ON → score a ball.</p>';
+      return;
+    }
+
+    const theme = getTheme();
+    list.innerHTML = merged
+      .map((m) => {
+        const url =
+          liveApi()?.buildShareOverlayUrl?.(m.id, theme, m.tournamentId) || siteOverlayUrl(m);
+        const inn = m.innings?.[m.currentInnings || 0];
+        const bpo = m.ballsPerOver || 6;
+        const ov =
+          inn && typeof formatOvers === 'function'
+            ? formatOvers(inn.balls, bpo)
+            : inn
+              ? `${Math.floor((inn.balls || 0) / bpo)}.${(inn.balls || 0) % bpo}`
+              : '0.0';
+        const score = inn ? `${inn.runs}/${inn.wickets} (${ov})` : '—';
+        return `
+        <article class="bs-share-card">
+          <div class="bs-share-card-head">
+            <strong>${esc(m.team1)} vs ${esc(m.team2)}</strong>
+            <span class="bs-share-live">${statusLabel(m)}</span>
+          </div>
+          <p class="bs-share-score">${esc(score)}</p>
+          <code class="bs-share-url">${esc(url)}</code>
+          <p class="bs-share-hint">OBS Browser Source · 1280×720 (or 1920×1080) · transparent background</p>
+          <div class="bs-share-actions">
+            <button type="button" class="bs-btn bs-btn--primary bs-btn--sm" data-copy-url="${esc(url)}">Copy link</button>
+            <a class="bs-btn bs-btn--ghost bs-btn--sm" href="${esc(url)}" target="_blank" rel="noopener">Preview</a>
+          </div>
+        </article>`;
+      })
+      .join('');
+
+    list.querySelectorAll('[data-copy-url]').forEach((btn) => {
+      btn.addEventListener('click', () => copyText(btn.getAttribute('data-copy-url'), 'Overlay link'));
+    });
   }
 
   function renderStudio() {
@@ -277,8 +480,7 @@
 
     const theme = getTheme();
     const h = stripHeight(theme);
-    const useLocal =
-      operatorMode && global.SLCRICK_DESKTOP && (!global.SLCRICK_SYNC || !global.SLCRICK_SYNC.isEnabled());
+    const useLocal = !!(operatorMode && global.SLCRICK_DESKTOP);
     const isLive = statusKey(match) === 'live' || statusKey(match) === 'paused';
     const previewUrl = overlayUrl(match, isLive ? '&preview=1' : '&preview=1', useLocal);
 
@@ -298,24 +500,18 @@
     if (locked) locked.hidden = unlocked;
     if (open) open.hidden = !unlocked;
 
-    const urlEl = document.getElementById('bs-url-overlay');
-    if (urlEl && unlocked) urlEl.value = overlayUrl(match, '', false);
+    if (unlocked || operatorMode) {
+      updateObsUrlFields(match);
+    }
 
     if (operatorMode) {
-      const hotEl = document.getElementById('bs-url-hotkeys');
-      if (hotEl && L) {
-        hotEl.value = L.buildOverlayUrl({
-          tournamentId: match.tournamentId,
-          matchId: match.id,
-          layer: 'hotkeys',
-        });
-      }
       const viewer = document.getElementById('bs-viewer-link');
       const site = linkApi()?.PUBLIC_SITE || 'https://slcrickpro.live';
       if (viewer) viewer.href = site + '/pages/broadcast-station.html';
     }
 
     renderStatusRibbon();
+    renderLiveShareBoard();
   }
 
   function renderWebCatalog() {
@@ -517,7 +713,11 @@
 
   async function pullLatest() {
     if (global.SLCRICK_SYNC && !global.SLCRICK_SYNC.isEnabled?.()) return;
-    if (typeof global.wakeUpServer === 'function') {
+    if (global.SLCRICK_REALTIME?.wakeApi) {
+      try {
+        await global.SLCRICK_REALTIME.wakeApi({ force: true, reason: 'pull' });
+      } catch (_) {}
+    } else if (typeof global.wakeUpServer === 'function') {
       try {
         await global.wakeUpServer();
       } catch (_) {}
@@ -568,6 +768,13 @@
   }
 
   function refresh() {
+    if (operatorMode && selectedTournamentId && global.DB) {
+      const live = liveApi()?.getLiveMatchForTournament(selectedTournamentId);
+      if (live && live.id !== selectedMatchId) {
+        selectedMatchId = live.id;
+        liveApi()?.joinMatch(live.id);
+      }
+    }
     renderStatusRibbon();
     renderIdleCopy();
     if (operatorMode) {
@@ -612,11 +819,12 @@
     ensureSocket();
 
     global.addEventListener('slcrick-live-update', refresh);
-    global.addEventListener('slcrick-broadcast-status', onBroadcastStatus);
-    if (global._cricproSocket) {
-      global._cricproSocket.on('connect', onBroadcastStatus);
-      global._cricproSocket.on('disconnect', onBroadcastStatus);
+    if (global.desktopAPI?.onMatchUpdate) {
+      global.desktopAPI.onMatchUpdate(() => refresh());
     }
+    global.addEventListener('slcrick-broadcast-status', onBroadcastStatus);
+    global.addEventListener('slcrick-realtime-state', onBroadcastStatus);
+    global.SLCRICK_REALTIME?.on?.('state', onBroadcastStatus);
 
     await pullLatest();
     ensureSocket();
@@ -642,8 +850,16 @@
 
     refresh();
 
-    if (!operatorMode) setInterval(refresh, 8000);
-    else setInterval(onBroadcastStatus, 4000);
+    if (!operatorMode) {
+      setInterval(refresh, 8000);
+      setInterval(renderLiveShareBoard, 10000);
+    } else {
+      setInterval(onBroadcastStatus, 4000);
+      setInterval(renderLiveShareBoard, 10000);
+    }
+
+    document.getElementById('bs-copy-obs-lan')?.addEventListener('click', () => copyObsUrl('lan'));
+    document.getElementById('bs-copy-obs-local')?.addEventListener('click', () => copyObsUrl('local'));
   }
 
   global.SLCRICK_BROADCAST_STATION = {
@@ -653,6 +869,7 @@
     selectTournament,
     selectPublicMatch,
     copyUrl,
+    copyObsUrl,
     submitUnlock,
     lockStudio,
   };
