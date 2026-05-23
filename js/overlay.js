@@ -6,29 +6,75 @@ let overlayLayer = 'all';
 
 // ── GSAP fallback (CDN blocked in OBS / offline) — still show graphics ──
 function installGsapFallback() {
-    if (typeof gsap !== 'undefined' && gsap.version) return;
+    if (typeof gsap !== 'undefined' && gsap.version && gsap.version !== 'fallback') return;
+
+    function applyTo(el, vars) {
+        if (!el || !vars) return;
+        if (vars.opacity !== undefined) el.style.opacity = String(vars.opacity);
+        if (vars.x !== undefined) {
+            const x = typeof vars.x === 'string' ? vars.x : vars.x + 'px';
+            el.style.transform = (el.style.transform || '').replace(/translateX\([^)]*\)/, '') + ` translateX(${x})`;
+        }
+        if (vars.y !== undefined) {
+            const y = typeof vars.y === 'string' ? vars.y : vars.y + 'px';
+            el.style.transform = (el.style.transform || '').replace(/translateY\([^)]*\)/, '') + ` translateY(${y})`;
+        }
+        if (vars.scale !== undefined) {
+            el.style.transform = `scale(${vars.scale})`;
+        }
+        if (vars.scaleX !== undefined) el.style.transform = `scaleX(${vars.scaleX})`;
+        if (vars.boxShadow !== undefined) el.style.boxShadow = vars.boxShadow;
+    }
+
     window.gsap = {
         version: 'fallback',
+        set(target, vars) {
+            const el = typeof target === 'string' ? document.querySelector(target) : target;
+            applyTo(el, vars);
+            return this;
+        },
+        killTweensOf() { return this; },
+        timeline() {
+            const steps = [];
+            return {
+                to(target, vars) { steps.push({ target, vars, type: 'to' }); return this; },
+                fromTo(target, fromVars, toVars) { steps.push({ target, fromVars, toVars, type: 'fromTo' }); return this; },
+                play() {
+                    steps.forEach((s, i) => {
+                        const delay = (s.vars?.delay || s.toVars?.delay || 0) * 1000 + i * 50;
+                        setTimeout(() => {
+                            const el = typeof s.target === 'string' ? document.querySelector(s.target) : s.target;
+                            if (s.type === 'fromTo') applyTo(el, s.fromVars);
+                            applyTo(el, s.toVars || s.vars);
+                            if ((s.toVars || s.vars)?.onComplete) setTimeout(s.toVars.onComplete, ((s.toVars || s.vars).duration || 0.5) * 1000);
+                        }, delay);
+                    });
+                },
+            };
+        },
         fromTo(target, fromVars, toVars) {
             const el = typeof target === 'string' ? document.querySelector(target) : target;
-            if (el) {
-                el.style.opacity = String(toVars.opacity ?? 1);
-                el.style.transform = 'translate(0,0) scale(1)';
-            }
-            if (toVars && toVars.onComplete) setTimeout(toVars.onComplete, (toVars.duration || 0.6) * 1000);
+            applyTo(el, fromVars);
+            const dur = (toVars.duration || 0.55) * 1000;
+            const delay = (toVars.delay || 0) * 1000;
+            setTimeout(() => {
+                applyTo(el, toVars);
+                if (toVars.onComplete) setTimeout(toVars.onComplete, dur);
+            }, delay);
             return this;
         },
         to(target, toVars) {
             const el = typeof target === 'string' ? document.querySelector(target) : target;
-            if (el && toVars) {
-                if (toVars.opacity !== undefined) el.style.opacity = String(toVars.opacity);
-                if (toVars.onComplete) setTimeout(toVars.onComplete, (toVars.duration || 0.6) * 1000);
-            }
+            const dur = (toVars.duration || 0.55) * 1000;
+            const delay = (toVars.delay || 0) * 1000;
+            setTimeout(() => {
+                applyTo(el, toVars);
+                if (toVars.onComplete) setTimeout(toVars.onComplete, dur);
+            }, delay);
             return this;
         },
-        set() { return this; },
     };
-    console.warn('⚠️ GSAP fallback — hotkey graphics use CSS visibility');
+    console.warn('⚠️ GSAP fallback — hotkey graphics use simplified motion');
 }
 installGsapFallback();
 
@@ -2029,8 +2075,9 @@ function spawnMiniFireworks(anchorEl, typeOrColors, opts = {}) {
                 delay: Math.random() * 0.08,
             });
         } else {
-            spark.style.transform = `translate(${dx}px, ${dy}px)`;
-            spark.style.opacity = '0';
+            spark.style.setProperty('--fx-dx', dx + 'px');
+            spark.style.setProperty('--fx-dy', dy + 'px');
+            spark.classList.add('fx-css-animate');
         }
     }
 
