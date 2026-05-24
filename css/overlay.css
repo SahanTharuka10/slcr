@@ -664,16 +664,16 @@ body.obs-strip-only #overlay-container.mode-2 {
 
 .m2-pro-bar {
     width: 100%;
-    min-height: 104px;
-    --m2-block-h: 90px;
-    --m2-photo-cap: 88px;
+    min-height: 76px;
+    --m2-block-h: 68px;
+    --m2-photo-cap: 56px;
     display: grid;
     grid-template-columns:
-        minmax(120px, 1fr)
-        minmax(200px, 1.35fr)
-        minmax(280px, 2.4fr)
-        minmax(200px, 1.35fr)
-        minmax(100px, 0.95fr);
+        minmax(52px, 0.55fr)
+        minmax(170px, 1.25fr)
+        minmax(210px, 1.55fr)
+        minmax(170px, 1.25fr)
+        minmax(52px, 0.55fr);
     align-items: stretch;
     gap: 0;
     filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35));
@@ -683,24 +683,25 @@ body.obs-strip-only #overlay-container.mode-2 {
 .m2-brand {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
-    min-height: 104px;
+    justify-content: center;
+    gap: 6px;
+    padding: 4px 6px;
+    min-height: 76px;
     position: relative;
     overflow: hidden;
     background: linear-gradient(180deg, #66bb6a 0%, #43a047 55%, #2e7d32 100%);
 }
 
 .m2-brand--bat {
-    clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
-    padding-right: 24px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+    padding-right: 14px;
 }
 
 .m2-brand--bowl {
-    clip-path: polygon(18px 0, 100% 0, 100% 100%, 0 100%);
-    padding-left: 28px;
+    clip-path: polygon(12px 0, 100% 0, 100% 100%, 0 100%);
+    padding-left: 16px;
     flex-direction: row-reverse;
-    justify-content: flex-start;
+    justify-content: center;
 }
 
 .m2-brand--bowl .m2-brand-text {
@@ -721,8 +722,8 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-brand-logo {
-    width: min(52px, var(--m2-block-h), 38%);
-    height: min(52px, var(--m2-block-h), 38%);
+    width: min(40px, var(--m2-block-h), 92%);
+    height: min(40px, var(--m2-block-h), 92%);
     aspect-ratio: 1;
     flex-shrink: 1;
     min-width: 0;
@@ -787,8 +788,8 @@ body.obs-strip-only #overlay-container.mode-2 {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 6px 8px;
-    min-height: 104px;
+    padding: 4px 6px;
+    min-height: 76px;
     border-top: 1px solid rgba(255, 255, 255, 0.9);
     overflow: hidden;
 }
@@ -800,8 +801,10 @@ body.obs-strip-only #overlay-container.mode-2 {
 
 .m2-panel--bowl {
     clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%);
-    padding-left: 20px;
-    gap: 8px;
+    padding-left: 16px;
+    gap: 4px;
+    --m2-photo-cap: 48px;
+    --m2-bowl-photo-h: 46px;
 }
 
 .m2-batter-row {
@@ -888,25 +891,37 @@ body.obs-strip-only #overlay-container.mode-2 {
     display: block;
 }
 
+.m2-batter-line,
+.m2-bowler-line {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    width: 100%;
+    flex-wrap: nowrap;
+}
+
 .m2-batter-name {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     color: #1a237e;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
     white-space: nowrap;
-    max-width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.15;
 }
 
 .m2-batter-score {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 950;
     color: #0f172a;
     line-height: 1;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .m2-batter-balls {
@@ -929,19 +944,25 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-bowler-name {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 800;
     color: #1a237e;
     text-transform: uppercase;
+    letter-spacing: 0.2px;
     white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     line-height: 1.15;
 }
 
 .m2-bowler-fig {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 900;
     color: #0f172a;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .m2-bowler-ov {
@@ -1010,14 +1031,37 @@ body.obs-strip-only #overlay-container.mode-2 {
 .m2-innings-tab {
     background: linear-gradient(180deg, #311b92 0%, #1a0b2e 100%);
     color: #e8eaf6;
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 900;
-    letter-spacing: 1.4px;
+    letter-spacing: 1.2px;
     text-transform: uppercase;
-    padding: 4px 22px 3px;
+    padding: 3px 14px 2px;
     border-radius: 4px 4px 0 0;
     margin-bottom: -1px;
     align-self: center;
+}
+
+.m2-teams-line {
+    display: block;
+    align-self: center;
+    text-align: center;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #c5cae9;
+    padding: 2px 8px 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    line-height: 1.2;
+}
+
+.m2-teams-vs {
+    opacity: 0.65;
+    font-weight: 700;
+    margin: 0 4px;
 }
 
 .m2-score-panel {
@@ -1026,32 +1070,32 @@ body.obs-strip-only #overlay-container.mode-2 {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    padding: 10px 18px 9px;
+    gap: 8px;
+    padding: 5px 12px 4px;
     width: 100%;
     min-width: 0;
     flex: 1 1 auto;
-    clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 100%, 0 100%);
-    box-shadow: 0 6px 20px rgba(26, 11, 46, 0.55);
+    clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 100%, 0 100%);
+    box-shadow: 0 4px 14px rgba(26, 11, 46, 0.55);
 }
 
 .m2-team-badge {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 42px;
-    height: 36px;
-    padding: 0 10px;
+    min-width: 34px;
+    height: 28px;
+    padding: 0 8px;
     background: linear-gradient(135deg, #ad1457 0%, #7b1fa2 100%);
     color: #fff;
-    font-size: 15px;
+    font-size: 12px;
     font-weight: 900;
-    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
-    letter-spacing: 0.5px;
+    clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+    letter-spacing: 0.4px;
 }
 
 .m2-live-score {
-    font-size: 30px;
+    font-size: 24px;
     font-weight: 950;
     line-height: 1;
     letter-spacing: -0.5px;
@@ -1059,7 +1103,7 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-live-overs {
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -1075,10 +1119,10 @@ body.obs-strip-only #overlay-container.mode-2 {
     text-align: center;
     background: linear-gradient(180deg, #1a0b2e 0%, #0f0518 100%);
     color: #e8eaf6;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.4px;
-    padding: 5px 12px 6px;
+    letter-spacing: 0.3px;
+    padding: 3px 10px 4px;
     white-space: nowrap;
 }
 
@@ -1106,20 +1150,20 @@ body.obs-strip-only .m2-pro-bar {
 }
 
 body.obs-strip-only .m2-pro-bar {
-    --m2-block-h: 98px;
-    --m2-photo-cap: 92px;
-    min-height: 112px;
+    --m2-block-h: 72px;
+    --m2-photo-cap: 58px;
+    min-height: 76px;
 }
 
 body.obs-strip-only .m2-panel--bowl {
-    --m2-bowl-photo-h: 60px;
-    --m2-photo-cap: 72px;
+    --m2-bowl-photo-h: 48px;
+    --m2-photo-cap: 52px;
 }
 
 body.obs-strip-only.mode-2-active,
 body.obs-strip-only:has(#overlay-container.mode-2) {
-    height: 120px !important;
-    max-height: 120px !important;
+    height: 88px !important;
+    max-height: 88px !important;
 }
 
 /* ============================================================
@@ -1201,7 +1245,7 @@ body.obs-layer-hotkeys #broadcast-next-match.overlay-visible {
 .crr-float-overlay {
     position: fixed;
     left: 24px;
-    bottom: 92px;
+    bottom: 78px;
     top: auto;
     z-index: 27600;
     display: none;
@@ -1304,7 +1348,7 @@ body.obs-capture-mode #broadcast-crr-float.overlay-visible {
     position: fixed;
     right: 24px;
     left: auto;
-    bottom: 74px;
+    bottom: 62px;
     top: auto;
     height: auto;
     min-height: 58px;
@@ -1458,7 +1502,7 @@ body.obs-strip-only .be-dock-overlay {
     left: 50%;
     right: auto;
     transform: translateX(-50%);
-    bottom: 74px;
+    bottom: 62px;
     top: auto;
     width: 98%;
     max-width: 1900px;
@@ -1661,16 +1705,16 @@ body.obs-capture-mode #broadcast-last-wicket.overlay-visible {
 
 body.obs-layer-hotkeys .last-wicket-overlay,
 body.obs-layer-combined .last-wicket-overlay {
-    bottom: 74px;
+    bottom: 62px;
 }
 
 body.obs-layer-hotkeys .be-dock-overlay,
 body.obs-layer-combined .be-dock-overlay {
-    bottom: 74px;
+    bottom: 62px;
 }
 
 body.obs-layer-hotkeys .crr-float-overlay {
-    bottom: 92px;
+    bottom: 78px;
 }
 
 /* 200px OBS strip: use browser height ≥280px, or hotkeys 1080 layer */

@@ -203,6 +203,55 @@ function getInningsPlayersForPhotoSlots(m) {
     };
 }
 
+/** Embed live player/team photos on match so OBS/cloud overlay always receives them via SYNC_SCORE */
+function enrichMatchBroadcastMedia(m) {
+    if (!m?.innings) return m;
+    const inn = m.innings[m.currentInnings ?? 0];
+    if (!inn) return m;
+
+    const slots = getInningsPlayersForPhotoSlots(m);
+    const livePhotos = {};
+
+    const resolvePhoto = (role, player) => {
+        if (!player) return '';
+        const existing = player.photo && String(player.photo).trim();
+        if (existing && existing.length > 12 && !existing.includes('default-player')) return existing;
+        const fromRole = getBroadcastPhotoForRole(role, player);
+        if (fromRole && fromRole.length > 12) return fromRole;
+        if (player.playerId && typeof DB !== 'undefined' && DB.getPlayerPhoto) {
+            const ph = DB.getPlayerPhoto(player.playerId) || '';
+            if (ph && ph.length > 12 && !String(ph).includes('default-player')) return ph;
+        }
+        return '';
+    };
+
+    ['striker', 'nonstriker', 'bowler'].forEach((role) => {
+        const pl = slots[role];
+        const ph = resolvePhoto(role, pl);
+        if (ph) {
+            livePhotos[role] = ph;
+            if (pl) pl.photo = ph;
+        }
+    });
+
+    m.broadcastLivePhotos = livePhotos;
+
+    m.teamPhotos = m.teamPhotos || {};
+    const batTeam = inn.battingTeam || m.team1;
+    const bowlTeam = inn.bowlingTeam || m.team2;
+    if (typeof DB !== 'undefined' && DB.getTeamPhoto) {
+        if (batTeam) {
+            const batLogo = DB.getTeamPhoto(batTeam, m.tournamentId);
+            if (batLogo && !String(batLogo).includes('default-team')) m.teamPhotos[batTeam] = batLogo;
+        }
+        if (bowlTeam) {
+            const bowlLogo = DB.getTeamPhoto(bowlTeam, m.tournamentId);
+            if (bowlLogo && !String(bowlLogo).includes('default-team')) m.teamPhotos[bowlTeam] = bowlLogo;
+        }
+    }
+    return m;
+}
+
 function buildPartnershipBroadcastData(m) {
     const inn = m.innings?.[m.currentInnings ?? 0];
     if (!inn) return {};
@@ -489,7 +538,18 @@ const Broadcast = {
      */
     send(cmd, data = {}) {
         data = this._buildBroadcastData(cmd, data);
+        const scoreSyncCmds = new Set(['SYNC_SCORE', 'SYNC_MATCH', 'FORCE_UPDATE']);
+        const skipEnrichCmds = new Set([
+            'SHOW_BIG_EVENT', 'STOP_ALL', 'STOP_OVERLAY', 'CLEAR_STAY_OVERLAYS',
+            'STOP_MATCH_DRAW', 'STOP_BROADCAST', 'SHOW_RUNS_BALLS', 'SHOW_CRR',
+        ]);
+        if (data?.match && !skipEnrichCmds.has(cmd)) {
+            enrichMatchBroadcastMedia(data.match);
+        }
         const bm = getBroadcastMatch();
+        if (bm && scoreSyncCmds.has(cmd)) {
+            enrichMatchBroadcastMedia(bm);
+        }
         const bt = getBroadcastTournament();
         const scopeTournamentId = (bm && bm.tournamentId) || (bt && bt.id) || null;
         const scopeMatchId = (bm && bm.id) || null;
@@ -500,13 +560,15 @@ const Broadcast = {
             matchId: scopeMatchId,
             timestamp: Date.now()
         };
-        // Use a unique key with timestamp to ensure the 'storage' event fires even if command is same
-        localStorage.setItem(BROADCAST_KEYS.COMMAND, JSON.stringify(payload));
-        console.log(`📡 Broadcast Sent (Local): ${cmd}`, data);
+        const isDesktop = !!window.desktopAPI;
+
+        if (!isDesktop) {
+            localStorage.setItem(BROADCAST_KEYS.COMMAND, JSON.stringify(payload));
+        }
 
         if (typeof window.forwardBroadcastToPreviews === 'function') {
             window.forwardBroadcastToPreviews(payload);
-        } else {
+        } else if (!isDesktop) {
             document.querySelectorAll('iframe').forEach((f) => {
                 if (f.contentWindow) {
                     f.contentWindow.postMessage({ type: 'cricpro_broadcast_cmd', payload }, '*');
@@ -514,9 +576,11 @@ const Broadcast = {
             });
         }
 
-        if (window.desktopAPI) {
+        if (isDesktop) {
             window.desktopAPI.broadcastCommand(payload);
-            if (bm) window.desktopAPI.publishMatch(bm);
+            if (bm && scoreSyncCmds.has(cmd)) {
+                window.desktopAPI.publishMatch(bm);
+            }
         }
 
         const rtSock = window.SLCRICK_REALTIME?.socket;
@@ -639,9 +703,10 @@ const Broadcast = {
      * Stop all overlays and return to live score
      */
     stopAll() {
+        this.send('STOP_MATCH_DRAW', {});
         this.send('STOP_ALL');
         this.syncToggleUI(true);
-        showToast('⏹ All Overlays Cleared', 'default');
+        showToast('⏹ All Overlays Cleared (incl. Match Draw)', 'default');
     },
 
     /**
@@ -915,3 +980,4 @@ window.buildPartnershipBroadcastData = buildPartnershipBroadcastData;
 window.buildLastWicketBroadcastData = buildLastWicketBroadcastData;
 window.getBroadcastProfileSettings = getBroadcastProfileSettings;
 window.getBroadcastPhotoForRole = getBroadcastPhotoForRole;
+window.enrichMatchBroadcastMedia = enrichMatchBroadcastMedia;

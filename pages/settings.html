@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloud Sync — SLCRICKPRO</title>
+    <link rel="stylesheet" href="../css/main.css" />
+</head>
+<body>
+    <header class="main-header">
+        <a href="../index.html" class="header-btn-sm">← Home</a>
+        <div class="logo-wrap">
+            <img src="../assets/logo.png" alt="SLCRICKPRO" class="logo-img" onerror="this.style.display='none'" />
+            <span class="logo-text">SLCRICKPRO</span>
+        </div>
+    </header>
+
+    <main class="content-container" style="max-width:640px;margin:32px auto;padding:0 20px 60px">
+        <h1 style="font-size:26px;font-weight:900;margin-bottom:8px">☁️ Cloud Sync</h1>
+        <p style="color:var(--c-muted);font-size:14px;line-height:1.6;margin-bottom:28px">
+            Score offline on this PC. When sync is on, matches and tournaments publish to
+            <strong>slcrickpro.live</strong> (Render API) so the website stays up to date.
+        </p>
+
+        <div class="card" style="padding:24px">
+            <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin-bottom:20px">
+                <input type="checkbox" id="sync-enabled" style="width:20px;height:20px" />
+                <span style="font-weight:800">Enable cloud sync</span>
+            </label>
+
+            <div class="form-group">
+                <label class="form-label">API server URL</label>
+                <input type="url" class="form-input" id="sync-backend-url"
+                    placeholder="https://slcrickpro.onrender.com" />
+                <p style="font-size:11px;color:var(--c-muted);margin-top:6px">
+                    Default production API. Use only if you host your own backend.
+                </p>
+            </div>
+
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:20px">
+                <button class="btn btn-primary" type="button" id="btn-save-sync">Save settings</button>
+                <button class="btn btn-ghost" type="button" id="btn-sync-now">Sync now</button>
+            </div>
+
+            <div id="sync-status" style="margin-top:20px;font-size:13px;color:var(--c-muted);line-height:1.5"></div>
+        </div>
+
+        <div class="card" style="margin-top:20px;padding:20px;font-size:13px;color:var(--c-muted)">
+            <strong style="color:var(--c-text)">How it works</strong>
+            <ul style="margin:12px 0 0 18px;line-height:1.7">
+                <li>Offline first — scoring always saves locally + <code>slcrickpro-data.json</code></li>
+                <li>With sync on — each save also pushes to the cloud API</li>
+                <li>“Sync now” pulls latest matches/tournaments from the server</li>
+                <li>Site visitors see live data on slcrickpro.live</li>
+            </ul>
+        </div>
+
+        <div class="card" style="margin-top:20px;padding:24px">
+            <h2 style="font-size:18px;font-weight:900;margin-bottom:8px">🗑 Free up storage</h2>
+            <p style="color:var(--c-muted);font-size:13px;line-height:1.6;margin-bottom:16px">
+                Clear old match data without turning off cloud sync. Tournaments, players, teams, and sync settings are kept.
+            </p>
+            <div id="settings-storage-stats" style="font-size:13px;color:var(--c-muted);margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px"></div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px">
+                <button class="btn btn-amber btn-sm" type="button" id="btn-purge-completed">Clear completed matches</button>
+                <button class="btn btn-red btn-sm" type="button" id="btn-purge-all">Clear ALL match data</button>
+                <button class="btn btn-ghost btn-sm" type="button" id="btn-clear-photos">Clear photo cache</button>
+            </div>
+        </div>
+    </main>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="../js/db.js"></script>
+    <script src="../js/socket-loader.js"></script>
+    <script src="../js/sync-client.js"></script>
+    <script>
+        function renderStatus() {
+            const el = document.getElementById('sync-status');
+            if (!window.SLCRICK_SYNC) {
+                el.textContent = 'Sync module not loaded.';
+                return;
+            }
+            const s = SLCRICK_SYNC.loadSettings();
+            const lines = [
+                s.enabled ? '🟢 Sync enabled' : '⚪ Offline only',
+                'Server: ' + (s.backendUrl || SLCRICK_SYNC.DEFAULT_BACKEND),
+            ];
+            if (s.lastSyncAt) lines.push('Last sync: ' + new Date(s.lastSyncAt).toLocaleString());
+            if (s.lastSyncError) lines.push('Last error: ' + s.lastSyncError);
+            el.innerHTML = lines.map(l => '<div>' + l + '</div>').join('');
+        }
+
+        function renderStorageStats() {
+            const el = document.getElementById('settings-storage-stats');
+            if (!el || !DB.getStorageStats) return;
+            const s = DB.getStorageStats();
+            el.innerHTML = `Matches: <strong>${s.matchCount}</strong> · Tournaments: <strong>${s.tournamentCount}</strong><br>Data ~${s.dataMB} MB · Photo cache ~${s.photoCacheMB} MB`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderStorageStats();
+            document.getElementById('btn-purge-completed')?.addEventListener('click', async () => {
+                if (!confirm('Delete all completed matches (local + cloud if sync on)?')) return;
+                const res = await DB.purgeAllMatchData({ completedOnly: true, clearPhotos: false });
+                renderStorageStats();
+                showToast(`Cleared ${res.deletedCount} completed match(es)`, 'success');
+            });
+            document.getElementById('btn-purge-all')?.addEventListener('click', async () => {
+                if (!confirm('Delete ALL match data? Sync stays on. Tournaments/players stay.')) return;
+                if (!confirm('Final confirm — cannot undo.')) return;
+                const res = await DB.purgeAllMatchData({ completedOnly: false, clearPhotos: true });
+                renderStorageStats();
+                showToast(`Cleared ${res.deletedCount} match(es)`, 'success');
+            });
+            document.getElementById('btn-clear-photos')?.addEventListener('click', () => {
+                if (!confirm('Clear photo cache only?')) return;
+                const n = DB.clearPhotoCache();
+                renderStorageStats();
+                showToast(`Cleared ${n} photo entries`, 'success');
+            });
+
+            if (!window.SLCRICK_SYNC) {
+                showToast('Sync module missing', 'error');
+                return;
+            }
+            const s = SLCRICK_SYNC.loadSettings();
+            document.getElementById('sync-enabled').checked = s.enabled;
+            document.getElementById('sync-backend-url').value = s.backendUrl || SLCRICK_SYNC.DEFAULT_BACKEND;
+            renderStatus();
+
+            document.getElementById('btn-save-sync').onclick = () => {
+                const cfg = SLCRICK_SYNC.saveSettings({
+                    enabled: document.getElementById('sync-enabled').checked,
+                    backendUrl: document.getElementById('sync-backend-url').value.trim(),
+                });
+                SLCRICK_SYNC.install();
+                if (cfg.enabled) SLCRICK_SYNC.flushQueue();
+                showToast('Settings saved', 'success');
+                renderStatus();
+            };
+
+            document.getElementById('btn-sync-now').onclick = async () => {
+                SLCRICK_SYNC.saveSettings({
+                    enabled: document.getElementById('sync-enabled').checked,
+                    backendUrl: document.getElementById('sync-backend-url').value.trim(),
+                });
+                SLCRICK_SYNC.install();
+                showToast('Syncing…', 'default');
+                const res = await pullGlobalData(true);
+                if (res?.ok) showToast('✅ Sync complete', 'success');
+                else showToast('Sync failed — check URL / internet', 'error');
+                renderStatus();
+            };
+        });
+    </script>
+</body>
+</html>

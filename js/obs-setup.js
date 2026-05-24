@@ -457,7 +457,12 @@
       window.refreshObsSetupPanel();
       window.refreshBroadcastPreview();
     }, 1200);
-    setInterval(window.refreshObsSetupPanel, 4000);
+    setInterval(() => {
+      const panel = document.getElementById('obs-setup-panel');
+      if (panel && panel.style.display !== 'none') {
+        window.refreshObsSetupPanel();
+      }
+    }, 12000);
   });
 
   window.addEventListener('resize', () => {

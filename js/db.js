@@ -952,7 +952,112 @@ const DB = {
         delete grants[id];
         localStorage.setItem('cricpro_grants', JSON.stringify(grants));
         console.log(`🧹 Session data cleared for match: ${id}`);
-    }
+    },
+
+    _clearPhotoCacheKeys() {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && (k.startsWith('cricpro_photo_') || k.startsWith('cricpro_team_photo_'))) {
+                keys.push(k);
+            }
+        }
+        keys.forEach((k) => localStorage.removeItem(k));
+        return keys.length;
+    },
+
+    _clearMatchDrawCache() {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && /matchdraw|match_draw|matchDraw/i.test(k)) keys.push(k);
+        }
+        keys.forEach((k) => localStorage.removeItem(k));
+        return keys.length;
+    },
+
+    getStorageStats() {
+        let photoBytes = 0;
+        let dataBytes = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            const v = localStorage.getItem(k) || '';
+            const b = v.length * 2;
+            if (k.startsWith('cricpro_photo_') || k.startsWith('cricpro_team_photo_')) {
+                photoBytes += b;
+            } else if (k.startsWith('cricpro_')) {
+                dataBytes += b;
+            }
+        }
+        return {
+            matchCount: this.getMatches().length,
+            tournamentCount: this.getTournaments().length,
+            photoCacheMB: (photoBytes / 1024 / 1024).toFixed(2),
+            dataMB: (dataBytes / 1024 / 1024).toFixed(2),
+        };
+    },
+
+    async purgeAllMatchData(options = {}) {
+        const {
+            completedOnly = false,
+            clearPhotos = true,
+            clearReports = true,
+            deleteFromCloud = true,
+            syncTournaments = true,
+        } = options;
+
+        let matches = this.getMatches();
+        const removing = completedOnly
+            ? matches.filter((m) => m.status === 'completed')
+            : matches.slice();
+        const removedIds = new Set(removing.map((m) => m.id));
+
+        for (const m of removing) {
+            if (deleteFromCloud) this.deleteMatchFromCloud(m.id);
+        }
+
+        matches = matches.filter((m) => !removedIds.has(m.id));
+        this.saveMatches(matches);
+
+        if (syncTournaments) {
+            this.getTournaments().forEach((t) => {
+                if (!t.matches?.length) return;
+                const next = t.matches.filter((id) => !removedIds.has(id));
+                if (next.length !== t.matches.length) {
+                    t.matches = next;
+                    this.saveTournament(t, true);
+                }
+            });
+        }
+
+        if (clearReports) {
+            if (completedOnly) {
+                const reports = this._secureGet(DB_KEYS.REPORTS, []).filter(
+                    (r) => !removedIds.has(r.matchId)
+                );
+                this._secureSet(DB_KEYS.REPORTS, reports);
+            } else {
+                this._secureSet(DB_KEYS.REPORTS, []);
+            }
+        }
+
+        if (clearPhotos && !completedOnly) {
+            this._clearPhotoCacheKeys();
+        }
+
+        if (!completedOnly) {
+            this._clearMatchDrawCache();
+            localStorage.removeItem('hotkey_match_id');
+            localStorage.removeItem('hotkey_mode');
+        }
+
+        localStorage.setItem('cricpro_force_update', Date.now().toString());
+        return { deletedCount: removing.length, remaining: matches.length };
+    },
+
+    clearPhotoCache() {
+        return this._clearPhotoCacheKeys();
+    },
 };
 
 // ============================================================

@@ -83,6 +83,10 @@ let _lastBroadcastCmdSig = '';
 let _lastPollMatchTs = 0;
 let _pollMatchInFlight = false;
 let _lastRenderedScoreKey = '';
+let _lastOverlayFingerprint = '';
+let _lastCloudMatchUpdated = 0;
+/** Match draw full-screen — cleared by STOP ALL / STOP_MATCH_DRAW / other hotkeys */
+let _matchDrawOnAir = false;
 
 /** OBS hides .broadcast-overlay unless .overlay-visible — stamp every popup */
 function stampBroadcastOverlay(el) {
@@ -172,8 +176,28 @@ function cloudBackendUrl() {
     return (window.CRICPRO_CLOUD_CONFIG?.backendUrl || 'https://slcrickpro.onrender.com').replace(/\/$/, '');
 }
 
-let _lastOverlayFingerprint = '';
-let _lastCloudMatchUpdated = 0;
+function overlayScoreKey(m) {
+    const inn = m?.innings?.[m.currentInnings || 0];
+    if (!inn) return '';
+    const overLen = (inn.currentOver || []).length;
+    return `${m.currentInnings}|${inn.runs}|${inn.wickets}|${inn.balls}|${inn.strikerIdx}|${inn.currentBowlerIdx}|${overLen}`;
+}
+
+function overlayNeedsRender(m, container) {
+    if (!m || !container) return true;
+    const fp = overlayMatchFingerprint(m);
+    const scoreKey = overlayScoreKey(m);
+    const hasBar =
+        container.querySelector('.m2-pro-bar') ||
+        container.querySelector('.m4-bar-wrapper') ||
+        container.querySelector('.m3-left');
+    if (hasBar && fp === _lastOverlayFingerprint && scoreKey === _lastRenderedScoreKey) {
+        return false;
+    }
+    _lastOverlayFingerprint = fp;
+    _lastRenderedScoreKey = scoreKey;
+    return true;
+}
 
 function hydrateOverlayMediaFromMatch(m) {
     if (!m || typeof DB === 'undefined') return;
@@ -239,8 +263,7 @@ function applyCloudScorePayload(data) {
     }
     const fp = overlayMatchFingerprint(m);
     const ts = m.lastUpdated || Date.now();
-    const inn = m.innings?.[m.currentInnings || 0];
-    const scoreKey = inn ? `${inn.runs}-${inn.wickets}-${inn.balls}-${m.currentInnings}` : '';
+    const scoreKey = overlayScoreKey(m);
     const changed =
         fp !== _lastOverlayFingerprint ||
         ts > _lastCloudMatchUpdated ||
@@ -460,7 +483,15 @@ function overlayDisplayName(fullName) {
     return raw.toUpperCase();
 }
 
-function overlayResolvePlayerPhoto(player, role) {
+function overlayResolvePlayerPhoto(player, role, matchCtx) {
+    const m =
+        matchCtx ||
+        (typeof latestSocketScore !== 'undefined' && latestSocketScore?.fullMatch) ||
+        (matchId && typeof DB !== 'undefined' ? DB.getMatch(matchId) : null);
+    if (m?.broadcastLivePhotos?.[role]) {
+        const lp = m.broadcastLivePhotos[role];
+        if (lp && String(lp).length > 12) return overlayPlayerPhotoUrl(lp);
+    }
     if (player?.photo && String(player.photo).length > 12) {
         return overlayPlayerPhotoUrl(player.photo);
     }
@@ -656,17 +687,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyDesktopMatchUpdate(match) {
         if (!match || !match.id) return;
         if (tournId && match.tournamentId !== tournId) return;
-        if (isMasterOverlay || !matchId || matchId === match.id) {
-            if (isMasterOverlay && matchId !== match.id) matchId = match.id;
-            if (typeof DB !== 'undefined' && DB.saveMatch) {
-                window._desktopApplyingRemoteMatch = true;
-                DB.saveMatch(match, true);
-                window._desktopApplyingRemoteMatch = false;
-            }
-            latestSocketScore = { id: match.id, fullMatch: match, score: match.innings?.[match.currentInnings] };
-            latestSocketScoreTime = Date.now();
-            renderOverlay();
-        }
+        if (!isMasterOverlay && matchId && matchId !== match.id) return;
+        if (isMasterOverlay && matchId !== match.id) matchId = match.id;
+        applyCloudScorePayload({ fullMatch: match, score: match.innings?.[match.currentInnings] });
     }
 
     if (window.desktopAPI) {
@@ -687,8 +710,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const liveBC = new BroadcastChannel('cricpro_live');
             liveBC.onmessage = (ev) => {
                 if (!ev.data || ev.data.type !== 'score_update') return;
+                if (window.desktopAPI) return;
                 pollServerScore();
-                pollMatchApi();
             };
         } catch (_) {}
     }
@@ -750,13 +773,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
                 window._desktopApplyingRemoteMatch = false;
             }
-            const inn = m.innings?.[m.currentInnings || 0];
-            const scoreKey = inn
-                ? `${inn.runs}-${inn.wickets}-${inn.balls}-${m.currentInnings}`
-                : '';
+            const scoreKey = overlayScoreKey(m);
             if (scoreKey !== _lastRenderedScoreKey) {
-                _lastRenderedScoreKey = scoreKey;
-                renderOverlay();
+                applyCloudScorePayload({
+                    fullMatch: m,
+                    score: m.innings?.[m.currentInnings || 0],
+                });
             }
         } catch (_) {
         } finally {
@@ -765,6 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function pollServerScore() {
+        if (window.desktopAPI) return;
         if (!matchId && !isMasterOverlay) return;
         if (typeof DB === 'undefined') return;
 
@@ -775,51 +798,56 @@ document.addEventListener('DOMContentLoaded', () => {
                     overlayMatchInTournament(m)
             );
             if (live) {
-                matchId = live.id;
-                latestSocketScore = { fullMatch: live, score: live.innings?.[live.currentInnings] };
-                renderOverlay();
+                applyCloudScorePayload({ fullMatch: live, score: live.innings?.[live.currentInnings] });
                 return;
             }
         }
         const localMatch = matchId ? DB.getMatch(matchId) : null;
         if (localMatch) {
-            latestSocketScore = { fullMatch: localMatch, score: localMatch.innings?.[localMatch.currentInnings] };
-            renderOverlay();
+            applyCloudScorePayload({
+                fullMatch: localMatch,
+                score: localMatch.innings?.[localMatch.currentInnings],
+            });
         }
     }
 
     const inPreviewIframe = isPreview && window.parent !== window;
+    const onDesktop = !!window.desktopAPI;
     const pollTick = () => {
         pollBroadcastCommands();
-        if (!inPreviewIframe) pollBroadcastApi();
+        if (!inPreviewIframe && !onDesktop) pollBroadcastApi();
         if (currentPopupView) return;
-        if (!inPreviewIframe) pollMatchApi();
-        if (!inPreviewIframe) pollServerScore();
+        if (!inPreviewIframe && !onDesktop) pollMatchApi();
+        if (!inPreviewIframe && !onDesktop) pollServerScore();
     };
     if (!inPreviewIframe) {
         pollTick();
-        const pollMs = isObsMode ? 900 : 600;
+        const pollMs = onDesktop ? 2500 : isObsMode ? 900 : 600;
         setInterval(pollTick, pollMs);
     }
 
+    let _storagePollTimer = null;
     window.addEventListener('storage', (e) => {
         if (e.key === 'cricpro_scorebar_theme' && e.newValue) {
             currentOverlayMode = overlayModeFromTheme(e.newValue);
             if (currentOverlayMode === 2) document.body.classList.add('mode-2-active');
             else document.body.classList.remove('mode-2-active');
+            _lastOverlayFingerprint = '';
             renderOverlay();
         }
         if (e.key === 'cricpro_force_update' || e.key === 'cricpro_broadcast_cmd') {
-            pollMatchApi();
-            pollServerScore();
-            if (e.key === 'cricpro_broadcast_cmd') {
-                try {
-                    const payload = JSON.parse(e.newValue);
-                    if (payload?.cmd) handleBroadcastCommand(payload.cmd, payload.data || {});
-                } catch (_) {}
-            } else if (!inPreviewIframe) {
-                renderOverlay();
-            }
+            if (_storagePollTimer) clearTimeout(_storagePollTimer);
+            _storagePollTimer = setTimeout(() => {
+                _storagePollTimer = null;
+                if (e.key === 'cricpro_broadcast_cmd') {
+                    try {
+                        const payload = JSON.parse(localStorage.getItem('cricpro_broadcast_cmd') || 'null');
+                        if (payload?.cmd) applyBroadcastPayload(payload);
+                    } catch (_) {}
+                } else if (!onDesktop) {
+                    pollServerScore();
+                }
+            }, 40);
         }
     });
 
@@ -862,9 +890,17 @@ function handleBroadcastCommand(cmd, data = {}) {
 
     if (cmd === 'STOP_OVERLAY' || cmd === 'CLEAR_STAY_OVERLAYS' || cmd === 'STOP_ALL' || cmd === 'STOP_BROADCAST') {
         hideAllBroadcastOverlays();
-        isScorebarVisible = true; // Always ensure scorebar returns
+        isScorebarVisible = true;
         renderOverlay();
         return;
+    }
+
+    const drawSafeCmds = new Set([
+        'SHOW_MATCH_DRAW', 'STOP_MATCH_DRAW', 'SYNC_SCORE', 'SYNC_MATCH', 'FORCE_UPDATE',
+        'SET_SCOREBAR_VISIBILITY', 'TOGGLE_SCOREBAR', 'SET_OVERLAY_MODE', 'SET_OVERLAY_SUBMODE',
+    ]);
+    if (_matchDrawOnAir && !drawSafeCmds.has(cmd)) {
+        hideMatchDrawOverlay(false);
     }
     if (cmd === 'FORCE_UPDATE') {
         renderOverlay();
@@ -952,11 +988,13 @@ function showMatchDrawOverlay(data) {
     if (!wrap || !frame || !data?.draw) return;
 
     hideAllBroadcastOverlays(true);
+    _matchDrawOnAir = true;
+
     const scorebar = document.getElementById('overlay-container');
     if (scorebar) scorebar.style.display = 'none';
 
     wrap.style.display = 'block';
-    wrap.classList.add('overlay-visible');
+    wrap.classList.add('overlay-visible', 'overlay-stay');
 
     const sendState = () => {
         try {
@@ -984,11 +1022,12 @@ function showMatchDrawOverlay(data) {
 }
 
 function hideMatchDrawOverlay(restoreScorebar) {
+    _matchDrawOnAir = false;
     const wrap = document.getElementById('broadcast-match-draw');
     const frame = document.getElementById('match-draw-frame');
     if (wrap) {
         wrap.style.display = 'none';
-        wrap.classList.remove('overlay-visible');
+        wrap.classList.remove('overlay-visible', 'overlay-stay');
     }
     if (frame) {
         frame.src = 'about:blank';
@@ -997,6 +1036,7 @@ function hideMatchDrawOverlay(restoreScorebar) {
     if (restoreScorebar !== false) {
         const scorebar = document.getElementById('overlay-container');
         if (scorebar) scorebar.style.display = '';
+        if (overlayLayer !== 'hotkeys') renderOverlay();
     }
 }
 
@@ -1017,13 +1057,16 @@ function hideAllBroadcastOverlays(skipMatchDraw) {
         beDock.style.display = 'none';
         beDock.innerHTML = '';
     }
+    const overlaySelector = skipMatchDraw
+        ? '.broadcast-overlay:not(#broadcast-match-draw)'
+        : '.broadcast-overlay';
     try {
-        const overlays = document.querySelectorAll('.broadcast-overlay');
+        const overlays = document.querySelectorAll(overlaySelector);
         if (overlays.length > 0 && typeof gsap !== 'undefined') {
-            gsap.to('.broadcast-overlay', { opacity: 0, scale: 0.9, duration: 0.4, onComplete: () => {
-                document.querySelectorAll('.broadcast-overlay').forEach(el => {
+            gsap.to(overlaySelector, { opacity: 0, scale: 0.9, duration: 0.4, onComplete: () => {
+                document.querySelectorAll(overlaySelector).forEach((el) => {
                     if (el.id) {
-                        el.classList.remove('overlay-visible');
+                        el.classList.remove('overlay-visible', 'overlay-stay');
                         el.style.display = 'none';
                         gsap.set(el, { opacity: 1, scale: 1, x: 0, y: 0, clearProps: 'transform,opacity' });
                     } else {
@@ -1033,18 +1076,18 @@ function hideAllBroadcastOverlays(skipMatchDraw) {
                 document.querySelectorAll('.broadcast-team-squad').forEach((el) => el.remove());
             }});
         } else {
-            overlays.forEach(el => {
+            overlays.forEach((el) => {
                 if (el.id) {
-                    el.classList.remove('overlay-visible');
+                    el.classList.remove('overlay-visible', 'overlay-stay');
                     el.style.display = 'none';
                 } else el.remove();
             });
         }
-    } catch(err) {
+    } catch (err) {
         console.warn('Error hiding overlays:', err);
-        document.querySelectorAll('.broadcast-overlay').forEach(el => {
+        document.querySelectorAll(overlaySelector).forEach((el) => {
             if (el.id) {
-                el.classList.remove('overlay-visible');
+                el.classList.remove('overlay-visible', 'overlay-stay');
                 el.style.display = 'none';
             } else el.remove();
         });
@@ -1075,6 +1118,8 @@ function renderOverlay() {
         container.innerHTML = '';
         return;
     }
+
+    if (!overlayNeedsRender(m, container)) return;
 
     if (currentOverlayMode === 2) {
         document.body.classList.add('mode-2-active');
@@ -1107,7 +1152,6 @@ function _renderOverlayMode2(m) {
     const bowlShort = getShortName(bowlTeam);
     const batLogo = overlayTeamLogoUrl(batTeam, m.tournamentId);
     const bowlLogo = overlayTeamLogoUrl(bowlTeam, m.tournamentId);
-    const leagueLine = overlayTournamentSubtitle(m);
 
     const siIdx =
         curInn.currentBatsmenIdx && typeof curInn.strikerIdx !== 'undefined'
@@ -1138,19 +1182,21 @@ function _renderOverlayMode2(m) {
     const crrVal = formatCRR(curInn.runs, curInn.balls, bpo);
     const projected = overlayProjectedScore(curInn, m);
 
-    const sPhoto = overlayResolvePlayerPhoto(striker, 'striker');
-    const nsPhoto = overlayResolvePlayerPhoto(nonStriker, 'nonstriker');
-    const bowlPhoto = overlayResolvePlayerPhoto(bowler, 'bowler');
+    const sPhoto = overlayResolvePlayerPhoto(striker, 'striker', m);
+    const nsPhoto = overlayResolvePlayerPhoto(nonStriker, 'nonstriker', m);
+    const bowlPhoto = overlayResolvePlayerPhoto(bowler, 'bowler', m);
     const defPhoto = overlayEscapeHtml(OVERLAY_DEFAULT_PLAYER_PHOTO);
 
     const batterCell = (pl, photo, isStriker) => `
         <div class="m2-batter-cell ${isStriker ? 'm2-batter-cell--on' : ''}">
             <div class="m2-player-text">
-                <div class="m2-batter-name">${overlayEscapeHtml(overlayDisplayName(pl.name))}</div>
-                <div class="m2-batter-score">${pl.runs ?? 0}<span class="m2-batter-balls">(${pl.balls ?? 0})</span></div>
+                <div class="m2-batter-line">
+                    <span class="m2-batter-name" title="${overlayEscapeHtml(pl.name || '')}">${overlayEscapeHtml(overlayDisplayName(pl.name))}</span>
+                    <span class="m2-batter-score">${pl.runs ?? 0}<span class="m2-batter-balls">(${pl.balls ?? 0})</span></span>
+                </div>
             </div>
             <div class="m2-photo-ring">
-                <img class="m2-photo" src="${overlayEscapeHtml(photo)}" alt="" onerror="this.onerror=null;this.src='${defPhoto}'">
+                <img class="m2-photo" src="${overlayEscapeHtml(photo)}" alt="" loading="eager" decoding="async" onerror="this.onerror=null;this.src='${defPhoto}'">
             </div>
         </div>`;
 
@@ -1162,10 +1208,6 @@ function _renderOverlayMode2(m) {
                         <img src="${overlayEscapeHtml(batLogo)}" alt="" onerror="this.style.display='none'">
                         <span class="m2-logo-fallback">${overlayEscapeHtml(batShort)}</span>
                     </div>
-                    <div class="m2-brand-text">
-                        <div class="m2-brand-team">${overlayEscapeHtml(String(batTeam).toUpperCase())}</div>
-                        ${leagueLine ? `<div class="m2-brand-league">${overlayEscapeHtml(leagueLine)}</div>` : ''}
-                    </div>
                 </div>
                 <div class="m2-panel m2-panel--bat">
                     <div class="m2-batter-row">
@@ -1175,6 +1217,7 @@ function _renderOverlayMode2(m) {
                 </div>
                 <div class="m2-core">
                     <div class="m2-innings-tab">${overlayEscapeHtml(innLabel)}</div>
+                    <div class="m2-teams-line">${overlayEscapeHtml(String(batTeam).toUpperCase())} <span class="m2-teams-vs">vs</span> ${overlayEscapeHtml(String(bowlTeam).toUpperCase())}</div>
                     <div class="m2-score-panel">
                         <span class="m2-team-badge">${overlayEscapeHtml(batShort)}</span>
                         <span class="m2-live-score">${overlayEscapeHtml(scoreMain)}</span>
@@ -1190,11 +1233,13 @@ function _renderOverlayMode2(m) {
                     <div class="m2-bowler-row">
                         <div class="m2-bowler-block">
                             <div class="m2-player-text">
-                                <span class="m2-bowler-name">${overlayEscapeHtml(overlayDisplayName(bowler.name))}</span>
-                                <span class="m2-bowler-fig">${bowler.wickets ?? 0} - ${bowler.runs ?? 0} <span class="m2-bowler-ov">${formatOvers(bowler.balls ?? 0, bpo)}</span></span>
+                                <div class="m2-bowler-line">
+                                    <span class="m2-bowler-name" title="${overlayEscapeHtml(bowler.name || '')}">${overlayEscapeHtml(overlayDisplayName(bowler.name))}</span>
+                                    <span class="m2-bowler-fig">${bowler.wickets ?? 0} - ${bowler.runs ?? 0} <span class="m2-bowler-ov">${formatOvers(bowler.balls ?? 0, bpo)}</span></span>
+                                </div>
                             </div>
                             <div class="m2-photo-ring m2-photo-ring--bowl">
-                                <img class="m2-photo" src="${overlayEscapeHtml(bowlPhoto)}" alt="" onerror="this.onerror=null;this.src='${defPhoto}'">
+                                <img class="m2-photo" src="${overlayEscapeHtml(bowlPhoto)}" alt="" loading="eager" decoding="async" onerror="this.onerror=null;this.src='${defPhoto}'">
                             </div>
                         </div>
                     </div>
@@ -1204,9 +1249,6 @@ function _renderOverlayMode2(m) {
                     <div class="m2-brand-logo">
                         <img src="${overlayEscapeHtml(bowlLogo)}" alt="" onerror="this.style.display='none'">
                         <span class="m2-logo-fallback">${overlayEscapeHtml(bowlShort)}</span>
-                    </div>
-                    <div class="m2-brand-text">
-                        <div class="m2-brand-team">${overlayEscapeHtml(String(bowlTeam).toUpperCase())}</div>
                     </div>
                 </div>
             </div>
@@ -2133,22 +2175,22 @@ function showBigEventGraphic(data) {
         dock.style.transform = 'scale(0.7)';
     }
 
-    spawnMiniFireworks(host, type, { count: 14, spread: 0.85, centerX: host.clientWidth * 0.55, centerY: 30 });
+    spawnMiniFireworks(host, type, { count: 8, spread: 0.85, centerX: host.clientWidth * 0.55, centerY: 30 });
 
     const iconEl = dock?.querySelector('.be-dock-icon');
     const glow = dock?.querySelector('.be-dock-glow');
     if (typeof gsap !== 'undefined' && gsap.fromTo && dock) {
-        gsap.to(dock, { opacity: 1, scale: 1, duration: 0.5, delay: 0.22, ease: 'back.out(1.7)' });
+        gsap.to(dock, { opacity: 1, scale: 1, duration: 0.32, delay: 0.06, ease: 'back.out(1.7)' });
         if (type === 'FOUR') {
-            gsap.fromTo(dock, { x: 40 }, { x: 0, duration: 0.45, delay: 0.22, ease: 'power3.out' });
-            if (glow) gsap.fromTo(glow, { scaleX: 0, opacity: 0 }, { scaleX: 1, opacity: 0.85, duration: 0.45, delay: 0.25 });
-            if (iconEl) gsap.fromTo(iconEl, { scale: 0, rotate: -25 }, { scale: 1, rotate: 0, duration: 0.4, delay: 0.28, ease: 'back.out(2.5)' });
+            gsap.fromTo(dock, { x: 40 }, { x: 0, duration: 0.3, delay: 0.06, ease: 'power3.out' });
+            if (glow) gsap.fromTo(glow, { scaleX: 0, opacity: 0 }, { scaleX: 1, opacity: 0.85, duration: 0.3, delay: 0.08 });
+            if (iconEl) gsap.fromTo(iconEl, { scale: 0, rotate: -25 }, { scale: 1, rotate: 0, duration: 0.28, delay: 0.1, ease: 'back.out(2.5)' });
         } else if (type === 'SIX') {
-            if (iconEl) gsap.fromTo(iconEl, { y: 16, scale: 0 }, { y: 0, scale: 1, duration: 0.45, delay: 0.3, ease: 'back.out(2)' });
-            gsap.to(dock, { boxShadow: '0 0 28px rgba(167,139,250,0.75)', duration: 0.2, yoyo: true, repeat: 3, delay: 0.5 });
+            if (iconEl) gsap.fromTo(iconEl, { y: 16, scale: 0 }, { y: 0, scale: 1, duration: 0.32, delay: 0.12, ease: 'back.out(2)' });
+            gsap.to(dock, { boxShadow: '0 0 28px rgba(167,139,250,0.75)', duration: 0.15, yoyo: true, repeat: 2, delay: 0.25 });
         } else if (type === 'WICKET') {
-            gsap.to(dock, { x: '+=4', duration: 0.05, repeat: 6, yoyo: true, ease: 'power1.inOut', delay: 0.35 });
-            if (iconEl) gsap.fromTo(iconEl, { scale: 1.5 }, { scale: 1, duration: 0.35, delay: 0.3, ease: 'elastic.out(1, 0.55)' });
+            gsap.to(dock, { x: '+=4', duration: 0.04, repeat: 4, yoyo: true, ease: 'power1.inOut', delay: 0.15 });
+            if (iconEl) gsap.fromTo(iconEl, { scale: 1.5 }, { scale: 1, duration: 0.28, delay: 0.12, ease: 'elastic.out(1, 0.55)' });
         }
     } else if (dock) {
         dock.style.opacity = '1';

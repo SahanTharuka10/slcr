@@ -258,6 +258,8 @@ function syncLivePlayerPhotoSlots(m) {
     const crr = inn.balls ? ((inn.runs / inn.balls) * 6).toFixed(2) : '0.00';
     const crrEl = document.getElementById('bm-crr-val');
     if (crrEl) crrEl.textContent = `CRR: ${crr}`;
+
+    if (typeof enrichMatchBroadcastMedia === 'function') enrichMatchBroadcastMedia(m);
 }
 
 function clearPlayerPhotoSlot(role) {
@@ -3595,38 +3597,52 @@ window.declareInnings = function() {
 // ========== HELPERS ==========
 // BroadcastChannel for instant same-browser cross-tab TV display updates
 const _scorerBC = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('cricpro_live') : null;
+let _overlaySignalTimer = null;
+
+function flushOverlaySignal() {
+    _overlaySignalTimer = null;
+    if (!currentMatch) return;
+    if (typeof enrichMatchBroadcastMedia === 'function') enrichMatchBroadcastMedia(currentMatch);
+    if (window.desktopAPI) {
+        window.desktopAPI.publishMatch(currentMatch);
+        window.desktopAPI.broadcastCommand({
+            cmd: 'SYNC_SCORE',
+            data: { match: currentMatch, matchId: currentMatch.id },
+            matchId: currentMatch.id,
+            tournamentId: currentMatch.tournamentId || null,
+            timestamp: Date.now(),
+        });
+        return;
+    }
+    if (_scorerBC) {
+        _scorerBC.postMessage({ type: 'score_update', matchId: currentMatch.id, ts: Date.now() });
+    }
+    localStorage.setItem('cricpro_force_update', Date.now().toString());
+}
+
+function scheduleOverlaySignal() {
+    if (_overlaySignalTimer) clearTimeout(_overlaySignalTimer);
+    _overlaySignalTimer = setTimeout(flushOverlaySignal, 45);
+}
 
 function saveAndRender() {
     if (currentMatch) {
         window.currentMatch = currentMatch;
         window.currentTournament = currentTournament;
-        DB.saveMatch(currentMatch);
+        const isDesktop = !!window.desktopAPI;
+        DB.saveMatch(currentMatch, true, {
+            skipPublish: isDesktop,
+            skipForceUpdate: isDesktop,
+        });
         renderScoring();
         if (typeof syncBroadcastMasterPhotos === 'function') {
             syncBroadcastMasterPhotos(currentMatch);
         }
-        if (window.desktopAPI) {
-            window.desktopAPI.publishMatch(currentMatch);
-            window.desktopAPI.broadcastCommand({
-                cmd: 'SYNC_SCORE',
-                data: { match: currentMatch, matchId: currentMatch.id },
-                matchId: currentMatch.id,
-                tournamentId: currentMatch.tournamentId || null,
-                timestamp: Date.now(),
-            });
-        }
-        // Signal TV overlay: BroadcastChannel (instant, same browser) + localStorage (cross-tab fallback)
-        if (_scorerBC) _scorerBC.postMessage({ type: 'score_update', matchId: currentMatch.id, ts: Date.now() });
-        localStorage.setItem('cricpro_force_update', Date.now().toString());
-        // Update hotkey label team names
+        scheduleOverlaySignal();
         const t1el = document.getElementById('hk-team1-name');
         const t2el = document.getElementById('hk-team2-name');
         if (t1el) t1el.textContent = currentMatch.team1 || 'Team A';
         if (t2el) t2el.textContent = currentMatch.team2 || 'Team B';
-        const hotkeysOpen = document.getElementById('panel-hotkeys')?.style.display === 'block';
-        if (hotkeysOpen && typeof window.refreshBroadcastPreview === 'function') {
-            window.refreshBroadcastPreview();
-        }
     }
 }
 function openModal(id) { const e = document.getElementById(id); if (e) e.style.display = 'flex'; }

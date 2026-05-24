@@ -209,7 +209,13 @@
         <!-- Matches Tab -->
         <div id="tab-matches" class="admin-panel" style="display:none">
             <h3 class="section-hd" style="margin-bottom:8px">Manage Matches</h3>
-            <p style="color:var(--c-muted);margin-bottom:24px">Force-remove ongoing matches from the system.</p>
+            <p style="color:var(--c-muted);margin-bottom:16px">Remove saved matches from local storage and cloud database (sync stays connected).</p>
+            <div id="storage-stats-box" class="card" style="padding:16px;margin-bottom:16px;font-size:13px;color:var(--c-muted)"></div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">
+                <button class="btn btn-amber btn-sm" type="button" onclick="purgeCompletedMatchesAdmin()">🗑 Clear completed matches</button>
+                <button class="btn btn-red btn-sm" type="button" onclick="purgeAllMatchesAdmin()">⚠ Clear ALL match data</button>
+                <button class="btn btn-ghost btn-sm" type="button" onclick="clearPhotoCacheAdmin()">📷 Clear photo cache</button>
+            </div>
             <div id="matches-list"></div>
         </div>
 
@@ -576,11 +582,11 @@
 
     <div class="toast" id="toast"></div>
 
-    <script src="/js/cloud-config.js"></script>
-    <script src="/js/cloud-services.js"></script>
-    <script src="/js/db.js"></script>
-    <script src="/js/admin.js"></script>
-    <script src="/js/admin-match-input.js"></script>
+    <script src="../js/db.js"></script>
+    <script src="../js/socket-loader.js"></script>
+    <script src="../js/sync-client.js"></script>
+    <script src="../js/admin.js"></script>
+    <script src="../js/admin-match-input.js"></script>
 </body>
 
 </html>

@@ -362,8 +362,7 @@
                     window._bmSyncTimer = setInterval(() => {
                         const m = (typeof currentMatch !== 'undefined') ? currentMatch : null;
                         if (m && typeof syncBroadcastMasterPhotos === 'function') syncBroadcastMasterPhotos(m);
-                        if (typeof renderBroadcastMatchList === 'function') renderBroadcastMatchList();
-                    }, 5000);
+                    }, 12000);
                 } else {
                     document.body.classList.remove('hotkey-panel-active');
                     if (window._bmSyncTimer) { clearInterval(window._bmSyncTimer); window._bmSyncTimer = null; }
@@ -706,7 +705,7 @@
                             <button class="btn btn-ghost" onclick="triggerVisualBigEvent('WICKET')" style="border-color:#d50000; color:#ff8a80; height:45px; font-size:18px; font-weight:900; border-radius:10px">W</button>
                         </div>
                         <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;height:44px;font-weight:900;border-radius:10px" onclick="shareMatchDrawOverlay()" title="Full screen on OBS overlay">📡 Share Draw</button>
-                        <button type="button" class="btn btn-green btn-full btn-sm" style="margin-top:6px;font-weight:800" onclick="hideMatchDrawOverlay()">✕ Hide Draw</button>
+                        <button type="button" class="btn btn-green btn-full btn-sm" style="margin-top:6px;font-weight:800" onclick="hideMatchDrawOverlay()" title="STOP layer — draw clears with STOP ALL too">✕ Hide Draw</button>
                         <button type="button" class="btn btn-ghost btn-full btn-sm" style="margin-top:6px;font-weight:700" onclick="openMatchDrawPreview()">👁 Preview in browser</button>
                         <button type="button" class="btn btn-ghost btn-full btn-sm" style="margin-top:4px;font-weight:700" onclick="openMatchDraw()">🎯 Edit Match Draw</button>
                     </div>
