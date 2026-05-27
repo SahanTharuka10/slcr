@@ -113,8 +113,10 @@
     }
 
     const existing = global.DB.getMatch(match.id);
+    // Completed stat file from desktop is authoritative — replace stale local live/paused rows.
     if (existing && (existing.status === 'live' || existing.status === 'paused')) {
-      throw new Error('Cannot import over a match that is currently live on this device.');
+      match.scoringStartedAt = existing.scoringStartedAt || match.scoringStartedAt;
+      if (!match.result && existing.result) match.result = existing.result;
     }
 
     global.DB.saveMatch(match, true, { skipPublish: true });
