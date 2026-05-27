@@ -3,34 +3,50 @@
  * Requires: cloud-config.js, db.js, socket-loader.js, realtime-manager.js
  */
 (function (global) {
-  function applyRemoteMatch(data, opts) {
-    if (!data?.id || !global.DB) return;
-    const list = global.DB.getMatches();
-    const idx = list.findIndex((m) => m.id === data.id);
-    const local = idx >= 0 ? list[idx] : null;
-    const cloudTs = data.lastUpdated || data.cloudUpdatedAt || 0;
-    const localTs = local?.lastUpdated || 0;
-    const fromSocket = !!(opts && opts.fromSocket);
-    const liveish = data.status === 'live' || data.status === 'paused';
-    if (local && !fromSocket && !liveish && localTs > cloudTs) return;
-    if (local && !fromSocket && liveish && localTs > cloudTs + 2000) return;
+  let _applyingRemoteMatch = false;
 
-    if (idx >= 0) list[idx] = data;
-    else list.push(data);
-
-    global.DB.saveMatches(list);
-    try {
-      localStorage.setItem('cricpro_force_update', String(Date.now()));
-    } catch (_) {}
-
+  function refreshLiveUi() {
     if (typeof global.renderOngoing === 'function') global.renderOngoing();
     if (typeof global.renderLive === 'function') global.renderLive();
     if (typeof global.updateTicker === 'function') global.updateTicker();
+  }
+
+  function notifyLiveUpdate(matchId) {
+    if (!matchId) return;
     try {
       global.dispatchEvent(
-        new CustomEvent('slcrick-live-update', { detail: { type: 'match', id: data.id } })
+        new CustomEvent('slcrick-live-update', { detail: { type: 'match', id: matchId } })
       );
     } catch (_) {}
+  }
+
+  function applyRemoteMatch(data, opts) {
+    if (!data?.id || !global.DB || _applyingRemoteMatch) return;
+    _applyingRemoteMatch = true;
+    try {
+      const list = global.DB.getMatches();
+      const idx = list.findIndex((m) => m.id === data.id);
+      const local = idx >= 0 ? list[idx] : null;
+      const cloudTs = data.lastUpdated || data.cloudUpdatedAt || 0;
+      const localTs = local?.lastUpdated || 0;
+      const fromSocket = !!(opts && opts.fromSocket);
+      const liveish = data.status === 'live' || data.status === 'paused';
+      if (local && !fromSocket && !liveish && localTs > cloudTs) return;
+      if (local && !fromSocket && liveish && localTs > cloudTs + 2000) return;
+
+      if (idx >= 0) list[idx] = data;
+      else list.push(data);
+
+      global.DB.saveMatches(list);
+      try {
+        localStorage.setItem('cricpro_force_update', String(Date.now()));
+      } catch (_) {}
+
+      refreshLiveUi();
+      if (!opts?.skipLiveEvent) notifyLiveUpdate(data.id);
+    } finally {
+      _applyingRemoteMatch = false;
+    }
   }
 
   function wireSocketHandlers(sock) {
@@ -39,6 +55,9 @@
 
     const onUpdate = (payload) => {
       const match = payload?.match || payload?.data || payload;
+      if (!match?.id) return;
+      // When live-sync.js is loaded, realtime-manager already calls applyScoreUpdate.
+      if (typeof global.SLCRICK_LIVE?.applyScoreUpdate === 'function') return;
       applyRemoteMatch(match, { fromSocket: true });
     };
 
@@ -89,13 +108,16 @@
 
   async function start() {
     if (global.SLCRICK_REALTIME) {
-      global.SLCRICK_REALTIME.on('scoreUpdate', (data) =>
-        applyRemoteMatch(data, { fromSocket: true })
-      );
       const forceConnect = !global.SLCRICK_DESKTOP;
       await global.SLCRICK_REALTIME.install({ force: forceConnect });
       const sock = global.SLCRICK_REALTIME.socket;
       if (sock) wireSocketHandlers(sock);
+      else {
+        global.SLCRICK_REALTIME.on('scoreUpdate', (data) => {
+          const m = data?.match || data?.data || data;
+          if (m?.id) applyRemoteMatch(m, { fromSocket: true });
+        });
+      }
       joinAllLiveRooms();
       if (!global.SLCRICK_DESKTOP) startWebsitePolling();
       return;
@@ -111,10 +133,7 @@
   global.SLCRICK_WEBSITE_FEED = { start, applyRemoteMatch };
 
   global.addEventListener('slcrick-live-update', (e) => {
-    if (e.detail?.type === 'match' && e.detail.id && global.DB) {
-      const m = global.DB.getMatch(e.detail.id);
-      if (m) applyRemoteMatch(m);
-    }
+    if (e.detail?.type === 'match') refreshLiveUi();
   });
 
   if (document.readyState === 'loading') {
