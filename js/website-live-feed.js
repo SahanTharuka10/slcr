@@ -82,7 +82,7 @@
   function joinAllLiveRooms() {
     if (!global.DB) return;
     const live = global.DB.getMatches().filter(
-      (m) => m?.id && (m.status === 'live' || m.status === 'paused') && m.publishLive !== false
+      (m) => m?.id && global.DB.isActivelyScoredMatch?.(m)
     );
     live.slice(0, 6).forEach((m) => {
       global.SLCRICK_REALTIME?.joinMatch?.(m.id);

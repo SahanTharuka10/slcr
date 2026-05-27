@@ -620,6 +620,38 @@ const DB = {
     getMatch(id) {
         return this.getMatches().find(m => m.id === id);
     },
+    /** At least one ball scored or batter faced a delivery. */
+    matchHadScoringActivity(m) {
+        if (!m) return false;
+        if (m.scoringStartedAt) return true;
+        for (const inn of m.innings || []) {
+            if (!inn) continue;
+            if ((inn.balls || 0) > 0) return true;
+            if (
+                Array.isArray(inn.batsmen) &&
+                inn.batsmen.some((b) => b && ((b.balls || 0) > 0 || (b.runs || 0) > 0))
+            ) {
+                return true;
+            }
+        }
+        return false;
+    },
+    /**
+     * Match is being scored right now (live/paused, published, recent update).
+     * Excludes abandoned live rows (0.0 ov, stale lastUpdated).
+     */
+    isActivelyScoredMatch(m, opts = {}) {
+        if (!m?.id || m.publishLive === false) return false;
+        const status = String(m.status || '').toLowerCase();
+        if (status !== 'live' && status !== 'paused') return false;
+        if (opts.allowDesktop !== false && window.SLCRICK_DESKTOP) return true;
+        const last = m.lastUpdated || m.scoringStartedAt || m.liveStartedAt || 0;
+        const staleMs = opts.staleMs ?? 45 * 60 * 1000;
+        if (last && Date.now() - last > staleMs) return false;
+        if (this.matchHadScoringActivity(m)) return true;
+        const freshMs = opts.freshMs ?? 5 * 60 * 1000;
+        return !!(last && Date.now() - last <= freshMs);
+    },
     saveMatch(match, skipCloud = false, options = {}) {
         match.lastUpdated = Date.now();
         if ((match.status === 'live' || match.status === 'paused') && match.publishLive !== false) {

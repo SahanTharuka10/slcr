@@ -75,48 +75,17 @@ function updateTicker() {
     if (!container || !panel) return;
     if (typeof DB === 'undefined' || !DB?.getMatches) return;
 
-    let matches = DB.getMatches().filter((m) => {
-        const liveish = m.status === 'live' || m.status === 'paused' || m.status === 'ongoing';
-        if (!liveish) return false;
-        if (window.SLCRICK_DESKTOP) return true;
-        return m.publishLive !== false;
-    });
-    let isResultFallback = false;
+    const matches = DB.getMatches()
+        .filter((m) => (DB.isActivelyScoredMatch ? DB.isActivelyScoredMatch(m) : false))
+        .sort(
+            (a, b) =>
+                (b.lastUpdated || b.scoringStartedAt || 0) - (a.lastUpdated || a.scoringStartedAt || 0)
+        );
 
     if (!matches.length) {
-        // Fallback to completed matches so the top panel is never empty
-        matches = DB.getMatches().filter(m => m.status === 'completed').slice(0, 5);
-        isResultFallback = true;
-    }
-
-    if (!matches.length) {
-        // If absolutely no matches exist yet, add dummy test matches for visual demonstration
-        matches = [
-            {
-                id: 'dummy-1',
-                tournamentName: 'EXHIBITION MATCH',
-                team1: 'Lions CC',
-                team2: 'Tigers CC',
-                status: 'live',
-                currentInnings: 0,
-                ballsPerOver: 6,
-                innings: [{ runs: 42, wickets: 2, balls: 26, battingTeam: 'Lions CC', bowlingTeam: 'Tigers CC' }]
-            },
-            {
-                id: 'dummy-2',
-                tournamentName: 'EXHIBITION MATCH',
-                team1: 'Panthers',
-                team2: 'Eagles',
-                status: 'completed',
-                currentInnings: 1,
-                ballsPerOver: 6,
-                innings: [
-                    { runs: 120, wickets: 8, balls: 60, battingTeam: 'Panthers', bowlingTeam: 'Eagles' },
-                    { runs: 121, wickets: 4, balls: 55, battingTeam: 'Eagles', bowlingTeam: 'Panthers' }
-                ]
-            }
-        ];
-        isResultFallback = false;
+        panel.style.display = 'none';
+        container.innerHTML = '';
+        return;
     }
 
     panel.style.display = 'block';
@@ -126,9 +95,7 @@ function updateTicker() {
         if (!inn) return '';
 
         let innText = '';
-        if (m.status === 'completed') {
-            innText = m.result || 'MATCH COMPLETED';
-        } else {
+        {
             if (currentInnings === 0) innText = '1ST INNINGS IN PROGRESS';
             else if (currentInnings === 1) innText = '2ND INNINGS IN PROGRESS';
             else innText = 'INNINGS IN PROGRESS';
@@ -151,21 +118,7 @@ function updateTicker() {
         let aScoreHTML = '<span class="live-yet-to-bat">YET TO BAT</span>';
         let bScoreHTML = '<span class="live-yet-to-bat">YET TO BAT</span>';
 
-        if (m.status === 'completed') {
-            const inn1 = innings[0];
-            const inn2 = innings[1];
-            if (inn1) {
-                if (inn1.battingTeam === teamA) {
-                    aScoreHTML = `${inn1.runs}-${inn1.wickets} <span class="live-team-overs">(${formatOvers(inn1.balls, m.ballsPerOver)} ov)</span>`;
-                    if (inn2) bScoreHTML = `${inn2.runs}-${inn2.wickets} <span class="live-team-overs">(${formatOvers(inn2.balls, m.ballsPerOver)} ov)</span>`;
-                } else {
-                    bScoreHTML = `${inn1.runs}-${inn1.wickets} <span class="live-team-overs">(${formatOvers(inn1.balls, m.ballsPerOver)} ov)</span>`;
-                    if (inn2) aScoreHTML = `${inn2.runs}-${inn2.wickets} <span class="live-team-overs">(${formatOvers(inn2.balls, m.ballsPerOver)} ov)</span>`;
-                }
-            }
-        } else {
-            // If Team 1 is batting now
-            if (inn.battingTeam === teamA) {
+        if (inn.battingTeam === teamA) {
                 aScoreHTML = `${inn.runs}-${inn.wickets} <span class="live-team-overs">(${formatOvers(inn.balls, m.ballsPerOver)} ov)</span>`;
                 if (currentInnings === 1 && innings[0]) {
                     const prevInn = innings[0];
@@ -178,14 +131,11 @@ function updateTicker() {
                     aScoreHTML = `${prevInn.runs}-${prevInn.wickets} <span class="live-team-overs">(${formatOvers(prevInn.balls, m.ballsPerOver)} ov)</span>`;
                 }
             }
-        }
 
-        let tournName = m.tournamentName || 'EXHIBITION';
-        if (m.status === 'completed') tournName += ' - RESULT';
-        else tournName += ' - LIVE';
+        let tournName = (m.tournamentName || 'Live match') + ' - LIVE';
 
         const matchId = m.id || '';
-        const linkURL = matchId.startsWith('dummy-') ? '#' : `pages/score-match.html?matchId=${matchId}`;
+        const linkURL = `pages/score-match.html?matchId=${matchId}`;
 
         return `
         <div class="live-match-card" onclick="if('${linkURL}' !== '#') window.location.href='${linkURL}'">

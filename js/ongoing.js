@@ -143,18 +143,14 @@ function matchHadScoringActivity(m) {
   return false;
 }
 
-/** Live tab: scoring now, or finished within last 24h (with real balls scored). */
+/** Live tab: only matches being scored now (not abandoned live / old results). */
 function isOngoingLiveTabMatch(m) {
   if (!m || m.publishLive === false) return false;
-  const status = String(m.status || '').toLowerCase();
-  if (status === 'live' || status === 'paused') return true;
-  if (status === 'completed') {
-    if (!matchHadScoringActivity(m)) return false;
-    const endAt = m.completedAt || m.lastUpdated || getMatchScoringStartedAt(m);
-    if (!endAt) return false;
-    return Date.now() - endAt <= ONGOING_LIVE_WINDOW_MS;
+  if (typeof DB !== 'undefined' && DB.isActivelyScoredMatch) {
+    return DB.isActivelyScoredMatch(m);
   }
-  return false;
+  const status = String(m.status || '').toLowerCase();
+  return status === 'live' || status === 'paused';
 }
 
 function renderLive() {
@@ -176,7 +172,7 @@ function renderLive() {
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
       <div class="empty-state-icon">🏏</div>
       <div class="empty-state-title">No Active Scoring Sessions</div>
-      <div class="empty-state-sub">Matches appear here while you score, and for 24 hours after the result. Scheduled fixtures are under <b>Tournament → Full Schedule</b>.</div>
+      <div class="empty-state-sub">Only matches you are scoring right now appear here. Finished or stopped games are under <b>Completed</b> or <b>Tournament</b>.</div>
     </div>`;
     return;
   }
