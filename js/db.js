@@ -652,6 +652,22 @@ const DB = {
         const freshMs = opts.freshMs ?? 5 * 60 * 1000;
         return !!(last && Date.now() - last <= freshMs);
     },
+    /**
+     * Website home / ongoing Live tab: only matches with scores updating now
+     * (recent cloud/socket update), not old "live" rows stuck on the server.
+     */
+    isSiteLiveDisplayMatch(m, opts = {}) {
+        if (!m?.id || m.publishLive === false) return false;
+        const status = String(m.status || '').toLowerCase();
+        if (status !== 'live' && status !== 'paused') return false;
+        if (window.SLCRICK_DESKTOP && opts.allowDesktop !== false) {
+            return this.isActivelyScoredMatch(m, opts);
+        }
+        if (!this.matchHadScoringActivity(m)) return false;
+        const last = m.lastUpdated || m.scoringStartedAt || m.liveStartedAt || 0;
+        const freshMs = opts.freshMs ?? 3 * 60 * 1000;
+        return !!(last && Date.now() - last <= freshMs);
+    },
     saveMatch(match, skipCloud = false, options = {}) {
         match.lastUpdated = Date.now();
         if ((match.status === 'live' || match.status === 'paused') && match.publishLive !== false) {

@@ -146,6 +146,9 @@ function matchHadScoringActivity(m) {
 /** Live tab: only matches being scored now (not abandoned live / old results). */
 function isOngoingLiveTabMatch(m) {
   if (!m || m.publishLive === false) return false;
+  if (typeof DB !== 'undefined' && DB.isSiteLiveDisplayMatch && !window.SLCRICK_DESKTOP) {
+    return DB.isSiteLiveDisplayMatch(m);
+  }
   if (typeof DB !== 'undefined' && DB.isActivelyScoredMatch) {
     return DB.isActivelyScoredMatch(m);
   }

@@ -87,9 +87,8 @@
 
   function joinAllLiveRooms() {
     if (!global.DB) return;
-    const live = global.DB.getMatches().filter(
-      (m) => m?.id && global.DB.isActivelyScoredMatch?.(m)
-    );
+    const liveFn = global.DB.isSiteLiveDisplayMatch || global.DB.isActivelyScoredMatch;
+    const live = global.DB.getMatches().filter((m) => m?.id && liveFn?.call(global.DB, m));
     live.slice(0, 6).forEach((m) => {
       global.SLCRICK_REALTIME?.joinMatch?.(m.id);
       if (m.tournamentId) global.SLCRICK_REALTIME?.joinTournament?.(m.tournamentId);
