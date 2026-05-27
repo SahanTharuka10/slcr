@@ -65,7 +65,16 @@
     const backendUrl = stored.backendUrl || DEFAULT_BACKEND;
 
     if (global.SLCRICK_DESKTOP) {
-      const enabled = isNetworkOnline() && !isUserSyncDisabled();
+      let enabled = false;
+      if (localStorage.getItem(SETTINGS_KEY)) {
+        try {
+          const cfg = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+          enabled = cfg.enabled === true && cfg.userDisabled !== true;
+        } catch (_) {}
+      } else if (localStorage.getItem('cricpro_sync_enabled') === 'true') {
+        enabled = true;
+      }
+      enabled = enabled && isNetworkOnline();
       return { ...stored, enabled, backendUrl };
     }
 
@@ -168,18 +177,21 @@
     return match;
   }
 
+  const _livePushSlots = new Map();
+
   function prepareMatchForPersistence(match, options = {}) {
     if (!match || typeof match !== 'object') return match;
     const copy = JSON.parse(JSON.stringify(match));
     delete copy._isSyncing;
     delete copy._isBackgroundSync;
+    delete copy._fastPush;
     if (Array.isArray(copy.history) && copy.history.length > MATCH_HISTORY_LIMIT) {
       copy.history = copy.history.slice(-MATCH_HISTORY_LIMIT);
     }
     if (Array.isArray(copy.redoStack) && copy.redoStack.length > MATCH_HISTORY_LIMIT) {
       copy.redoStack = copy.redoStack.slice(-MATCH_HISTORY_LIMIT);
     }
-    if (options.background) stripHeavyFields(copy);
+    if (options.background || match._fastPush) stripHeavyFields(copy);
     return copy;
   }
 
@@ -393,7 +405,7 @@
       'Content-Type': 'application/json',
       'x-api-key': 'slcrickpro-v1',
     };
-    // Do not send x-slcrick-client — Render CORS rarely whitelists it; desktop publish is allowed via x-api-key + publishLive (server authorizeMatchSync).
+    // Do not send x-slcrick-client — Render CORS rarely whitelists it; desktop publish is allowed via x-api-key + publishLive (see server authorizeMatchSync).
     if (token && token !== 'ok') {
       headers['x-scoring-token'] = token;
       headers.Authorization = 'Bearer ' + token;
@@ -401,16 +413,37 @@
     return headers;
   }
 
-  /** Push one live match to cloud immediately (after each score on desktop). */
-  async function pushLiveMatchNow(match) {
-    if (!match?.id || !isEnabled() || !global.DB) return { ok: false };
-    const copy = JSON.parse(JSON.stringify(match));
+  async function drainLivePushQueue(matchId) {
+    const slot = _livePushSlots.get(matchId);
+    if (!slot || slot.inFlight || !slot.pending) return;
+    slot.inFlight = true;
+    const src = slot.pending;
+    slot.pending = null;
+    const copy = JSON.parse(JSON.stringify(src));
+    delete copy._isSyncing;
     copy.publishLive = copy.publishLive !== false;
     copy.lastUpdated = Date.now();
     copy._isBackgroundSync = true;
     copy._fastPush = true;
-    await syncToDB('match', copy);
-    return { ok: true };
+    try {
+      await syncToDB('match', copy);
+    } catch (_) {}
+    slot.inFlight = false;
+    if (slot.pending) drainLivePushQueue(matchId);
+    else _livePushSlots.delete(matchId);
+  }
+
+  /** Push one live match to cloud immediately (after each score on desktop). */
+  function pushLiveMatchNow(match) {
+    if (!match?.id || !isEnabled() || !global.DB) return Promise.resolve({ ok: false });
+    let slot = _livePushSlots.get(match.id);
+    if (!slot) {
+      slot = { pending: null, inFlight: false };
+      _livePushSlots.set(match.id, slot);
+    }
+    slot.pending = match;
+    if (!slot.inFlight) drainLivePushQueue(match.id);
+    return Promise.resolve({ ok: true, queued: true });
   }
 
   async function wakeUpServer(maxAttempts = 4) {
@@ -598,7 +631,7 @@
         : background
           ? stripHeavyFields(JSON.parse(JSON.stringify(data)))
           : data;
-    if (type === 'match' && syncPayload && isEnabled()) {
+    if (type === 'match' && syncPayload && isEnabled() && !data._fastPush) {
       syncPayload = attachCloudMediaToMatch(syncPayload);
     }
     let endpoint = '';
@@ -620,8 +653,8 @@
     else if (type === 'post') endpoint = '/sync/post';
     else return;
 
-    if (data._isSyncing) return;
-    data._isSyncing = true;
+    if (data._isSyncing && !data._fastPush) return;
+    if (!data._fastPush) data._isSyncing = true;
 
     const tid =
       type === 'match'
@@ -658,7 +691,7 @@
     }
 
     const finish = () => {
-      data._isSyncing = false;
+      if (!data._fastPush) data._isSyncing = false;
     };
 
     try {
@@ -929,18 +962,51 @@
   }
 
   function bootstrapDesktopAutoSync() {
-    if (!global.SLCRICK_DESKTOP || !isNetworkOnline()) return;
+    if (!global.SLCRICK_DESKTOP) return;
+
+    if (!localStorage.getItem('cricpro_desktop_offline_migrated_v2')) {
+      localStorage.setItem('cricpro_desktop_offline_migrated_v2', '1');
+      if (!localStorage.getItem('cricpro_sync_user_opted_in')) {
+        const stored = loadStoredSettings();
+        saveSettings({
+          enabled: false,
+          backendUrl: stored.backendUrl || DEFAULT_BACKEND,
+          userDisabled: true,
+        });
+        global.desktopAPI?.notifySyncSettings?.({ enabled: false });
+        return;
+      }
+    }
+
+    const stored = loadStoredSettings();
+    const hasSettings = !!localStorage.getItem(SETTINGS_KEY);
+    const legacyOn = localStorage.getItem('cricpro_sync_enabled') === 'true';
+
+    if (!hasSettings && !legacyOn) {
+      saveSettings({
+        enabled: false,
+        backendUrl: stored.backendUrl || DEFAULT_BACKEND,
+        userDisabled: true,
+      });
+      global.desktopAPI?.notifySyncSettings?.({ enabled: false });
+      return;
+    }
+
     if (isUserSyncDisabled()) {
       global.desktopAPI?.notifySyncSettings?.({ enabled: false });
       return;
     }
-    const stored = loadStoredSettings();
-    saveSettings({
-      enabled: true,
-      backendUrl: stored.backendUrl || DEFAULT_BACKEND,
-      userDisabled: false,
-    });
-    global.desktopAPI?.notifySyncSettings?.({ enabled: true });
+
+    if (!isNetworkOnline()) return;
+
+    if (hasSettings || legacyOn) {
+      saveSettings({
+        enabled: true,
+        backendUrl: stored.backendUrl || DEFAULT_BACKEND,
+        userDisabled: false,
+      });
+      global.desktopAPI?.notifySyncSettings?.({ enabled: true });
+    }
   }
 
   function wireDesktopAutoSync() {
@@ -948,7 +1014,7 @@
     global._slcrickAutoSyncWired = true;
 
     global.addEventListener('online', () => {
-      if (isUserSyncDisabled()) return;
+      if (isUserSyncDisabled() || !isEnabled()) return;
       install();
       global.SLCRICK_REALTIME?.install?.({ force: true });
       flushQueue().catch(() => {});

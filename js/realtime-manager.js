@@ -35,8 +35,8 @@
   Object.values(Events).forEach((e) => listeners.set(e, new Set()));
 
   const WAKE_COOLDOWN_MS = 45000;
-  const REST_FALLBACK_MS = 10000;
-  const WEBSITE_SAFETY_POLL_MS = 8000;
+  const REST_FALLBACK_MS = 3500;
+  const WEBSITE_SAFETY_POLL_MS = 4000;
   const WAKE_PATH = '/sync/matches';
 
   function on(event, fn) {

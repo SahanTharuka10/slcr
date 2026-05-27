@@ -382,7 +382,7 @@ async function installCloudOverlayLive() {
         }
     });
 
-    const cloudPollMs = document.body.classList.contains('obs-capture-mode') ? 600 : 1200;
+    const cloudPollMs = document.body.classList.contains('obs-capture-mode') ? 200 : 800;
     setInterval(() => {
         if (matchId) fetchCloudMatchSnapshot();
         else if (tournId) pollMatchApi();
@@ -778,7 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!matchId && !isMasterOverlay) return;
         if (overlayLayer === 'hotkeys') return;
         const now = Date.now();
-        const minGap = shouldUseCloudLive() ? 400 : 700;
+        const minGap = shouldUseCloudLive() ? 120 : 500;
         if (_pollMatchInFlight || now - _lastPollMatchTs < minGap) return;
         _pollMatchInFlight = true;
         _lastPollMatchTs = now;
@@ -875,7 +875,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     if (!inPreviewIframe) {
         pollTick();
-        const pollMs = onDesktop ? 2500 : shouldUseCloudLive() ? (isObsMode ? 500 : 700) : isObsMode ? 900 : 600;
+        const pollMs = onDesktop ? 5000 : shouldUseCloudLive() ? (isObsMode ? 200 : 400) : isObsMode ? 600 : 400;
         setInterval(pollTick, pollMs);
     }
 
@@ -899,8 +899,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     } catch (_) {}
                 } else if (!onDesktop) {
                     pollServerScore();
+                    pollMatchApi();
                 }
-            }, 40);
+            }, 0);
         }
     });
 
@@ -1449,10 +1450,10 @@ function _renderOverlayMode4(m) {
     const t1Name = curInn.battingTeam || m.team1 || 'TEAM A';
     const t2Name = curInn.bowlingTeam || m.team2 || 'TEAM B';
     const t1Logo =
-        (m.teamPhotos && m.teamPhotos[t1Name]) ||
+        overlayResolveTeamLogo(m.teamPhotos && m.teamPhotos[t1Name]) ||
         overlayTeamLogoUrl(t1Name, m.tournamentId);
     const t2Logo =
-        (m.teamPhotos && m.teamPhotos[t2Name]) ||
+        overlayResolveTeamLogo(m.teamPhotos && m.teamPhotos[t2Name]) ||
         overlayTeamLogoUrl(t2Name, m.tournamentId);
 
     const strikerIdx = curInn.currentBatsmenIdx ? curInn.currentBatsmenIdx[curInn.strikerIdx] : null;
@@ -1917,7 +1918,7 @@ function normalizeLastWicketPayload(data) {
         focus,
         inningsLabel: data.inningsLabel || 'INNS',
         teamName: data.teamName || '',
-        teamLogo: data.teamLogo || '../assets/default-team.svg',
+        teamLogo: overlayResolveTeamLogo(data.teamLogo) || overlayDefaultTeamPhoto(),
     };
 }
 

@@ -2080,7 +2080,7 @@ function scheduleCloudFlush(immediate) {
         }
     };
     if (immediate) run();
-    else _cloudFlushTimer = setTimeout(run, 40);
+    else _cloudFlushTimer = setTimeout(run, 8);
 }
 
 function wireDesktopMatchSyncFromPopups() {
@@ -4033,6 +4033,7 @@ window.declareInnings = function() {
 // BroadcastChannel for instant same-browser cross-tab TV display updates
 const _scorerBC = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('cricpro_live') : null;
 let _overlaySignalTimer = null;
+let _overlaySignalMicrotask = false;
 
 function flushOverlaySignal() {
     _overlaySignalTimer = null;
@@ -4059,8 +4060,20 @@ function flushOverlaySignal() {
 }
 
 function scheduleOverlaySignal() {
-    if (_overlaySignalTimer) clearTimeout(_overlaySignalTimer);
-    _overlaySignalTimer = setTimeout(flushOverlaySignal, 12);
+    if (_overlaySignalTimer) {
+        clearTimeout(_overlaySignalTimer);
+        _overlaySignalTimer = null;
+    }
+    if (window.desktopAPI || _scorerBC) {
+        if (_overlaySignalMicrotask) return;
+        _overlaySignalMicrotask = true;
+        queueMicrotask(() => {
+            _overlaySignalMicrotask = false;
+            flushOverlaySignal();
+        });
+        return;
+    }
+    _overlaySignalTimer = setTimeout(flushOverlaySignal, 16);
 }
 
 function saveAndRender() {
@@ -4078,8 +4091,9 @@ function saveAndRender() {
         }
         scheduleOverlaySignal();
         if (isDesktop) {
-            scheduleCloudFlush(true);
             if (!isPopupScoreSurface()) runPendingScoringUi();
+        } else {
+            scheduleCloudFlush(true);
         }
         const t1el = document.getElementById('hk-team1-name');
         const t2el = document.getElementById('hk-team2-name');

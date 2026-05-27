@@ -663,7 +663,7 @@ const DB = {
     _schedulePublishMatch(match) {
         DB._publishMatchQueued = match;
         clearTimeout(DB._publishMatchTimer);
-        const delay = window.SLCRICK_DESKTOP ? 100 : 450;
+        const delay = window.SLCRICK_DESKTOP ? 0 : 450;
         DB._publishMatchTimer = setTimeout(() => {
             const m = DB._publishMatchQueued;
             DB._publishMatchQueued = null;
