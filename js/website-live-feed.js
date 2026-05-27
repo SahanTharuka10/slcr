@@ -6,9 +6,15 @@
   let _applyingRemoteMatch = false;
 
   function refreshLiveUi() {
+    if (typeof global.updateTicker === 'function') global.updateTicker();
     if (typeof global.renderOngoing === 'function') global.renderOngoing();
     if (typeof global.renderLive === 'function') global.renderLive();
-    if (typeof global.updateTicker === 'function') global.updateTicker();
+    if (typeof global.refreshTournamentStandingsUI === 'function') {
+      global.refreshTournamentStandingsUI();
+    }
+    if (typeof global.refreshTournamentFixturesUI === 'function') {
+      global.refreshTournamentFixturesUI();
+    }
   }
 
   function notifyLiveUpdate(matchId) {
@@ -103,7 +109,7 @@
       }
     };
     tick();
-    setInterval(tick, 8000);
+    setInterval(tick, 4000);
   }
 
   async function start() {
@@ -130,7 +136,7 @@
     }
   }
 
-  global.SLCRICK_WEBSITE_FEED = { start, applyRemoteMatch };
+  global.SLCRICK_WEBSITE_FEED = { start, applyRemoteMatch, refreshLiveUi };
 
   global.addEventListener('slcrick-live-update', (e) => {
     if (e.detail?.type === 'match') refreshLiveUi();

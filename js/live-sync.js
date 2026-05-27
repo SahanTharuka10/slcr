@@ -16,23 +16,43 @@
     return PUBLIC_SITE;
   }
 
+  function normalizeLivePayload(data) {
+    if (!data) return null;
+    if (data.id && (data.innings || data.team1 || data.status)) return data;
+    return data.match || data.fullMatch || data.data || null;
+  }
+
   function applyScoreUpdate(data) {
-    if (!data?.id || !global.DB) return;
+    const match = normalizeLivePayload(data);
+    if (!match?.id || !global.DB) return;
     const list = global.DB.getMatches();
-    const idx = list.findIndex((m) => m.id === data.id);
+    const idx = list.findIndex((m) => m.id === match.id);
     const local = idx >= 0 ? list[idx] : null;
-    const cloudTs = data.lastUpdated || 0;
+    const cloudTs = match.lastUpdated || match.cloudUpdatedAt || 0;
     const localTs = local?.lastUpdated || 0;
-    if (local && localTs > cloudTs) return;
-    if (idx >= 0) list[idx] = data;
-    else list.push(data);
+    const liveish = match.status === 'live' || match.status === 'paused';
+    if (local && !liveish && localTs > cloudTs) return;
+    if (local && liveish && localTs > cloudTs + 1500) return;
+    if (idx >= 0) list[idx] = match;
+    else list.push(match);
     global._desktopApplyingRemoteMatch = true;
     try {
       global.DB.saveMatches(list);
+      try {
+        global.localStorage.setItem('cricpro_force_update', String(Date.now()));
+      } catch (_) {}
     } finally {
       global._desktopApplyingRemoteMatch = false;
     }
-    global.dispatchEvent?.(new CustomEvent('slcrick-live-update', { detail: { type: 'match', id: data.id } }));
+    if (typeof global.SLCRICK_WEBSITE_FEED?.refreshLiveUi === 'function') {
+      global.SLCRICK_WEBSITE_FEED.refreshLiveUi();
+    } else {
+      if (typeof global.updateTicker === 'function') global.updateTicker();
+      if (typeof global.renderOngoing === 'function') global.renderOngoing();
+    }
+    global.dispatchEvent?.(
+      new CustomEvent('slcrick-live-update', { detail: { type: 'match', id: match.id } })
+    );
     global.SLCRICK_BROADCAST?.emitStatus?.();
     global.SLCRICK_BROADCAST_STATION?.refresh?.();
   }

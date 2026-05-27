@@ -293,8 +293,11 @@ async function handleTournamentStatUpload(event, tournamentId) {
             pushToCloud,
         });
         const m = result.match;
+        if (pushToCloud && global.SLCRICK_SYNC?.syncCloudData) {
+            await global.SLCRICK_SYNC.syncCloudData({ silent: true, forceRefresh: true });
+        }
         showToast(
-            `✅ ${m.team1} vs ${m.team2} imported${pushToCloud ? ' & sent to site' : ' locally'}`,
+            `✅ ${m.team1} vs ${m.team2} — standings & stats updated${pushToCloud ? ' on site' : ''}`,
             'success'
         );
         renderTournamentsAdmin();

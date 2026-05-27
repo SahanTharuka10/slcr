@@ -103,7 +103,8 @@
     const { expectedTournamentId = null, pushToCloud = false } = options;
     const match = JSON.parse(JSON.stringify(bundle.match));
     match.status = 'completed';
-    match.publishLive = false;
+    // Show on site standings, fixtures, NRR, and leaderboards (not a hidden draft).
+    match.publishLive = match.type === 'tournament' ? true : match.publishLive !== false;
 
     if (expectedTournamentId && match.tournamentId && match.tournamentId !== expectedTournamentId) {
       throw new Error(
@@ -137,7 +138,7 @@
     if (pushToCloud && typeof global.syncToDB === 'function' && !global.SLCRICK_DESKTOP) {
       const mPayload = {
         ...match,
-        publishLive: false,
+        publishLive: match.publishLive !== false,
         _manualStatUpload: true,
         _isBackgroundSync: true,
       };
@@ -150,6 +151,15 @@
     try {
       global.localStorage.setItem('cricpro_force_update', String(Date.now()));
     } catch (_) {}
+
+    if (typeof global.refreshTournamentStandingsUI === 'function') {
+      global.refreshTournamentStandingsUI();
+    }
+    if (typeof global.refreshTournamentFixturesUI === 'function') {
+      global.refreshTournamentFixturesUI();
+    }
+    if (typeof global.renderOngoing === 'function') global.renderOngoing();
+    if (typeof global.updateTicker === 'function') global.updateTicker();
 
     return { match, tournament: t };
   }

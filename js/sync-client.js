@@ -584,6 +584,20 @@
     if (typeof global.SLCRICK_BROADCAST_STATION?.refresh === 'function') {
       global.SLCRICK_BROADCAST_STATION.refresh();
     }
+    if (typeof global.SLCRICK_WEBSITE_FEED?.refreshLiveUi === 'function') {
+      global.SLCRICK_WEBSITE_FEED.refreshLiveUi();
+    } else {
+      if (typeof global.updateTicker === 'function') global.updateTicker();
+      if (typeof global.renderOngoing === 'function') global.renderOngoing();
+      if (typeof global.refreshTournamentStandingsUI === 'function') {
+        global.refreshTournamentStandingsUI();
+      }
+    }
+    try {
+      global.dispatchEvent?.(
+        new CustomEvent('slcrick-live-update', { detail: { type: 'sync' } })
+      );
+    } catch (_) {}
   }
 
   async function syncCloudData(options = {}) {

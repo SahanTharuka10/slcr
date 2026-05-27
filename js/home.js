@@ -13,9 +13,21 @@ function runHomeAutoSync() {
     }
 }
 
+function hasActiveLiveOnSite() {
+    if (typeof DB === 'undefined' || !DB?.getMatches) return false;
+    return DB.getMatches().some((m) =>
+        DB.isActivelyScoredMatch ? DB.isActivelyScoredMatch(m) : m.status === 'live' || m.status === 'paused'
+    );
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     runHomeAutoSync();
-    setInterval(runHomeAutoSync, 30000);
+    const syncTick = () => {
+        runHomeAutoSync();
+        const ms = hasActiveLiveOnSite() ? 3500 : 20000;
+        setTimeout(syncTick, ms);
+    };
+    setTimeout(syncTick, 3500);
     window.addEventListener('storage', (e) => {
         if (e.key === 'cricpro_force_update') updateTicker();
     });
@@ -24,7 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateClock();
     setInterval(updateClock, 1000);
     updateTicker();
-    setInterval(updateTicker, 15000);
+    setInterval(() => {
+        if (hasActiveLiveOnSite()) updateTicker();
+    }, 4000);
 });
 
 function initParticles() {

@@ -746,6 +746,13 @@ function leaderCard(rank, name, team, statVal, statLbl, sub, tournId, tournName)
     </div>`;
 }
 
+function refreshTournamentFixturesUI() {
+    if (currentTab !== 'tournament' || !selectedTournId) return;
+    if (selectedTournSubTab === 'fixtures' || selectedTournSubTab === 'matches') {
+        renderFullSchedule(selectedTournId);
+    }
+}
+
 function refreshTournamentStandingsUI() {
     if (currentTab !== 'tournament' || !selectedTournId) return;
     const t = DB.getTournament(selectedTournId);
@@ -1185,21 +1192,25 @@ window.refreshAll = refreshAll;
 window.computeTournamentStandings = computeTournamentStandings;
 window.getTournamentMatches = getTournamentMatches;
 window.refreshTournamentStandingsUI = refreshTournamentStandingsUI;
+window.refreshTournamentFixturesUI = refreshTournamentFixturesUI;
 
 // Handle cross-tab updates (e.g. from score-match.html)
 window.addEventListener('storage', (e) => {
     if (e.key === 'cricpro_force_update') {
         renderOngoing();
         refreshTournamentStandingsUI();
+        refreshTournamentFixturesUI();
     }
 });
 
 window.addEventListener('slcrick-live-update', () => {
     refreshTournamentStandingsUI();
+    refreshTournamentFixturesUI();
 });
 
 setInterval(() => {
     if (currentTab === 'tournament' && selectedTournId) {
         refreshTournamentStandingsUI();
+        refreshTournamentFixturesUI();
     }
-}, 6000);
+}, 4000);
