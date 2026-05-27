@@ -222,7 +222,7 @@
         <!-- Tournaments Tab -->
         <div id="tab-tournaments" class="admin-panel" style="display:none">
             <h3 class="section-hd" style="margin-bottom:8px">Manage Tournaments</h3>
-            <p style="color:var(--c-muted);margin-bottom:24px">End or remove tournaments from the website.</p>
+            <p style="color:var(--c-muted);margin-bottom:16px">End or remove tournaments. Upload a <strong>.slcrick-stat.json</strong> file exported from the desktop app (completed match → 📥 SITE) to publish results on the website without live auto-sync.</p>
             <div id="tournaments-list"></div>
         </div>
 
@@ -583,6 +583,8 @@
     <div class="toast" id="toast"></div>
 
     <script src="../js/db.js"></script>
+    <script src="../js/tournament-standings.js"></script>
+    <script src="../js/match-stat-bundle.js"></script>
     <script src="../js/socket-loader.js"></script>
     <script src="../js/sync-client.js"></script>
     <script src="../js/admin.js"></script>

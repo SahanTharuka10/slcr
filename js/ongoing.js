@@ -260,11 +260,15 @@ function buildMatchCard(m, isLive) {
                 📄 PDF
             </button>
         </div>` : (m.status === 'completed' ? `
-        <div class="match-card-actions" style="margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px; display:flex; justify-content:space-between; gap:8px">
-            <button class="btn btn-sm" style="flex:1; font-weight:800; background:rgba(255,255,255,0.05); color:#fff; border:1px solid rgba(255,255,255,0.1); height:44px; border-radius:12px" onclick="event.stopPropagation(); generateMatchPDF('${m.id}')">
+        <div class="match-card-actions" style="margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap">
+            <button class="btn btn-sm" style="flex:1; min-width:72px; font-weight:800; background:rgba(255,255,255,0.05); color:#fff; border:1px solid rgba(255,255,255,0.1); height:44px; border-radius:12px" onclick="event.stopPropagation(); generateMatchPDF('${m.id}')">
                 📄 PDF
             </button>
-            <button class="btn btn-primary btn-sm" style="flex:1.5; font-weight:900; height:44px; border-radius:12px" onclick="event.stopPropagation(); openMatchDetail('${m.id}')">
+            ${m.type === 'tournament' && m.tournamentId ? `
+            <button class="btn btn-sm" style="flex:1; min-width:72px; font-weight:800; background:rgba(0,230,118,0.12); color:#00e676; border:1px solid rgba(0,230,118,0.35); height:44px; border-radius:12px" title="Download stat file for website upload" onclick="event.stopPropagation(); downloadMatchStatBundle('${m.id}')">
+                📥 SITE
+            </button>` : ''}
+            <button class="btn btn-primary btn-sm" style="flex:1.5; min-width:88px; font-weight:900; height:44px; border-radius:12px" onclick="event.stopPropagation(); openMatchDetail('${m.id}')">
                 📊 STATS
             </button>
         </div>` : '')}

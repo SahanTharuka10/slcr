@@ -253,12 +253,60 @@ function renderTournamentsAdmin() {
     container.innerHTML = tourns
         .map(
             (t) => `
-        <div class="admin-card" style="margin-bottom:10px">
-            <strong>${t.name}</strong> · ${t.matches?.length || 0} matches
-            <button class="btn btn-red btn-sm" style="float:right" onclick="deleteAdminTournament('${t.id}')">Delete</button>
+        <div class="admin-card" style="margin-bottom:12px">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap">
+                <div>
+                    <strong>${escapeHTML(t.name)}</strong>
+                    <div style="font-size:12px; opacity:0.65; margin-top:4px">${t.matches?.length || 0} matches · ${t.status || 'active'}</div>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap">
+                    <input type="file" id="stat-upload-${t.id}" accept=".json,.slcrick-stat.json,application/json" style="display:none" onchange="handleTournamentStatUpload(event, '${t.id}')">
+                    <button class="btn btn-green btn-sm" type="button" onclick="document.getElementById('stat-upload-${t.id}').click()">📤 Upload stat report</button>
+                    <button class="btn btn-red btn-sm" type="button" onclick="deleteAdminTournament('${t.id}')">Delete</button>
+                </div>
+            </div>
+            <p style="font-size:11px; opacity:0.55; margin:10px 0 0">Desktop: completed match → 📥 SITE. Upload the .slcrick-stat.json here to update standings on the website.</p>
         </div>`
         )
         .join('');
+}
+
+async function handleTournamentStatUpload(event, tournamentId) {
+    const input = event?.target;
+    const file = input?.files?.[0];
+    if (!file) return;
+    if (typeof MatchStatBundle === 'undefined') {
+        showToast('Stat bundle module not loaded — refresh the page', 'error');
+        return;
+    }
+
+    const btn = input.closest('.admin-card')?.querySelector('.btn-green');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Uploading…';
+    }
+
+    try {
+        const pushToCloud = typeof syncToDB === 'function' && !window.SLCRICK_DESKTOP;
+        const result = await MatchStatBundle.importFromFile(file, {
+            expectedTournamentId: tournamentId,
+            pushToCloud,
+        });
+        const m = result.match;
+        showToast(
+            `✅ ${m.team1} vs ${m.team2} imported${pushToCloud ? ' & sent to site' : ' locally'}`,
+            'success'
+        );
+        renderTournamentsAdmin();
+    } catch (e) {
+        showToast(e.message || 'Upload failed', 'error');
+    } finally {
+        if (input) input.value = '';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '📤 Upload stat report';
+        }
+    }
 }
 
 function deleteAdminTournament(id) {
@@ -352,7 +400,18 @@ function deletePlayerAdmin(playerId) {
 }
 
 function reSyncAllStats() {
-    showToast('Stats are local-only — recalculated from saved matches', 'default');
+    const tourns = DB.getTournaments();
+    let n = 0;
+    tourns.forEach((t) => {
+        if (typeof computeTournamentStandings === 'function') {
+            computeTournamentStandings(t);
+            n++;
+        }
+    });
+    showToast(
+        n ? `Recalculated standings for ${n} tournament(s) from saved matches` : 'No tournaments to recalculate',
+        'default'
+    );
 }
 
 function renderStoreItems() {
