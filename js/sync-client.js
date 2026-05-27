@@ -16,7 +16,56 @@
   let _wakePromise = null;
   let _isSyncingCloud = false;
   let _lastSyncTime = 0;
+  let _lastSyncFailAt = 0;
   const SYNC_DEBOUNCE_MS = 2000;
+  const SYNC_FAIL_BACKOFF_MS = 12000;
+  const _tokenPushFailUntil = new Map();
+  const _tokenPushWarned = new Set();
+
+  function formatSyncError(err) {
+    if (!err) return 'unknown';
+    if (err instanceof DOMException) {
+      return err.name + (err.message ? ': ' + err.message : '');
+    }
+    return err.message || String(err);
+  }
+
+  /** Safe timeout — AbortSignal.timeout is missing in some OBS/browser builds. */
+  function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      try {
+        return fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+      } catch (_) {}
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: ac.signal }).finally(() => clearTimeout(timer));
+  }
+
+  async function fetchCloud(url, options = {}, retries = 2) {
+    const timeoutMs = options.timeoutMs || 22000;
+    const { timeoutMs: _t, ...fetchOpts } = options;
+    let lastErr = null;
+    for (let i = 0; i <= retries; i++) {
+      if (i > 0) {
+        _serverAwake = false;
+        await wakeUpServer(2);
+        await new Promise((r) => setTimeout(r, 1000 * i));
+      }
+      try {
+        const r = await fetchWithTimeout(url, fetchOpts, timeoutMs);
+        if (r.ok || r.status === 401 || r.status === 403) {
+          _serverAwake = true;
+          return r;
+        }
+        lastErr = new Error('HTTP ' + r.status);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    _serverAwake = false;
+    throw lastErr || new Error('fetch failed');
+  }
 
   function isLocalHost() {
     const h = global.location?.hostname || '';
@@ -242,22 +291,35 @@
   async function pushTournamentForScoringToken(tournamentId, password) {
     const url = getBackendUrl();
     if (!url || !tournamentId || !password) return null;
+    if (!isNetworkOnline()) return null;
+    if ((_tokenPushFailUntil.get(tournamentId) || 0) > Date.now()) return null;
     const t = global.DB?.getTournament?.(tournamentId);
     if (!t) return null;
     try {
+      await wakeUpServer(2);
       const payload = stripHeavyFields(JSON.parse(JSON.stringify({ ...t, scoringPassword: password })));
-      const r = await fetch(`${url}/sync/tournament`, {
-        method: 'POST',
-        headers: buildAuthHeaders(null),
-        body: JSON.stringify(payload),
-      });
+      const r = await fetchCloud(
+        `${url}/sync/tournament`,
+        {
+          method: 'POST',
+          headers: buildAuthHeaders(null),
+          body: JSON.stringify(payload),
+        },
+        1
+      );
       const d = await r.json().catch(() => ({}));
       if (d?.token) {
+        _tokenPushFailUntil.delete(tournamentId);
+        _tokenPushWarned.delete(tournamentId);
         storeScoringToken(tournamentId, d.token, d.expiresInMs);
         return d.token;
       }
     } catch (e) {
-      console.warn('[Sync] tournament push for token failed', e.message || e);
+      _tokenPushFailUntil.set(tournamentId, Date.now() + 90000);
+      if (!_tokenPushWarned.has(tournamentId)) {
+        _tokenPushWarned.add(tournamentId);
+        console.warn('[Sync] tournament push for token failed', formatSyncError(e));
+      }
     }
     return null;
   }
@@ -272,11 +334,16 @@
     if (fromSync) return fromSync;
 
     try {
-      const r = await fetch(`${url}/api/handshake`, {
-        method: 'POST',
-        headers: buildAuthHeaders(null),
-        body: JSON.stringify({ id: tournamentId, type: 'tournament', password: pw }),
-      });
+      await wakeUpServer(1);
+      const r = await fetchCloud(
+        `${url}/api/handshake`,
+        {
+          method: 'POST',
+          headers: buildAuthHeaders(null),
+          body: JSON.stringify({ id: tournamentId, type: 'tournament', password: pw }),
+        },
+        1
+      );
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.ok && d.token) {
         _handshakeFailedPw.delete(tournamentId);
@@ -300,7 +367,10 @@
         }
       }
     } catch (e) {
-      console.warn('[Sync] handshake failed', e.message || e);
+      if (!_tokenPushWarned.has('hs:' + tournamentId)) {
+        _tokenPushWarned.add('hs:' + tournamentId);
+        console.warn('[Sync] handshake failed', formatSyncError(e));
+      }
     }
     return null;
   }
@@ -368,7 +438,9 @@
   }
 
   async function authenticateAllTournaments() {
-    if (!global.DB || !isEnabled()) return;
+    if (!global.DB || !isEnabled() || !isNetworkOnline()) return;
+    const awake = await wakeUpServer(2);
+    if (!awake) return;
     const activeTournIds = new Set();
     global.DB.getMatches().forEach((m) => {
       if (
@@ -462,12 +534,11 @@
     if (_wakePromise) return _wakePromise;
     _wakePromise = (async () => {
       try {
-        const r = await fetch(`${url}/sync/matches`, {
-          method: 'GET',
-          cache: 'no-store',
-          mode: 'cors',
-          signal: AbortSignal.timeout(12000),
-        });
+        const r = await fetchWithTimeout(
+          `${url}/sync/matches`,
+          { method: 'GET', cache: 'no-store', mode: 'cors' },
+          12000
+        );
         if (r.ok || r.status === 401 || r.status === 403) {
           _serverAwake = true;
           return true;
@@ -521,35 +592,47 @@
       global._isGlobalSyncCompleted = true;
       return { ok: true, offline: true };
     }
+    if (!isNetworkOnline()) {
+      return { ok: false, error: 'offline' };
+    }
     if (_isSyncingCloud) return;
     const now = Date.now();
-    if (options.silent && now - _lastSyncTime < SYNC_DEBOUNCE_MS) return;
+    const debounceMs =
+      _lastSyncFailAt && now - _lastSyncFailAt < SYNC_FAIL_BACKOFF_MS
+        ? SYNC_FAIL_BACKOFF_MS
+        : SYNC_DEBOUNCE_MS;
+    if (options.silent && now - _lastSyncTime < debounceMs) return;
     _lastSyncTime = now;
-
-    if (!_serverAwake && !options.forceRefresh && !global.SLCRICK_REALTIME?.socket?.connected) {
-      wakeUpServer(1).catch(() => {});
-    }
 
     _isSyncingCloud = true;
     try {
+      await wakeUpServer(options.forceRefresh ? 3 : 2);
+
+      const fetchOpts = { method: 'GET', cache: 'no-store', mode: 'cors' };
       const [mReq, tReq] = await Promise.all([
-        fetch(`${backendUrl}/sync/matches`, { signal: AbortSignal.timeout(30000) }).catch(() => ({ ok: false })),
-        fetch(`${backendUrl}/sync/tournaments`, { signal: AbortSignal.timeout(30000) }).catch(() => ({ ok: false })),
+        fetchCloud(`${backendUrl}/sync/matches`, fetchOpts, 1).catch(() => null),
+        fetchCloud(`${backendUrl}/sync/tournaments`, fetchOpts, 1).catch(() => null),
       ]);
 
-      if (!mReq.ok && !tReq.ok) {
+      if ((!mReq || !mReq.ok) && (!tReq || !tReq.ok)) {
+        _lastSyncFailAt = Date.now();
+        _serverAwake = false;
         const cfg = loadSettings();
-        if (mReq.status === 401 || mReq.status === 403) {
+        const st = mReq?.status || tReq?.status || 0;
+        if (st === 401 || st === 403) {
           cfg.lastSyncError =
             'Cloud sync needs tournament scoring password — open match in Score Match and unlock';
         } else {
-          cfg.lastSyncError = 'Server unreachable';
+          cfg.lastSyncError = 'Server waking up — retry in a few seconds';
         }
         saveSettings(cfg);
-        return { ok: false, error: 'fetch_failed', status: mReq.status || 0 };
+        if (!options.silent) {
+          console.warn('[Sync] pull failed — cloud API unreachable (Render may be cold)');
+        }
+        return { ok: false, error: 'fetch_failed', status: st };
       }
 
-      if (mReq.status === 401 || mReq.status === 403) {
+      if (mReq?.status === 401 || mReq?.status === 403) {
         const cfg = loadSettings();
         cfg.lastSyncError =
           'Cloud sync unauthorized — re-enter tournament password in Score Match';
@@ -558,7 +641,7 @@
         return { ok: false, error: 'auth_failed', status: mReq.status };
       }
 
-      if (mReq.ok) {
+      if (mReq?.ok) {
         const matchData = await mReq.json();
         const remoteMatches = Array.isArray(matchData)
           ? matchData
@@ -571,7 +654,7 @@
         saveSettings(cfg);
       }
 
-      if (tReq.ok && global.DB) {
+      if (tReq?.ok && global.DB) {
         const tournData = await tReq.json();
         const remoteTourns = Array.isArray(tournData)
           ? tournData
@@ -607,14 +690,20 @@
       cfg.lastSyncAt = Date.now();
       cfg.lastSyncError = null;
       saveSettings(cfg);
+      _lastSyncFailAt = 0;
       global._isGlobalSyncCompleted = true;
       return { ok: true };
     } catch (e) {
-      console.error('[Sync] pull failed', e);
+      _lastSyncFailAt = Date.now();
+      _serverAwake = false;
+      const msg = formatSyncError(e);
+      if (!options.silent) {
+        console.warn('[Sync] pull failed', msg);
+      }
       const cfg = loadSettings();
-      cfg.lastSyncError = e.message || 'sync_error';
+      cfg.lastSyncError = msg.includes('Abort') ? 'Sync timed out — server may be waking' : msg;
       saveSettings(cfg);
-      return { ok: false, error: e.message };
+      return { ok: false, error: msg };
     } finally {
       _isSyncingCloud = false;
     }
@@ -695,11 +784,15 @@
     };
 
     try {
-      let r = await fetch(backendUrl + endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(syncPayload),
-      });
+      let r = await fetchCloud(
+        backendUrl + endpoint,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(syncPayload),
+        },
+        type === 'match' && data._fastPush ? 1 : 2
+      );
 
       if (type === 'tournament' && tid) {
         try {
@@ -716,11 +809,15 @@
           await primeTournamentForMatch(tid);
           const retryToken = await ensureScoringToken(tid);
           headers = buildAuthHeaders(retryToken);
-          r = await fetch(backendUrl + endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(syncPayload),
-          });
+          r = await fetchCloud(
+            backendUrl + endpoint,
+            {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(syncPayload),
+            },
+            1
+          );
           if (r.ok) {
             finish();
             return;
