@@ -6,6 +6,11 @@
   const DEFAULT_BACKEND = 'https://slcrickpro.onrender.com';
   const SETTINGS_KEY = 'cricpro_sync_settings';
   const MATCH_HISTORY_LIMIT = 80;
+  const _handshake401Logged = new Set();
+  /** tournamentId -> password that already got 401 (do not retry until password changes) */
+  const _handshakeFailedPw = new Map();
+  /** matchId or tournamentId — avoid console spam when cloud token missing */
+  const _matchSyncBlockedLogged = new Set();
 
   let _serverAwake = false;
   let _wakePromise = null;
@@ -18,7 +23,16 @@
     return h === 'localhost' || h === '127.0.0.1';
   }
 
-  function loadSettings() {
+  function isNetworkOnline() {
+    try {
+      return global.navigator?.onLine !== false;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /** Raw settings from storage (no auto-enable logic). */
+  function loadStoredSettings() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) return JSON.parse(raw);
@@ -27,20 +41,50 @@
     const legacyOn = localStorage.getItem('cricpro_sync_enabled') === 'true';
     const cfgUrl = (global.CRICPRO_CLOUD_CONFIG?.backendUrl || '').trim();
     const existing = (global.BACKEND_BASE_URL || '').trim();
-    let enabled = legacyOn;
-    let backendUrl = legacyUrl || cfgUrl || existing || DEFAULT_BACKEND;
-    if (!global.SLCRICK_DESKTOP && !isLocalHost() && !legacyOn && !localStorage.getItem(SETTINGS_KEY)) {
+    return {
+      enabled: legacyOn,
+      backendUrl: legacyUrl || cfgUrl || existing || DEFAULT_BACKEND,
+    };
+  }
+
+  function isUserSyncDisabled() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const cfg = JSON.parse(raw);
+        if (cfg.userDisabled === true) return true;
+        if (cfg.userDisabled === false) return false;
+        if (cfg.enabled === false) return true;
+      }
+    } catch (_) {}
+    return localStorage.getItem('cricpro_sync_enabled') === 'false' && !!localStorage.getItem(SETTINGS_KEY);
+  }
+
+  function loadSettings() {
+    const stored = loadStoredSettings();
+    const backendUrl = stored.backendUrl || DEFAULT_BACKEND;
+
+    if (global.SLCRICK_DESKTOP) {
+      const enabled = isNetworkOnline() && !isUserSyncDisabled();
+      return { ...stored, enabled, backendUrl };
+    }
+
+    let enabled = !!stored.enabled;
+    if (!isLocalHost() && !localStorage.getItem(SETTINGS_KEY) && !stored.enabled) {
       enabled = true;
     }
-    return { enabled, backendUrl };
+    return { ...stored, enabled, backendUrl };
   }
 
   function saveSettings(cfg) {
+    const userDisabled =
+      cfg.userDisabled !== undefined ? !!cfg.userDisabled : cfg.enabled === false;
     const next = {
-      enabled: !!cfg.enabled,
+      enabled: global.SLCRICK_DESKTOP ? !userDisabled : !!cfg.enabled,
       backendUrl: (cfg.backendUrl || DEFAULT_BACKEND).trim().replace(/\/$/, ''),
       lastSyncAt: cfg.lastSyncAt || null,
       lastSyncError: cfg.lastSyncError || null,
+      userDisabled: global.SLCRICK_DESKTOP ? userDisabled : undefined,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
     localStorage.setItem('cricpro_sync_enabled', next.enabled ? 'true' : 'false');
@@ -151,6 +195,7 @@
 
   function storeScoringToken(tournamentId, token, expiresInMs) {
     if (!token) return;
+    if (tournamentId) _handshakeFailedPw.delete(tournamentId);
     const exp = Date.now() + (expiresInMs || 2 * 60 * 60 * 1000);
     localStorage.setItem('cricpro_token', token);
     localStorage.setItem('cricpro_token_expiry', String(exp));
@@ -163,38 +208,112 @@
     }
   }
 
-  async function requestTournamentScoringToken(tournamentId, password) {
+  /** Real scoring password for cloud API — never sends desktop-only "offline". */
+  function getCloudScoringPassword(tournamentId) {
+    if (!tournamentId) return '';
+    const stored = localStorage.getItem(`tourn_pw_${tournamentId}`);
+    if (stored && String(stored).trim() && stored !== 'offline') return String(stored).trim();
+    const t = global.DB?.getTournament?.(tournamentId);
+    const pw = t?.scoringPassword || t?.password || '';
+    const trimmed = String(pw || '').trim();
+    if (trimmed && trimmed !== 'offline') return trimmed;
+    return '';
+  }
+
+  function tournamentPassword(tournamentId) {
+    const cloud = getCloudScoringPassword(tournamentId);
+    if (cloud) return cloud;
+    if (global.SLCRICK_DESKTOP) return 'offline';
+    return '';
+  }
+
+  async function pushTournamentForScoringToken(tournamentId, password) {
     const url = getBackendUrl();
     if (!url || !tournamentId || !password) return null;
+    const t = global.DB?.getTournament?.(tournamentId);
+    if (!t) return null;
     try {
-      const r = await fetch(`${url}/api/handshake`, {
+      const payload = stripHeavyFields(JSON.parse(JSON.stringify({ ...t, scoringPassword: password })));
+      const r = await fetch(`${url}/sync/tournament`, {
         method: 'POST',
         headers: buildAuthHeaders(null),
-        body: JSON.stringify({ id: tournamentId, type: 'tournament', password }),
+        body: JSON.stringify(payload),
       });
       const d = await r.json().catch(() => ({}));
-      if (r.ok && d.ok && d.token) {
+      if (d?.token) {
         storeScoringToken(tournamentId, d.token, d.expiresInMs);
         return d.token;
       }
-      if (r.status === 401) {
-        console.warn('[Sync] handshake 401 — cloud tournament password may differ from this PC');
-      }
     } catch (e) {
-      console.warn('[Sync] handshake failed', e);
+      console.warn('[Sync] tournament push for token failed', e.message || e);
     }
     return null;
   }
 
-  function tournamentPassword(tournamentId) {
-    if (!tournamentId) return '';
-    const stored = localStorage.getItem(`tourn_pw_${tournamentId}`);
-    if (stored) return stored;
-    const t = global.DB?.getTournament?.(tournamentId);
-    const pw = t?.scoringPassword || t?.password || '';
-    if (pw) return pw;
-    if (global.SLCRICK_DESKTOP) return 'offline';
-    return '';
+  async function requestTournamentScoringToken(tournamentId, password) {
+    const url = getBackendUrl();
+    const pw = String(password || '').trim();
+    if (!url || !tournamentId || !pw || pw === 'offline') return null;
+    if (_handshakeFailedPw.get(tournamentId) === pw) return null;
+
+    const fromSync = await pushTournamentForScoringToken(tournamentId, pw);
+    if (fromSync) return fromSync;
+
+    try {
+      const r = await fetch(`${url}/api/handshake`, {
+        method: 'POST',
+        headers: buildAuthHeaders(null),
+        body: JSON.stringify({ id: tournamentId, type: 'tournament', password: pw }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok && d.token) {
+        _handshakeFailedPw.delete(tournamentId);
+        storeScoringToken(tournamentId, d.token, d.expiresInMs);
+        return d.token;
+      }
+      if (r.status === 401) {
+        _handshakeFailedPw.set(tournamentId, pw);
+        if (!_handshake401Logged.has(tournamentId)) {
+          _handshake401Logged.add(tournamentId);
+          const tName = global.DB?.getTournament?.(tournamentId)?.name || tournamentId;
+          console.warn(
+            `[Sync] Tournament "${tName}" — cloud password mismatch. Open Score Match → enter the scoring password you used when creating this tournament (not "offline").`
+          );
+          if (typeof global.showToast === 'function') {
+            global.showToast(
+              `Cloud sync needs the real password for "${tName}". Open Score Match and unlock with your tournament password.`,
+              'error'
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Sync] handshake failed', e.message || e);
+    }
+    return null;
+  }
+
+  function logMatchSyncBlockedOnce(tournamentId, matchId, reason) {
+    const key = `${tournamentId}:${matchId || ''}:${reason || 'token'}`;
+    if (_matchSyncBlockedLogged.has(key)) return;
+    _matchSyncBlockedLogged.add(key);
+    const tName = global.DB?.getTournament?.(tournamentId)?.name || tournamentId;
+    const msg =
+      reason === 'no_cloud_password'
+        ? `[Sync] "${tName}" — enter your real tournament scoring password in Score Match (not offline) so live scores can sync.`
+        : `[Sync] "${tName}" — cloud password mismatch. Re-unlock in Score Match with the password from tournament setup.`;
+    console.warn(msg);
+    if (typeof global.showToast === 'function') {
+      global.showToast(msg.replace('[Sync] ', ''), 'error');
+    }
+  }
+
+  function tournamentPayloadForCloud(t) {
+    if (!t) return null;
+    const payload = { ...t };
+    const pw = getCloudScoringPassword(t.id);
+    if (pw) payload.scoringPassword = pw;
+    return payload;
   }
 
   async function ensureScoringToken(tournamentId) {
@@ -206,24 +325,56 @@
     }
     const fromMap = getStoredTournamentScoringToken(tournamentId);
     if (fromMap) return fromMap;
-    const pw = tournamentPassword(tournamentId);
+
+    const pw = getCloudScoringPassword(tournamentId);
     if (pw) {
       const tok = await requestTournamentScoringToken(tournamentId, pw);
       if (tok) return tok;
     }
+
+    if (isEnabled()) {
+      const openTok = await requestTournamentScoringToken(tournamentId, 'slcrick-sync');
+      if (openTok) return openTok;
+    }
+
     const exp = Number(localStorage.getItem('cricpro_token_expiry') || 0);
     const legacy = localStorage.getItem('cricpro_token');
     if (legacy && legacy !== 'ok' && exp > Date.now()) return legacy;
     return null;
   }
 
+  /** Production requires x-scoring-token for tournament matches; prime cloud row then fetch token. */
+  async function resolveMatchSyncToken(tournamentId) {
+    if (!tournamentId) return null;
+    await primeTournamentForMatch(tournamentId);
+    let token = await ensureScoringToken(tournamentId);
+    if (!token) {
+      const pw = getCloudScoringPassword(tournamentId);
+      if (pw) token = await requestTournamentScoringToken(tournamentId, pw);
+    }
+    return token || null;
+  }
+
   async function authenticateAllTournaments() {
     if (!global.DB || !isEnabled()) return;
+    const activeTournIds = new Set();
+    global.DB.getMatches().forEach((m) => {
+      if (
+        m?.tournamentId &&
+        (m.status === 'live' || m.status === 'paused' || m.status === 'completed')
+      ) {
+        activeTournIds.add(m.tournamentId);
+      }
+    });
+
     const tourns = global.DB.getTournaments().filter((t) => t && t.id);
     for (const t of tourns) {
-      const pw = tournamentPassword(t.id);
-      if (pw) await requestTournamentScoringToken(t.id, pw);
-      await new Promise((r) => setTimeout(r, 120));
+      if (!activeTournIds.has(t.id) && !t.isLocked && !t.scoringPassword && !t.password) {
+        continue;
+      }
+      const pw = getCloudScoringPassword(t.id) || 'slcrick-sync';
+      await requestTournamentScoringToken(t.id, pw);
+      await new Promise((r) => setTimeout(r, 80));
     }
   }
 
@@ -232,7 +383,8 @@
     if (!tournamentId || !global.DB) return;
     const t = global.DB.getTournament(tournamentId);
     if (!t) return;
-    await syncToDB('tournament', { ...t, _isBackgroundSync: true, _primeOnly: true });
+    const payload = tournamentPayloadForCloud(t) || t;
+    await syncToDB('tournament', { ...payload, _isBackgroundSync: true, _primeOnly: true });
     await ensureScoringToken(tournamentId);
   }
 
@@ -241,11 +393,24 @@
       'Content-Type': 'application/json',
       'x-api-key': 'slcrickpro-v1',
     };
+    // Do not send x-slcrick-client — Render CORS rarely whitelists it; desktop publish is allowed via x-api-key + publishLive (server authorizeMatchSync).
     if (token && token !== 'ok') {
       headers['x-scoring-token'] = token;
       headers.Authorization = 'Bearer ' + token;
     }
     return headers;
+  }
+
+  /** Push one live match to cloud immediately (after each score on desktop). */
+  async function pushLiveMatchNow(match) {
+    if (!match?.id || !isEnabled() || !global.DB) return { ok: false };
+    const copy = JSON.parse(JSON.stringify(match));
+    copy.publishLive = copy.publishLive !== false;
+    copy.lastUpdated = Date.now();
+    copy._isBackgroundSync = true;
+    copy._fastPush = true;
+    await syncToDB('match', copy);
+    return { ok: true };
   }
 
   async function wakeUpServer(maxAttempts = 4) {
@@ -288,8 +453,9 @@
     const matchMap = new Map(localMatches.filter((m) => m && m.id).map((m) => [m.id, m]));
     let anyUpdated = false;
 
+    const keepFn = global.DB?.shouldStoreRemoteMatchLocally || ((m) => m && m.id && !m.deleted);
     remoteMatches
-      .filter((m) => m && m.id && !m.deleted)
+      .filter((m) => keepFn(m))
       .forEach((remoteMatch) => {
         const localMatch = matchMap.get(remoteMatch.id);
         const remoteTs = remoteMatch.lastUpdated || remoteMatch.cloudUpdatedAt || 0;
@@ -340,9 +506,23 @@
 
       if (!mReq.ok && !tReq.ok) {
         const cfg = loadSettings();
-        cfg.lastSyncError = 'Server unreachable';
+        if (mReq.status === 401 || mReq.status === 403) {
+          cfg.lastSyncError =
+            'Cloud sync needs tournament scoring password — open match in Score Match and unlock';
+        } else {
+          cfg.lastSyncError = 'Server unreachable';
+        }
         saveSettings(cfg);
-        return { ok: false, error: 'fetch_failed' };
+        return { ok: false, error: 'fetch_failed', status: mReq.status || 0 };
+      }
+
+      if (mReq.status === 401 || mReq.status === 403) {
+        const cfg = loadSettings();
+        cfg.lastSyncError =
+          'Cloud sync unauthorized — re-enter tournament password in Score Match';
+        saveSettings(cfg);
+        global._isGlobalSyncCompleted = true;
+        return { ok: false, error: 'auth_failed', status: mReq.status };
       }
 
       if (mReq.ok) {
@@ -353,6 +533,9 @@
             ? matchData.matches
             : [];
         applyRemoteMatches(remoteMatches, options);
+        const cfg = loadSettings();
+        cfg.lastSyncError = null;
+        saveSettings(cfg);
       }
 
       if (tReq.ok && global.DB) {
@@ -447,19 +630,31 @@
           ? syncPayload?.id
           : null;
 
+    let token = null;
     if (type === 'match' && tid && !data._primeOnly) {
-      await primeTournamentForMatch(tid);
-    }
-
-    if (type === 'tournament' && tid) {
+      token = await resolveMatchSyncToken(tid);
+      if (!token) {
+        const reason = getCloudScoringPassword(tid) ? 'handshake_failed' : 'no_cloud_password';
+        if (!global.SLCRICK_DESKTOP) {
+          logMatchSyncBlockedOnce(tid, syncPayload?.id, reason);
+          data._isSyncing = false;
+          return;
+        }
+        logMatchSyncBlockedOnce(tid, syncPayload?.id, reason);
+      }
+    } else if (type === 'tournament' && tid) {
       await ensureScoringToken(null);
+      token = await ensureScoringToken(tid);
+    } else {
+      token = await ensureScoringToken(tid || null);
+      if (!token && tid) token = await ensureScoringToken(tid);
     }
-    let token = await ensureScoringToken(tid || null);
-    if (!token && tid) token = await ensureScoringToken(tid);
 
     let headers = buildAuthHeaders(token);
     if (type === 'match' && syncPayload) {
-      if (syncPayload.publishLive === undefined) syncPayload.publishLive = true;
+      const liveish = syncPayload.status === 'live' || syncPayload.status === 'paused';
+      if (global.SLCRICK_DESKTOP && liveish) syncPayload.publishLive = true;
+      else if (syncPayload.publishLive === undefined) syncPayload.publishLive = true;
     }
 
     const finish = () => {
@@ -498,7 +693,7 @@
             return;
           }
         }
-        const pw = tournamentPassword(tid);
+        const pw = getCloudScoringPassword(tid);
         if (pw && !data._authRetried) {
           const newToken = await requestTournamentScoringToken(tid, pw);
           if (newToken) {
@@ -613,6 +808,11 @@
         ? global.DB?.getMatch?.(id)?.tournamentId
         : id;
       grantLocalAccess(id, pwd, tid || null);
+      if (isEnabled() && tid && pwd !== 'offline') {
+        requestTournamentScoringToken(tid, pwd).catch(() => {});
+      } else if (isEnabled() && tid) {
+        requestTournamentScoringToken(tid, 'slcrick-sync').catch(() => {});
+      }
       return { ok: true, offline: true, source: local.source };
     }
 
@@ -625,7 +825,7 @@
     try {
       const r = await fetch(`${url}/api/handshake`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildAuthHeaders(null),
         body: JSON.stringify({ id, type, password: pwd }),
       });
       let d = {};
@@ -649,7 +849,11 @@
         grantLocalAccess(id, pwd, type === 'tournament' ? id : global.DB?.getMatch?.(id)?.tournamentId);
         return { ok: true, token: d.token, expiresInMs: d.expiresInMs };
       }
-      return { ok: false, error: d?.error || local.error || 'Access denied' };
+      return {
+        ok: false,
+        error: d?.error || local.error || 'Access denied',
+        httpStatus: r.status,
+      };
     } catch (e) {
       if (local.error === 'Wrong password') {
         return { ok: false, error: 'Connection failed — check internet or use the password from when you created this tournament' };
@@ -659,6 +863,8 @@
   }
 
   function install() {
+    bootstrapDesktopAutoSync();
+
     const url = getBackendUrl();
     if (url) {
       global.BACKEND_BASE_URL = url;
@@ -668,6 +874,12 @@
     if (global.DB) {
       global.DB.getCloudURL = () => getBackendUrl() || global.BACKEND_BASE_URL || '';
       global.DB.handshake = handshake;
+      if (!localStorage.getItem('cricpro_storage_migrated_v2')) {
+        try {
+          global.DB.saveMatches(global.DB.getMatches());
+          localStorage.setItem('cricpro_storage_migrated_v2', '1');
+        } catch (_) {}
+      }
     }
 
     if (isEnabled()) {
@@ -675,23 +887,17 @@
       global.syncCloudData = syncCloudData;
       global.pullGlobalData = pullGlobalData;
       global.wakeUpServer = wakeUpServer;
-      global.SLCRICK_REALTIME?.install?.({ force: false });
+      global.SLCRICK_REALTIME?.install?.({ force: !!global.SLCRICK_DESKTOP });
       if (!global._slcrickSyncBooted) {
         global._slcrickSyncBooted = true;
         wakeUpServer().then(async (ok) => {
           if (ok) {
+            await syncCloudData({ silent: true });
             await authenticateAllTournaments();
-            syncCloudData({ silent: true });
           }
         });
       }
-      if (!global._slcrickSyncInterval) {
-        global._slcrickSyncInterval = setInterval(() => {
-          if (!isEnabled()) return;
-          if (global.SLCRICK_REALTIME?.socket?.connected) return;
-          syncCloudData({ silent: true });
-        }, 90000);
-      }
+      startBackgroundSyncLoops();
     } else {
       global._isGlobalSyncCompleted = true;
       if (global.SLCRICK_DESKTOP) {
@@ -701,7 +907,57 @@
       global.SLCRICK_REALTIME?.disconnect?.();
       global.SLCRICK_LIVE?.disconnect?.();
     }
+    if (global.SLCRICK_DESKTOP && global.desktopAPI?.notifySyncSettings) {
+      global.desktopAPI.notifySyncSettings({ enabled: isEnabled() });
+    }
     global.SLCRICK_BROADCAST?.emitStatus?.();
+  }
+
+  function startBackgroundSyncLoops() {
+    if (!global._slcrickSyncInterval) {
+      global._slcrickSyncInterval = setInterval(() => {
+        if (!isEnabled()) return;
+        syncCloudData({ silent: true });
+      }, 45000);
+    }
+    if (global.SLCRICK_DESKTOP && !global._slcrickFlushInterval) {
+      global._slcrickFlushInterval = setInterval(() => {
+        if (!isEnabled()) return;
+        flushQueue().catch(() => {});
+      }, 5000);
+    }
+  }
+
+  function bootstrapDesktopAutoSync() {
+    if (!global.SLCRICK_DESKTOP || !isNetworkOnline()) return;
+    if (isUserSyncDisabled()) {
+      global.desktopAPI?.notifySyncSettings?.({ enabled: false });
+      return;
+    }
+    const stored = loadStoredSettings();
+    saveSettings({
+      enabled: true,
+      backendUrl: stored.backendUrl || DEFAULT_BACKEND,
+      userDisabled: false,
+    });
+    global.desktopAPI?.notifySyncSettings?.({ enabled: true });
+  }
+
+  function wireDesktopAutoSync() {
+    if (!global.SLCRICK_DESKTOP || global._slcrickAutoSyncWired) return;
+    global._slcrickAutoSyncWired = true;
+
+    global.addEventListener('online', () => {
+      if (isUserSyncDisabled()) return;
+      install();
+      global.SLCRICK_REALTIME?.install?.({ force: true });
+      flushQueue().catch(() => {});
+    });
+
+    global.addEventListener('offline', () => {
+      install();
+      global.SLCRICK_REALTIME?.disconnect?.();
+    });
   }
 
   let _flushRunning = false;
@@ -730,7 +986,8 @@
       if (tid) {
         const t = global.DB.getTournament(tid);
         if (t) {
-          await syncToDB('tournament', { ...t, _isBackgroundSync: true });
+          const tPayload = tournamentPayloadForCloud(t) || t;
+          await syncToDB('tournament', { ...tPayload, _isBackgroundSync: true });
           await new Promise((r) => setTimeout(r, 350));
         }
       }
@@ -744,11 +1001,22 @@
     }
   }
 
+  async function prefetchCloudToken(tournamentId, password) {
+    if (!tournamentId || !isEnabled()) return null;
+    const pw = String(password || '').trim();
+    if (pw && pw !== 'offline') return requestTournamentScoringToken(tournamentId, pw);
+    return requestTournamentScoringToken(tournamentId, 'slcrick-sync');
+  }
+
   global.SLCRICK_SYNC = {
     DEFAULT_BACKEND,
     loadSettings,
+    prefetchCloudToken,
+    loadStoredSettings,
     saveSettings,
     isEnabled,
+    isUserSyncDisabled,
+    isNetworkOnline,
     getBackendUrl,
     install,
     syncToDB,
@@ -758,6 +1026,7 @@
     verifyLocalPassword,
     wakeUpServer,
     flushQueue,
+    pushLiveMatchNow,
     ensureScoringToken,
     authenticateAllTournaments,
     storeScoringToken,
@@ -765,6 +1034,7 @@
 
   if (global.DB && !global._slcrickSyncClientBooted) {
     global._slcrickSyncClientBooted = true;
+    wireDesktopAutoSync();
     install();
   }
 })(typeof window !== 'undefined' ? window : global);

@@ -25,7 +25,7 @@ const io = socketIo(server, {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-api-key', 'x-scoring-token', 'session-token', 'Session-Token']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-api-key', 'x-scoring-token', 'session-token', 'Session-Token', 'x-slcrick-client']
   }
 });
 
@@ -34,7 +34,7 @@ const corsOptions = {
   origin: true, // Reflect ANY origin — simplest and most reliable cross-domain fix
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-api-key', 'x-scoring-token', 'session-token', 'Session-Token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-api-key', 'x-scoring-token', 'session-token', 'Session-Token', 'x-slcrick-client']
 };
 app.use(cors(corsOptions));
 
@@ -53,7 +53,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-api-key, x-scoring-token, session-token, Session-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-api-key, x-scoring-token, session-token, Session-Token, x-slcrick-client');
   
   // Content Security Policy: Relaxed enough for the app's needs but providing basic protection
   res.setHeader('Content-Security-Policy', "default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.socket.io https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https: ws: wss:;");
@@ -367,6 +367,7 @@ function compactSyncPayload(data) {
   return copy;
 }
 
+/** @param {string} tournamentId - Must be the real tournament id for x-scoring-token auth (never a match id). */
 function generateScoringToken(tournamentId) {
   const payload = { tournamentId, iat: Date.now(), exp: Date.now() + SCORING_TOKEN_TTL_MS };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64');
@@ -407,13 +408,45 @@ function parseMatchRowData(row) {
   return m;
 }
 
-/** Desktop publish + API key, or valid tournament scoring token */
+function tournamentIdFromMatchPayload(m) {
+  if (!m || typeof m !== 'object') return null;
+  const v = m.tournamentId ?? m.tournament_id ?? m.tournId;
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s || null;
+}
+
+function isBcryptScoringHash(s) {
+  return typeof s === 'string' && /^\$2[aby]\$\d{2}\$/.test(s);
+}
+
+/** Plain text or bcrypt (some legacy rows stored plain). */
+async function scoringPasswordMatches(plain, stored) {
+  const p = String(plain ?? '');
+  const st = stored !== undefined && stored !== null ? String(stored) : '';
+  if (!st) return true;
+  if (isBcryptScoringHash(st)) {
+    try {
+      return await bcrypt.compare(p, st);
+    } catch (_) {
+      return false;
+    }
+  }
+  return p === st;
+}
+
+/** Trusted desktop API key (live publish), or valid tournament scoring token */
 function authorizeMatchSync(req, data, existingMatch, tour) {
+  const desktopPublish =
+    req.headers['x-slcrick-client'] === 'desktop' &&
+    isValidSyncApiKey(req) &&
+    data.publishLive !== false;
+  if (desktopPublish) return true;
+  if (isValidSyncApiKey(req) && data.publishLive !== false) return true;
+
   const token = req.headers['x-scoring-token'];
   const payload = decodeScoringToken(token);
   const tid = data.tournamentId || parseMatchRowData(existingMatch)?.tournamentId;
-
-  if (isValidSyncApiKey(req) && data.publishLive !== false) return true;
 
   if (existingMatch && existingMatch.scoring_password) {
     const allowedTournamentId = parseMatchRowData(existingMatch)?.tournamentId || data.tournamentId;
@@ -1128,30 +1161,74 @@ app.post('/api/handshake', async (req, res) => {
 
   try {
     await ensureDB();
-    const Model = type === 'tournament' ? Tournament : Match;
-    const record = await Model.findByPk(id);
 
+    if (type === 'tournament') {
+      const record = await Tournament.findByPk(id);
+      if (!record) {
+        return res.status(404).json({ ok: false, error: 'Record not found' });
+      }
+      const tokenSubject = id;
+
+      if (!record.scoring_password) {
+        const token = generateScoringToken(tokenSubject);
+        return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
+      }
+
+      if (DEV_PASSWORD_BACKDOOR && password === DEV_BACKDOOR_PASSWORD) {
+        const token = generateScoringToken(tokenSubject);
+        return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
+      }
+
+      const ok = await scoringPasswordMatches(password, record.scoring_password);
+      if (!ok) {
+        return res.status(401).json({ ok: false, error: 'Invalid password' });
+      }
+
+      const token = generateScoringToken(tokenSubject);
+      return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
+    }
+
+    /** Match handshake: verify against match row hash and/or parent tournament hash (scores share one password). */
+    const record = await Match.findByPk(id);
     if (!record) {
       return res.status(404).json({ ok: false, error: 'Record not found' });
     }
 
-    if (!record.scoring_password) {
-      const token = generateScoringToken(id);
+    const mdata = parseMatchRowData(record);
+    const tournamentIdFromMatch = tournamentIdFromMatchPayload(mdata);
+    const tokenSubject = tournamentIdFromMatch || id;
+
+    let tourRow = null;
+    if (tournamentIdFromMatch) {
+      tourRow = await Tournament.findByPk(tournamentIdFromMatch);
+    }
+
+    const matchHash = record.scoring_password || null;
+    const tourHash = tourRow?.scoring_password || null;
+
+    if (!matchHash && !tourHash) {
+      const token = generateScoringToken(tokenSubject);
       return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
     }
 
-    // Development backdoor
     if (DEV_PASSWORD_BACKDOOR && password === DEV_BACKDOOR_PASSWORD) {
-      const token = generateScoringToken(id);
+      const token = generateScoringToken(tokenSubject);
       return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
     }
 
-    const match = await bcrypt.compare(password, record.scoring_password);
-    if (!match) {
+    let ok = false;
+    if (matchHash) {
+      ok = await scoringPasswordMatches(password, matchHash);
+    }
+    if (!ok && tourHash) {
+      ok = await scoringPasswordMatches(password, tourHash);
+    }
+
+    if (!ok) {
       return res.status(401).json({ ok: false, error: 'Invalid password' });
     }
 
-    const token = generateScoringToken(id);
+    const token = generateScoringToken(tokenSubject);
     return res.json({ ok: true, token, expiresInMs: SCORING_TOKEN_TTL_MS });
   } catch (e) {
     console.error('/api/handshake error', e);

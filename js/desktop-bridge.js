@@ -22,7 +22,19 @@
     }
     const on = window.SLCRICK_SYNC && window.SLCRICK_SYNC.isEnabled();
     const rt = window.SLCRICK_REALTIME?.getStatus?.();
-    if (!on) {
+    const userOff = window.SLCRICK_SYNC?.isUserSyncDisabled?.();
+    const netOff = window.SLCRICK_SYNC?.isNetworkOnline?.() === false;
+    if (userOff) {
+      badge.textContent = '● Site sync paused';
+      badge.style.background = 'rgba(148,163,184,0.15)';
+      badge.style.color = '#94a3b8';
+      badge.style.border = '1px solid rgba(148,163,184,0.35)';
+    } else if (netOff) {
+      badge.textContent = '● Offline · local only';
+      badge.style.background = 'rgba(34,197,94,0.15)';
+      badge.style.color = '#22c55e';
+      badge.style.border = '1px solid rgba(34,197,94,0.35)';
+    } else if (!on) {
       badge.textContent = '● Offline Desktop';
       badge.style.background = 'rgba(34,197,94,0.15)';
       badge.style.color = '#22c55e';
@@ -95,6 +107,8 @@
     updateSyncBadge();
     setInterval(updateSyncBadge, 5000);
     window.addEventListener('slcrick-realtime-state', updateSyncBadge);
+    window.addEventListener('online', updateSyncBadge);
+    window.addEventListener('offline', updateSyncBadge);
 
     if (window.desktopAPI?.getBaseUrl) {
       try {
@@ -112,6 +126,23 @@
   };
 
   window.copyObsBrowserUrl = window.copyObsLink || async function (matchId, tournamentId) {
+    if (window.desktopAPI?.getObsBrowserUrls) {
+      const urls = await window.desktopAPI.getObsBrowserUrls({
+        matchId,
+        tournamentId,
+        layer: 'combined',
+      });
+      const url = urls.lan || urls.local || urls.website;
+      try {
+        await navigator.clipboard.writeText(url);
+        if (typeof showToast === 'function') {
+          showToast(urls.lan ? 'LAN OBS URL copied' : 'OBS URL copied', 'success');
+        }
+      } catch (_) {
+        if (typeof showToast === 'function') showToast(url, 'default');
+      }
+      return url;
+    }
     if (window.getObsOverlayUrl) {
       const url = await window.getObsOverlayUrl(matchId, tournamentId);
       try {

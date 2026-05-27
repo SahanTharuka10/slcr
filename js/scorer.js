@@ -250,10 +250,10 @@ function syncLivePlayerPhotoSlots(m) {
     setTeamLbl('btn-team1-label', m.team1 || 'TEAM A');
     setTeamLbl('btn-team2-label', m.team2 || 'TEAM 2');
     const vsEl = document.getElementById('bm-vs-indicator');
-    if (vsEl) vsEl.textContent = `${m.team1 || 'A'} vs ${m.team2 || 'B'}`;
+    if (vsEl) vsEl.textContent = 'Overlay linked';
     const scoreEl = document.getElementById('bm-score-indicator');
     if (scoreEl) {
-        scoreEl.textContent = `${inn.runs || 0}/${inn.wickets || 0} (${formatOvers(inn.balls || 0, m.ballsPerOver || 6)})`;
+        scoreEl.textContent = `${inn.runs || 0}/${inn.wickets || 0}`;
     }
     const crr = inn.balls ? ((inn.runs / inn.balls) * 6).toFixed(2) : '0.00';
     const crrEl = document.getElementById('bm-crr-val');
@@ -283,6 +283,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const mId = urlParams.get('matchId');
     const tId = urlParams.get('tournamentId');
+
+    if (urlParams.get('obsPopup') === '1') {
+        document.documentElement.classList.add('obs-popup-mode');
+        wireDesktopMatchSyncFromPopups();
+    }
+
+    if (urlParams.get('popupScore') === '1') {
+        document.documentElement.classList.add('popup-score-mode');
+        document.title = 'Popup Score — SLCRICKPRO';
+        if (localStorage.getItem('theme') !== 'dark') {
+            document.body.classList.add('light-mode');
+        }
+        wireDesktopMatchSyncFromPopups();
+    }
+
+    if (window.SLCRICK_DESKTOP) {
+        if (localStorage.getItem('cricpro_auto_popup_scorecard') !== 'true') {
+            localStorage.setItem('cricpro_auto_popup_scorecard', 'false');
+        }
+        if (localStorage.getItem('cricpro_auto_popup_obs') !== 'true') {
+            localStorage.setItem('cricpro_auto_popup_obs', 'false');
+        }
+        wireDesktopMatchSyncFromPopups();
+    }
 
     // ISOLATE BROADCAST CONTROLLER IMMEDIATELY
     if (urlParams.get('hotkey') === 'true' && (mId || tId)) {
@@ -368,7 +392,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (m) {
-            // BYPASS ALL PASSWORD CHECKS
             if (m.status === 'scheduled') {
                 startOfficialMatch(mId);
             } else if (m.status === 'live' || m.status === 'paused') {
@@ -475,6 +498,7 @@ function matchNeedsPassword(m, t) {
     if (m.tournamentId && t) return tournamentHasPassword(t);
     return false;
 }
+window.matchNeedsPassword = matchNeedsPassword;
 
 function repairTournamentPasswordCache(t) {
     if (!t?.id || !window.DB) return t;
@@ -544,7 +568,7 @@ async function ensureTournamentAccess(tournamentId, pending) {
         t = DB.getTournament(tournamentId);
     }
     if (!t || !tournamentHasPassword(t)) return true;
-    if (isTournamentHubSessionActive(tournamentId)) return true;
+    if (isTournamentHubSessionActive(tournamentId) || isTournamentAuthorized(tournamentId)) return true;
     showTournamentLoginScreen(t, pending || { type: 'hub' });
     return false;
 }
@@ -907,21 +931,32 @@ function authorizeTournamentLocally(tournamentId) {
     return false;
 }
 
-function openScorerDashboard(matchId) {
-    // existing scorer path
-    currentMatch = DB.getMatch(matchId);
-    if (!currentMatch) { 
-        startOfficialMatch(matchId); 
-        return; 
+async function openScorerDashboard(matchId) {
+    let m = DB.getMatch(matchId);
+    if (!m) {
+        startOfficialMatch(matchId);
+        return;
     }
-    
-    currentMatch.status = 'live'; // Ensured lowercase
-    DB.saveMatch(currentMatch);
-    loadMatch(currentMatch);
+    const tid = m.tournamentId || '';
+    if (tid && typeof window.ensureTournamentAccess === 'function') {
+        const allowed = await window.ensureTournamentAccess(tid, {
+            type: 'match',
+            matchId,
+            tournamentId: tid
+        });
+        if (!allowed) return;
+    } else if (matchNeedsPassword(m, tid ? DB.getTournament(tid) : null)) {
+        showMatchLoginScreen(m, { type: 'match', matchId });
+        return;
+    }
+    m.status = 'live';
+    DB.saveMatch(m);
+    loadMatch(m);
 }
 
 function resumeMatch(id) {
-    onResumeOrStart(id, false);
+    const m = DB.getMatch(id);
+    onResumeOrStart(id, m?.tournamentId || '', false);
 }
 
 let currentTournamentTab = 'matches';
@@ -1299,18 +1334,27 @@ async function loginToMatch() {
             const local = window.SLCRICK_SYNC.verifyLocalPassword(id, pw);
             if (local.ok) {
                 await grantAccess({});
+                if (tournamentId && window.SLCRICK_SYNC?.prefetchCloudToken) {
+                    window.SLCRICK_SYNC.prefetchCloudToken(tournamentId, pw).catch(() => {});
+                }
                 return;
             }
         }
         const stored = localStorage.getItem(`tourn_pw_${id}`);
         if (stored && String(stored).trim() === pw) {
             await grantAccess({});
+            if (tournamentId && window.SLCRICK_SYNC?.prefetchCloudToken) {
+                window.SLCRICK_SYNC.prefetchCloudToken(tournamentId, pw).catch(() => {});
+            }
             return;
         }
         const tObj = id.startsWith('MATCH') ? DB.getMatch(id) : DB.getTournament(id);
         const tPw = tObj?.scoringPassword || tObj?.password;
         if (tPw && String(tPw).trim() === pw) {
             await grantAccess({});
+            if (tournamentId && window.SLCRICK_SYNC?.prefetchCloudToken) {
+                window.SLCRICK_SYNC.prefetchCloudToken(tournamentId, pw).catch(() => {});
+            }
             return;
         }
         if (window.SLCRICK_DESKTOP && !tPw && (tObj?.isLocked || tournamentHasPassword(tObj)) && pw === 'offline') {
@@ -1319,24 +1363,38 @@ async function loginToMatch() {
         }
     }
 
+    let lastHandshakeErr = '';
     for (const id of tryIds) {
         if (typeof DB.handshake !== 'function') continue;
         try {
             const res = await DB.handshake(id, pw);
             if (res?.ok) {
                 await grantAccess({ token: res.token, expiresInMs: res.expiresInMs });
+                if (tournamentId && window.SLCRICK_SYNC?.prefetchCloudToken && pw !== 'offline') {
+                    window.SLCRICK_SYNC.prefetchCloudToken(tournamentId, pw).catch(() => {});
+                }
                 return;
             }
+            if (res?.error) lastHandshakeErr = String(res.error);
         } catch (e) {
             console.warn('[Login] handshake error', id, e);
         }
     }
 
-    const hint =
-        window.SLCRICK_DESKTOP && !document.getElementById('tourn-scoring-password')?.value
-            ? ' Desktop tournaments often use password: offline'
-            : '';
-    showToast('❌ Wrong password.' + hint, 'error');
+    if (window.SLCRICK_DESKTOP && tournamentId) {
+        const tRec = DB.getTournament(tournamentId);
+        if (tRec && tournamentHasPassword(tRec) && pw === 'offline') {
+            await grantAccess({});
+            showToast('Scoring unlocked (offline). Use your real password for live website sync.', 'default');
+            return;
+        }
+    }
+
+    const hint = window.SLCRICK_DESKTOP
+        ? ' On desktop try the password from tournament setup, or offline if you never set one.'
+        : ' Use the same scoring password as when you created the tournament.';
+    const cloudBit = lastHandshakeErr ? ` Cloud: ${lastHandshakeErr}.` : '';
+    showToast('Wrong password.' + cloudBit + hint, 'error');
     const pwEl = document.getElementById('login-password');
     if (pwEl) {
         pwEl.value = '';
@@ -1787,6 +1845,15 @@ function loadMatch(m) {
     const pt = document.getElementById('publish-toggle');
     if (pt) pt.checked = m.publishLive;
     updateHeaderActions();
+    primeCloudSyncForLiveMatch(m);
+
+    if (
+        window.SLCRICK_DESKTOP &&
+        (localStorage.getItem('cricpro_auto_popup_scorecard') === 'true' ||
+            localStorage.getItem('cricpro_auto_popup_obs') === 'true')
+    ) {
+        maybeAutoOpenDesktopPopups();
+    }
 
     // WebSocket Room Join — use the global single socket instance
     const _activeSocket = window._cricproSocket || (typeof socket !== 'undefined' ? socket : null);
@@ -1803,12 +1870,274 @@ function loadMatch(m) {
 }
 
 
+function openPopupScorecardWindow() {
+    if (!currentMatch?.id) {
+        showToast('Start or resume a match first', 'error');
+        return;
+    }
+    if (window.desktopAPI?.openPopupScorecard) {
+        window.desktopAPI.openPopupScorecard({ matchId: currentMatch.id });
+        showToast('🎛 Popup scorecard opened', 'success');
+    } else {
+        showToast('Popup scorecard — desktop app only', 'error');
+    }
+}
+window.openPopupScorecardWindow = openPopupScorecardWindow;
+
+function openObsPopupWindow() {
+    if (!currentMatch?.id) {
+        showToast('Start or resume a match first', 'error');
+        return;
+    }
+    if (window.desktopAPI?.openObsPopup) {
+        window.desktopAPI.openObsPopup({
+            matchId: currentMatch.id,
+            tournamentId: currentMatch.tournamentId || null,
+        });
+        showToast('📡 OBS / Hotkeys popup opened', 'success');
+    } else {
+        showToast('Pop-up OBS — desktop app only', 'error');
+    }
+}
+window.openObsPopupWindow = openObsPopupWindow;
+
+/** Optional: only if user enabled auto-open in Settings (default OFF). */
+function maybeAutoOpenDesktopPopups() {
+    if (!window.SLCRICK_DESKTOP || !currentMatch?.id) return;
+    if (currentMatch.status !== 'live' && currentMatch.status !== 'paused') return;
+    const mid = currentMatch.id;
+    if (localStorage.getItem('cricpro_auto_popup_scorecard') === 'true') {
+        if (window._slcrickPopupAutoOpened !== mid) {
+            window._slcrickPopupAutoOpened = mid;
+            window.desktopAPI?.openPopupScorecard?.({ matchId: mid }).catch(() => {});
+        }
+    }
+    if (localStorage.getItem('cricpro_auto_popup_obs') === 'true') {
+        if (window._slcrickObsPopupAutoOpened !== mid) {
+            window._slcrickObsPopupAutoOpened = mid;
+            setTimeout(() => {
+                window.desktopAPI?.openObsPopup?.({
+                    matchId: mid,
+                    tournamentId: currentMatch.tournamentId || null,
+                }).catch(() => {});
+            }, 600);
+        }
+    }
+}
+
+function isPopupScoreSurface() {
+    return document.documentElement.classList.contains('popup-score-mode');
+}
+
+function applyDesktopMatchSnapshot(match) {
+    if (!match?.id) return;
+    let m;
+    try {
+        m = JSON.parse(JSON.stringify(match));
+    } catch (_) {
+        m = match;
+    }
+    delete m._pendingUiConsumer;
+    window._desktopApplyingRemoteMatch = true;
+    try {
+        currentMatch = m;
+        window.currentMatch = m;
+        if (typeof DB !== 'undefined' && DB.getMatches && DB.saveMatches) {
+            const arr = DB.getMatches();
+            const idx = arr.findIndex((x) => x.id === m.id);
+            if (idx >= 0) arr[idx] = m;
+            else arr.push(m);
+            DB.saveMatches(arr);
+        }
+        const scoringEl = document.getElementById('screen-scoring');
+        if (scoringEl && (m.status === 'live' || m.status === 'paused')) {
+            if (isPopupScoreSurface()) {
+                if (scoringEl.style.display === 'none') showScreen('scoring');
+            } else {
+                showScreen('scoring');
+            }
+        }
+        renderScoring();
+        if (typeof syncBroadcastMasterPhotos === 'function') syncBroadcastMasterPhotos(currentMatch);
+    } finally {
+        window._desktopApplyingRemoteMatch = false;
+    }
+}
+
+function queueScoringUi(spec) {
+    if (!currentMatch) return;
+    currentMatch._scoringUi = {
+        type: spec.type,
+        slot: spec.slot,
+        title: spec.title || 'New Batsman',
+        delay: spec.delay != null ? spec.delay : 60,
+        consumer: spec.consumer || (isPopupScoreSurface() ? 'popup' : 'main'),
+        at: Date.now(),
+    };
+}
+
+function runPendingScoringUi() {
+    const ui = currentMatch?._scoringUi;
+    if (!ui || ui._opened) return;
+    if (ui.consumer === 'popup' && !isPopupScoreSurface()) return;
+    if (ui.consumer === 'main' && isPopupScoreSurface()) return;
+    clearTimeout(window._scoringUiTimer);
+    const wait = Math.max(0, ui.delay || 0);
+    window._scoringUiTimer = setTimeout(() => {
+        const u = currentMatch?._scoringUi;
+        if (!u || u.at !== ui.at || u._opened) return;
+        u._opened = true;
+        if (u.type === 'bowler') openNewBowlerModal();
+        else if (u.type === 'batsman') openNewBatsmanModal(u.slot ?? 0, u.title || 'New Batsman');
+    }, wait);
+}
+
+function requestBowlerModal(delay) {
+    const consumer = currentMatch?._pendingUiConsumer || (isPopupScoreSurface() ? 'popup' : 'main');
+    queueScoringUi({ type: 'bowler', delay: delay != null ? delay : 80, consumer });
+    if (consumer === 'main') runPendingScoringUi();
+}
+
+function requestBatsmanModal(slot, title, delay) {
+    const consumer = currentMatch?._pendingUiConsumer || (isPopupScoreSurface() ? 'popup' : 'main');
+    queueScoringUi({ type: 'batsman', slot, title, delay: delay != null ? delay : 80, consumer });
+    if (consumer === 'main') runPendingScoringUi();
+}
+
+function openBowlerPickerOrQueue() {
+    if (currentMatch?._pendingUiConsumer === 'popup') requestBowlerModal(60);
+    else openNewBowlerModal();
+}
+
+function openBatsmanPickerOrQueue(slot, title, delay) {
+    if (currentMatch?._pendingUiConsumer === 'popup') requestBatsmanModal(slot, title, delay != null ? delay : 80);
+    else setTimeout(() => openNewBatsmanModal(slot, title), delay || 0);
+}
+
+async function forwardPopupScoringCommand(action, payload = {}) {
+    if (!isPopupScoreSurface() || !window.desktopAPI?.scoringCommand) return false;
+    if (!currentMatch?.id) {
+        showToast('No live match', 'error');
+        return false;
+    }
+    try {
+        currentMatch._pendingUiConsumer = 'popup';
+        const r = await window.desktopAPI.scoringCommand({
+            matchId: currentMatch.id,
+            action,
+            payload,
+            uiConsumer: 'popup',
+        });
+        delete currentMatch._pendingUiConsumer;
+        if (!r?.ok) {
+            showToast(r?.error || 'Action failed', 'error');
+            return false;
+        }
+        if (r.match) applyDesktopMatchSnapshot(r.match);
+        runPendingScoringUi();
+        scheduleCloudFlush(true);
+        if (!r.match) flushOverlaySignal();
+        return true;
+    } catch (e) {
+        delete currentMatch?._pendingUiConsumer;
+        showToast(e?.message || 'Action failed', 'error');
+        return false;
+    }
+}
+
+let _cloudFlushTimer = null;
+function primeCloudSyncForLiveMatch(m) {
+    if (!m?.id) return;
+    m.publishLive = m.publishLive !== false;
+    const tid = m.tournamentId;
+    if (tid && window.SLCRICK_SYNC?.prefetchCloudToken) {
+        const stored = localStorage.getItem(`tourn_pw_${tid}`);
+        window.SLCRICK_SYNC.prefetchCloudToken(tid, stored || '').catch(() => {});
+    }
+    window.SLCRICK_REALTIME?.joinMatch?.(m.id);
+    if (tid) window.SLCRICK_REALTIME?.joinTournament?.(tid);
+    if (window.SLCRICK_SYNC?.pushLiveMatchNow) {
+        window.SLCRICK_SYNC.pushLiveMatchNow(m).catch(() => {});
+    } else {
+        scheduleCloudFlush(true);
+    }
+}
+
+function scheduleCloudFlush(immediate) {
+    if (!window.SLCRICK_DESKTOP || !window.SLCRICK_SYNC?.flushQueue) return;
+    if (!currentMatch?.id) return;
+    if (window.SLCRICK_SYNC.isUserSyncDisabled?.()) return;
+    if (window.SLCRICK_SYNC.isNetworkOnline?.() === false) return;
+    clearTimeout(_cloudFlushTimer);
+    const run = () => {
+        _cloudFlushTimer = null;
+        if (!window.SLCRICK_SYNC?.isEnabled?.()) return;
+        if (currentMatch?.id && window.SLCRICK_SYNC.pushLiveMatchNow) {
+            window.SLCRICK_SYNC.pushLiveMatchNow(currentMatch)
+                .catch(() => window.SLCRICK_SYNC.flushQueue().catch(() => {}));
+        } else {
+            window.SLCRICK_SYNC.flushQueue().catch(() => {});
+        }
+    };
+    if (immediate) run();
+    else _cloudFlushTimer = setTimeout(run, 40);
+}
+
+function wireDesktopMatchSyncFromPopups() {
+    if (!window.desktopAPI?.onMatchUpdate || window._slcrickPopupSyncWired) return;
+    window._slcrickPopupSyncWired = true;
+    window.desktopAPI.onMatchUpdate((match) => {
+        if (!match?.id) return;
+        if (isPopupScoreSurface()) {
+            if (currentMatch && match.id !== currentMatch.id) return;
+        } else if (currentMatch && match.id !== currentMatch.id) {
+            return;
+        }
+        applyDesktopMatchSnapshot(match);
+        runPendingScoringUi();
+        if (document.documentElement.classList.contains('popup-score-mode')) {
+            scheduleCloudFlush(true);
+        }
+        const bm = document.getElementById('bm-score-indicator');
+        if (bm && currentMatch?.innings) {
+            const inn = currentMatch.innings[currentMatch.currentInnings];
+            if (inn) {
+                bm.textContent = `${inn.runs}/${inn.wickets}`;
+            }
+        }
+        const vs = document.getElementById('bm-vs-indicator');
+        if (vs && currentMatch) vs.textContent = 'Overlay linked';
+    });
+}
+
 function updateHeaderActions() {
     const el = document.getElementById('header-actions');
+    if (!el) return;
     const m = currentMatch;
-    if (!m) { el.innerHTML = ''; return; }
-    el.innerHTML = `
-    <span class="badge badge-${m.status === 'live' ? 'green' : 'amber'}">${m.status === 'live' ? 'LIVE' : 'Paused'}</span>`;
+    el.querySelectorAll('.hdr-dynamic').forEach((n) => n.remove());
+    if (!m) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'hdr-dynamic';
+    wrap.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+    const desktopBtns = window.SLCRICK_DESKTOP
+        ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openPopupScorecardWindow()">🎛 Popup Score</button>
+           <button type="button" class="btn btn-primary btn-sm" onclick="openObsPopupWindow()">📡 Pop-up OBS</button>`
+        : '';
+    wrap.innerHTML = `<span class="badge badge-${m.status === 'live' ? 'green' : 'amber'}">${m.status === 'live' ? 'LIVE' : 'Paused'}</span>${desktopBtns}`;
+    const themeBtn = document.getElementById('theme-toggle-scorer');
+    if (themeBtn) el.insertBefore(wrap, themeBtn);
+    else el.appendChild(wrap);
+
+    refreshDesktopPopupBar();
+}
+
+function refreshDesktopPopupBar() {
+    const bar = document.getElementById('desktop-popup-bar');
+    const m = currentMatch;
+    if (!bar) return;
+    bar.style.display =
+        window.SLCRICK_DESKTOP && m && (m.status === 'live' || m.status === 'paused') ? 'flex' : 'none';
 }
 
 function startInlineNameEdit(elementId, onSave) {
@@ -1914,7 +2243,11 @@ function editPlayerName(role, idx) {
 }
 
 /** Swap striker / non-striker ends (wrong batter at striker's end). */
-function swapBatsmenEnds() {
+async function swapBatsmenEnds() {
+    if (isPopupScoreSurface()) {
+        await forwardPopupScoringCommand('swapBatsmenEnds');
+        return;
+    }
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
@@ -2064,18 +2397,40 @@ function renderScoring() {
 
     // Partnership – track per partnership object
     const p = getPartnership(inn);
-    document.getElementById('partner-runs').textContent = p.runs || 0;
-    document.getElementById('partner-balls').textContent = p.balls || 0;
-    document.getElementById('partner-sr').textContent = formatSR(p.runs || 0, p.balls || 0);
+    const pr = p.runs || 0;
+    const pb = p.balls || 0;
+    const psr = formatSR(p.runs || 0, p.balls || 0);
+    ['partner-runs', 'partner-runs-sc'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = pr;
+    });
+    ['partner-balls', 'partner-balls-sc'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = pb;
+    });
+    ['partner-sr', 'partner-sr-sc'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = psr;
+    });
 
     // Fall of wickets
-    const fowEl = document.getElementById('fow-list');
-    if (inn.fallOfWickets && inn.fallOfWickets.length) {
-        fowEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">` +
-            inn.fallOfWickets.map((fw, i) =>
-                `<span class="badge badge-red" title="${fw.batsmanName} – ${fw.wicketType}">${i + 1}–${fw.runs} (${fw.batsmanName}, ${formatOvers(fw.balls, m.ballsPerOver)} ov)</span>`
-            ).join('') + `</div>`;
-    } else { fowEl.textContent = 'No wickets yet'; }
+    const fowHtml =
+        inn.fallOfWickets && inn.fallOfWickets.length
+            ? `<div style="display:flex;flex-wrap:wrap;gap:6px">` +
+              inn.fallOfWickets
+                  .map(
+                      (fw, i) =>
+                          `<span class="badge badge-red" title="${fw.batsmanName} – ${fw.wicketType}">${i + 1}–${fw.runs} (${fw.batsmanName}, ${formatOvers(fw.balls, m.ballsPerOver)} ov)</span>`
+                  )
+                  .join('') +
+              `</div>`
+            : null;
+    ['fow-list', 'fow-list-sc'].forEach((id) => {
+        const fowEl = document.getElementById(id);
+        if (!fowEl) return;
+        if (fowHtml) fowEl.innerHTML = fowHtml;
+        else fowEl.textContent = 'No wickets yet';
+    });
 
     // Undo/Redo states
     document.getElementById('undo-btn').disabled = !(m.history && m.history.length);
@@ -2097,6 +2452,8 @@ function renderScoring() {
     if (typeof syncLivePlayerPhotoSlots === 'function') {
         syncLivePlayerPhotoSlots(m);
     }
+
+    refreshDesktopPopupBar();
 }
 
 function uploadPlayerPhoto(role) {
@@ -2177,7 +2534,11 @@ function setStriker(i) {
 }
 
 // ========== RECORD BALL ==========
-function recordBall(event) {
+async function recordBall(event) {
+    if (isPopupScoreSurface()) {
+        await forwardPopupScoringCommand('recordBall', { event: event });
+        return;
+    }
     const m = currentMatch;
     if (!m || m.status !== 'live') return;
     const inn = m.innings[m.currentInnings];
@@ -2185,15 +2546,15 @@ function recordBall(event) {
 
     // Need bowler?
     if (inn.currentBowlerIdx === null) {
-        pendingBallEvent = event; openNewBowlerModal(); return;
+        pendingBallEvent = event; openBowlerPickerOrQueue(); return;
     }
     // Need batsmen?
     const idx0 = inn.currentBatsmenIdx[0], idx1 = inn.currentBatsmenIdx[1];
     if (idx0 === undefined || idx0 === null || !inn.batsmen[idx0]) {
-        pendingBallEvent = event; openNewBatsmanModal(0, '1st Batsman'); return;
+        pendingBallEvent = event; openBatsmanPickerOrQueue(0, '1st Batsman', 0); return;
     }
     if (idx1 === undefined || idx1 === null || !inn.batsmen[idx1]) {
-        pendingBallEvent = event; openNewBatsmanModal(1, '2nd Batsman'); return;
+        pendingBallEvent = event; openBatsmanPickerOrQueue(1, '2nd Batsman', 0); return;
     }
 
     pushHistory();
@@ -2265,7 +2626,7 @@ function recordExtra(type) {
     if (!m || m.status !== 'live') return;
     const inn = m.innings[m.currentInnings];
     if (!inn || inn.isDone) return;
-    if (inn.currentBowlerIdx === null) { pendingExtraType = type; openNewBowlerModal(); return; }
+    if (inn.currentBowlerIdx === null) { pendingExtraType = type; openBowlerPickerOrQueue(); return; }
 
     if (type === 'wide') {
         openWideModal(); // Always use modal for wide (supports extra overthrow runs)
@@ -2287,7 +2648,7 @@ function openWideModal() {
     if (!m || m.status !== 'live') return;
     const inn = m.innings[m.currentInnings];
     if (!inn || inn.isDone) return;
-    if (inn.currentBowlerIdx === null) { pendingExtraType = 'wide'; openNewBowlerModal(); return; }
+    if (inn.currentBowlerIdx === null) { pendingExtraType = 'wide'; openBowlerPickerOrQueue(); return; }
     wideExtraRuns = 0;
     document.querySelectorAll('#modal-wide .wr-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
     openModal('modal-wide');
@@ -2299,12 +2660,17 @@ function selectWideRuns(btn) {
     btn.classList.add('active');
 }
 
-function confirmWide() {
+async function confirmWide() {
+    if (isPopupScoreSurface()) {
+        closeModal('modal-wide');
+        await forwardPopupScoringCommand('confirmWide', { wideExtraRuns });
+        return;
+    }
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
     if (!inn || inn.isDone) { closeModal('modal-wide'); return; }
-    if (inn.currentBowlerIdx === null) { closeModal('modal-wide'); pendingExtraType = 'wide'; openNewBowlerModal(); return; }
+    if (inn.currentBowlerIdx === null) { closeModal('modal-wide'); pendingExtraType = 'wide'; openBowlerPickerOrQueue(); return; }
 
     pushHistory();
     const totalRuns = 1 + wideExtraRuns; // 1 wide penalty + overthrows
@@ -2350,7 +2716,12 @@ function selectByeRuns(btn) {
     document.querySelectorAll('#modal-bye .wr-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
 }
-function confirmBye() {
+async function confirmBye() {
+    if (isPopupScoreSurface()) {
+        closeModal('modal-bye');
+        await forwardPopupScoringCommand('confirmBye', { byeExtraType, byeRuns });
+        return;
+    }
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
@@ -2359,7 +2730,7 @@ function confirmBye() {
     if (inn.currentBowlerIdx === null) {
         closeModal('modal-bye');
         pendingExtraType = byeExtraType;
-        openNewBowlerModal(); return;
+        openBowlerPickerOrQueue(); return;
     }
 
     // Ensure batsmen exist
@@ -2416,7 +2787,12 @@ function selectNoballRuns(btn) {
     btn.classList.add('active');
 }
 
-function confirmNoball() {
+async function confirmNoball() {
+    if (isPopupScoreSurface()) {
+        closeModal('modal-noball');
+        await forwardPopupScoringCommand('confirmNoball', { noballRuns });
+        return;
+    }
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
@@ -2425,7 +2801,7 @@ function confirmNoball() {
     if (inn.currentBowlerIdx === null) {
         closeModal('modal-noball');
         pendingExtraType = 'custom_noball';
-        openNewBowlerModal(); return;
+        openBowlerPickerOrQueue(); return;
     }
 
     if (!inn.batsmen.length || inn.currentBatsmenIdx[0] === null) {
@@ -2492,20 +2868,31 @@ function selectWicketRuns(btn) {
     btn.classList.add('active');
 }
 
-function confirmWicket() {
+async function confirmWicket() {
     const m = currentMatch;
     if (!m) return;
     const inn = m.innings[m.currentInnings];
     if (!inn || inn.isDone) { closeModal('modal-wicket'); return; }
 
-    if (inn.currentBowlerIdx === null) { closeModal('modal-wicket'); openNewBowlerModal(); return; }
+    if (inn.currentBowlerIdx === null) { closeModal('modal-wicket'); openBowlerPickerOrQueue(); return; }
 
     const radio = document.querySelector('input[name="dismissed"]:checked');
     const dismissedSlot = radio ? parseInt(radio.value) : inn.strikerIdx;
-    const dismissedBatIdx = inn.currentBatsmenIdx[dismissedSlot];
-    const dismissedBat = inn.batsmen[dismissedBatIdx];
     const wicketType = document.getElementById('wicket-type').value;
     const fielder = document.getElementById('wicket-fielder').value.trim();
+
+    if (isPopupScoreSurface()) {
+        closeModal('modal-wicket');
+        await forwardPopupScoringCommand('confirmWicket', {
+            dismissedSlot,
+            wicketType,
+            fielder,
+            wicketRuns,
+        });
+        return;
+    }
+    const dismissedBatIdx = inn.currentBatsmenIdx[dismissedSlot];
+    const dismissedBat = inn.batsmen[dismissedBatIdx];
 
     pushHistory();
 
@@ -2591,7 +2978,7 @@ function confirmWicket() {
         finishInnings(inn, 'all_out_or_overs');
     } else {
         // Need new batsman
-        setTimeout(() => openNewBatsmanModal(dismissedSlot, 'New Batsman In'), overDone ? 500 : 100);
+        openBatsmanPickerOrQueue(dismissedSlot, 'New Batsman In', overDone ? 180 : 80);
     }
 }
 
@@ -2681,7 +3068,6 @@ function openNewBatsmanModal(slot, title) {
     currentPendingWicket = (slot !== undefined) ? slot : 0;
     document.getElementById('new-batsman-sub').textContent = title || 'New Batsman';
     document.getElementById('new-bat-name').value = '';
-    document.getElementById('new-bat-pid').value = '';
     document.getElementById('player-lookup-result').textContent = '';
     populateSquadDatalist('batting');
     renderSquadQuickPick('squad-bat-opts', 'batting');
@@ -2689,23 +3075,33 @@ function openNewBatsmanModal(slot, title) {
 }
 
 function lookupPlayer() {
-    const pid = document.getElementById('new-bat-pid').value.trim().toUpperCase();
-    const player = DB.getPlayerById(pid);
+    const name = document.getElementById('new-bat-name')?.value.trim();
+    const player = name ? findPlayerInTeamRoster(name, getInningsTeamForSide('batting')) : null;
     const resultEl = document.getElementById('player-lookup-result');
+    if (!resultEl) return;
     if (player) {
         document.getElementById('new-bat-name').value = player.name;
         resultEl.innerHTML = `✅ <b>${player.name}</b> | ${capitalize(player.role || 'player')} | ${player.team || 'No team'}`;
         resultEl.style.color = '#00e676';
     } else {
-        resultEl.textContent = `❌ Player ID "${pid}" not found in database`;
-        resultEl.style.color = '#ff6d3b';
+        resultEl.textContent = '';
     }
 }
 
-function confirmNewBatsman() {
+async function confirmNewBatsman() {
     const name = document.getElementById('new-bat-name').value.trim();
-    let pid = document.getElementById('new-bat-pid').value.trim().toUpperCase();
+    let pid = '';
     if (!name) { showToast('❌ Enter batsman name', 'error'); return; }
+
+    if (isPopupScoreSurface()) {
+        closeModal('modal-new-batsman');
+        await forwardPopupScoringCommand('confirmNewBatsman', {
+            name,
+            pid,
+            slot: currentPendingWicket,
+        });
+        return;
+    }
 
     const rosterPid = ensurePlayerOnTeamRoster(name, 'batting');
     if (!pid) pid = rosterPid || '';
@@ -2745,8 +3141,9 @@ function confirmNewBatsman() {
     inn.currentPartnership = { runs: 0, balls: 0 };
 
     closeModal('modal-new-batsman');
+    if (currentMatch?._scoringUi) delete currentMatch._scoringUi;
     if (inn.currentBowlerIdx === null) {
-        setTimeout(() => openNewBowlerModal(), 200);
+        openBowlerPickerOrQueue();
     } else { saveAndRender(); }
     
     if (typeof syncLivePlayerPhotoSlots === 'function') syncLivePlayerPhotoSlots(m);
@@ -2758,7 +3155,6 @@ function confirmNewBatsman() {
 // ========== NEW BOWLER ==========
 function openNewBowlerModal() {
     document.getElementById('new-bowl-name').value = '';
-    document.getElementById('new-bowl-pid').value = '';
     populateSquadDatalist('bowling');
     renderSquadQuickPick('recent-bowlers-opts', 'bowling', { includeInningsBowlers: true });
     openModal('modal-new-bowler');
@@ -2773,18 +3169,24 @@ function pickSquadBowlerName(name) {
 }
 
 function lookupBowler() {
-    const pid = document.getElementById('new-bowl-pid').value.trim().toUpperCase();
-    const player = DB.getPlayerById(pid);
+    const name = document.getElementById('new-bowl-name')?.value.trim();
+    const player = name ? findPlayerInTeamRoster(name, getInningsTeamForSide('bowling')) : null;
     if (player) {
         document.getElementById('new-bowl-name').value = player.name;
         showToast(`✅ Found: ${player.name}`, 'success');
-    } else { showToast(`❌ Player "${pid}" not found`, 'error'); }
+    }
 }
 
-function confirmNewBowler() {
+async function confirmNewBowler() {
     const name = document.getElementById('new-bowl-name').value.trim();
-    let pid = document.getElementById('new-bowl-pid').value.trim().toUpperCase();
+    let pid = '';
     if (!name) { showToast('❌ Enter bowler name', 'error'); return; }
+
+    if (isPopupScoreSurface()) {
+        closeModal('modal-new-bowler');
+        await forwardPopupScoringCommand('confirmNewBowler', { name, pid });
+        return;
+    }
 
     const rosterPid = ensurePlayerOnTeamRoster(name, 'bowling');
     if (!pid) pid = rosterPid || '';
@@ -2793,6 +3195,8 @@ function confirmNewBowler() {
         const pMatch = DB.getPlayers().find(p => p.name.toLowerCase() === name.toLowerCase());
         if (pMatch) pid = pMatch.playerId;
     }
+
+    if (currentMatch?._scoringUi) delete currentMatch._scoringUi;
 
     const m = currentMatch;
     const inn = m.innings[m.currentInnings];
@@ -2860,7 +3264,7 @@ function checkEndOfOver(inn) {
         }
 
         if (!isEnd) {
-            setTimeout(() => openNewBowlerModal(), 400);
+            requestBowlerModal(100);
         }
         return true;
     }
@@ -3197,6 +3601,7 @@ function showMatchResult() {
     }
 
     m.result = resultText;
+    m.winner = winner || null;
     m.completedAt = Date.now();
 
     // Keep tournament rosters on disk after match ends (permanent squad names)
@@ -3219,6 +3624,8 @@ function showMatchResult() {
                         DB.saveMatch(nextMatch);
                     }
                 }
+            } else if (typeof window.computeTournamentStandings === 'function') {
+                window.computeTournamentStandings(t);
             } else {
                 computeStandings(t);
             }
@@ -3418,8 +3825,28 @@ function openTournamentSummary() {
         </tr>`).join('');
     }
     
+    const tsTitle = document.getElementById('ts-title');
+    if (tsTitle) tsTitle.textContent = `🏆 ${t.name || 'Tournament'} — Summary`;
     showScreen('tournament-summary');
 }
+
+async function downloadTournamentSummaryPDF() {
+    const tid = currentMatch?.tournamentId;
+    if (!tid) {
+        showToast('No tournament linked to this match', 'error');
+        return;
+    }
+    if (typeof MatchReportEngine !== 'undefined' && MatchReportEngine.generateTournamentPDF) {
+        await MatchReportEngine.generateTournamentPDF(tid);
+        return;
+    }
+    if (typeof generateTournamentPDF === 'function') {
+        await generateTournamentPDF(tid);
+        return;
+    }
+    showToast('PDF report engine not loaded — refresh the page', 'error');
+}
+window.downloadTournamentSummaryPDF = downloadTournamentSummaryPDF;
 
 function computeStandings(t) {
     t.teams.forEach(team => {
@@ -3489,7 +3916,11 @@ function pushHistory() {
     if (m.history.length > 150) m.history.shift();
 }
 
-function undoAction() {
+async function undoAction() {
+    if (isPopupScoreSurface()) {
+        await forwardPopupScoringCommand('undoAction');
+        return;
+    }
     const m = currentMatch;
     if (!m || !m.history || !m.history.length) { showToast('Nothing to undo', 'error'); return; }
     const current = JSON.stringify({ innings: m.innings, currentInnings: m.currentInnings });
@@ -3503,7 +3934,11 @@ function undoAction() {
     showToast('↩ Undone!', 'success');
 }
 
-function redoAction() {
+async function redoAction() {
+    if (isPopupScoreSurface()) {
+        await forwardPopupScoringCommand('redoAction');
+        return;
+    }
     const m = currentMatch;
     if (!m || !m.redoStack || !m.redoStack.length) { showToast('Nothing to redo', 'error'); return; }
     const current = JSON.stringify({ innings: m.innings, currentInnings: m.currentInnings });
@@ -3622,7 +4057,7 @@ function flushOverlaySignal() {
 
 function scheduleOverlaySignal() {
     if (_overlaySignalTimer) clearTimeout(_overlaySignalTimer);
-    _overlaySignalTimer = setTimeout(flushOverlaySignal, 45);
+    _overlaySignalTimer = setTimeout(flushOverlaySignal, 12);
 }
 
 function saveAndRender() {
@@ -3639,6 +4074,10 @@ function saveAndRender() {
             syncBroadcastMasterPhotos(currentMatch);
         }
         scheduleOverlaySignal();
+        if (isDesktop) {
+            scheduleCloudFlush(true);
+            if (!isPopupScoreSurface()) runPendingScoringUi();
+        }
         const t1el = document.getElementById('hk-team1-name');
         const t2el = document.getElementById('hk-team2-name');
         if (t1el) t1el.textContent = currentMatch.team1 || 'Team A';
@@ -3659,9 +4098,7 @@ async function printScorecard() {
 
 // ========== NEW OPEN BATSMEN ==========
 function openOpenBatsmenModal() {
-    document.getElementById('open-bat1-pid').value = '';
     document.getElementById('open-bat1-name').value = '';
-    document.getElementById('open-bat2-pid').value = '';
     document.getElementById('open-bat2-name').value = '';
     populateSquadDatalist('batting');
     renderSquadQuickPick('squad-open-bat-opts', 'batting', { openBatsmen: true });
@@ -3669,19 +4106,19 @@ function openOpenBatsmenModal() {
 }
 
 function lookupPlayerOpen(num) {
-    const pid = document.getElementById(`open-bat${num}-pid`).value.trim().toUpperCase();
-    const player = DB.getPlayerById(pid);
+    const name = document.getElementById(`open-bat${num}-name`)?.value.trim();
+    const player = name ? findPlayerInTeamRoster(name, getInningsTeamForSide('batting')) : null;
     if (player) {
         document.getElementById(`open-bat${num}-name`).value = player.name;
         showToast(`✅ Found: ${player.name}`, 'success');
-    } else { showToast(`❌ Player ID "${pid}" not found`, 'error'); }
+    }
 }
 
 function confirmOpenBatsmen() {
     const n1 = document.getElementById('open-bat1-name').value.trim();
-    let pid1 = document.getElementById('open-bat1-pid').value.trim().toUpperCase() || null;
+    let pid1 = null;
     const n2 = document.getElementById('open-bat2-name').value.trim();
-    let pid2 = document.getElementById('open-bat2-pid').value.trim().toUpperCase() || null;
+    let pid2 = null;
 
     if (!n1 || !n2) { showToast('❌ Enter both opening batsmen names', 'error'); return; }
 
@@ -6189,16 +6626,29 @@ function forceEndMatchInHub(mId) {
     m.status = 'completed';
     m.completedAt = Date.now();
     if (!m.result) m.result = 'End Match forced via Hub';
+    const i0 = m.innings?.[0];
+    const i1 = m.innings?.[1];
+    if (!m.winner && i0 && i1) {
+        if (i1.runs > i0.runs) m.winner = i1.battingTeam || m.team2;
+        else if (i1.runs < i0.runs) m.winner = i0.battingTeam || m.team1;
+    }
     DB.saveMatch(m);
     
     // Recalculate tournament standings
     if (m.tournamentId) {
         const t = DB.getTournament(m.tournamentId);
-        if (t && t.format !== 'knockout' && typeof computeStandings === 'function') {
-            computeStandings(t);
-            DB.saveTournament(t);
+        if (t && t.format !== 'knockout') {
+            if (typeof window.computeTournamentStandings === 'function') {
+                window.computeTournamentStandings(t);
+            } else if (typeof computeStandings === 'function') {
+                computeStandings(t);
+                DB.saveTournament(t);
+            }
         }
     }
+    try {
+        localStorage.setItem('cricpro_force_update', Date.now().toString());
+    } catch (_) {}
     if (typeof renderTournamentMatches === 'function') renderTournamentMatches();
     showToast('🛑 Match marked as completed.', 'success');
 }
@@ -6238,15 +6688,10 @@ function renderEmbeddedScorecard(innIdx = 0) {
     if (roster.length > 0) {
         roster.forEach(r => {
             if(!r) return;
-            let pName = r;
+            const pObj = resolveRosterPlayer(r);
+            let pName = pObj?.name || r;
             let pId = null;
-            if(r.length === 16 && r.toUpperCase() === r) {
-               let pObj = DB.getPlayerById(r);
-               if(pObj) { pName = pObj.name; pId = pObj.playerId; }
-            } else {
-               let pObj = DB.getPlayers().find(p => p.name && p.name.toLowerCase() === r.toLowerCase());
-               if(pObj) { pName = pObj.name; pId = pObj.playerId; }
-            }
+            if (pObj?.playerId) pId = pObj.playerId;
             
             let batted = battedPlayers.find(b => (b.playerId && b.playerId === pId) || (b.name && b.name.toLowerCase() === pName.toLowerCase()));
             if (batted) {
@@ -6525,3 +6970,13 @@ window.publishPlayerProfileToBroadcast = function() {
         closeModal('modal-player-profile');
     }
 };
+
+// Expose for desktop popup / IPC scoring bridge
+window.applyDesktopMatchSnapshot = applyDesktopMatchSnapshot;
+window.recordBall = recordBall;
+window.recordExtra = recordExtra;
+window.openWicketModal = openWicketModal;
+window.undoAction = undoAction;
+window.swapBatsmenEnds = swapBatsmenEnds;
+window.loadMatch = loadMatch;
+window.renderScoring = renderScoring;

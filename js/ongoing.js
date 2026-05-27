@@ -50,36 +50,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     optimizeMobileLabels();
     window.addEventListener('resize', optimizeMobileLabels);
 
-    // Stage 1: Render Local Cache Immediately (Fast Load)
-    renderOngoing(); 
-    
-    // Stage 2: Synchronize with Cloud immediately so cross-device matches appear after refresh.
-    if (typeof syncCloudData === 'function') {
-        await syncCloudData({ forceRefresh: true, silent: true }); 
-    }
-    
-    // Stage 3: Render Final Results after sync
     renderOngoing();
-    startAutoRefresh();
+
+    try {
+        if (window.SLCRICK_WEBSITE_FEED?.start) await window.SLCRICK_WEBSITE_FEED.start();
+        else if (window.SLCRICK_REALTIME?.install) await window.SLCRICK_REALTIME.install({ force: true });
+        if (window.SLCRICK_SYNC?.syncCloudData) {
+            await window.SLCRICK_SYNC.syncCloudData({ silent: true, forceRefresh: true });
+        } else if (typeof window.pullGlobalData === 'function') {
+            await window.pullGlobalData(false);
+        }
+    } catch (e) {
+        console.warn('[Ongoing] cloud sync bootstrap failed', e);
+    }
+
+    renderOngoing();
 });
 
 function startAutoRefresh() {
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(() => {
-        const sockOk =
-            window.SLCRICK_REALTIME?.socket?.connected || window._cricproSocket?.connected;
-        if (sockOk) return;
-        if (typeof syncCloudData === 'function') {
-            syncCloudData({ forceRefresh: true, silent: true });
-        }
-    }, 30000);
+  // Manual polling removed. syncCloudData now handles live refreshes.
 }
 
 function refreshAll() {
-    // Force a full cloud synchronization instead of just a UI refresh
     if (typeof pullGlobalData === 'function') {
         const btn = document.querySelector('.header-right-group .btn');
-        if (btn) btn.innerHTML = '🔄 Syncing...';
+        if (btn) btn.innerHTML = '🔄 Refreshing...';
         
         pullGlobalData(true).then(() => {
             if (btn) btn.innerHTML = '🔄 Refresh';
@@ -113,37 +108,102 @@ function switchTab(tab) {
 }
 
 // ========== LIVE MATCHES ==========
+const ONGOING_LIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function getMatchScoringStartedAt(m) {
+  if (!m) return null;
+  if (m.scoringStartedAt) return m.scoringStartedAt;
+  if (m.liveStartedAt) return m.liveStartedAt;
+  if (m.startedAt) return m.startedAt;
+  const hist = m.history;
+  if (Array.isArray(hist) && hist.length) {
+    const first = hist[0];
+    const ts = first?.timestamp || first?.ts || first?.at;
+    if (ts) return typeof ts === 'number' ? ts : Date.parse(ts) || null;
+  }
+  const inn0 = m.innings?.[0];
+  const inn1 = m.innings?.[1];
+  const hasPlay =
+    (inn0 && ((inn0.balls || 0) > 0 || (inn0.batsmen?.length || 0) > 0)) ||
+    (inn1 && ((inn1.balls || 0) > 0 || (inn1.batsmen?.length || 0) > 0));
+  if (hasPlay && m.lastUpdated) return m.lastUpdated;
+  return null;
+}
+
+function matchHadScoringActivity(m) {
+  if (!m) return false;
+  if (m.scoringStartedAt) return true;
+  for (const inn of m.innings || []) {
+    if (!inn) continue;
+    if ((inn.balls || 0) > 0) return true;
+    if (Array.isArray(inn.batsmen) && inn.batsmen.some((b) => b && (b.balls > 0 || b.runs > 0))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Live tab: scoring now, or finished within last 24h (with real balls scored). */
+function isOngoingLiveTabMatch(m) {
+  if (!m || m.publishLive === false) return false;
+  const status = String(m.status || '').toLowerCase();
+  if (status === 'live' || status === 'paused') return true;
+  if (status === 'completed') {
+    if (!matchHadScoringActivity(m)) return false;
+    const endAt = m.completedAt || m.lastUpdated || getMatchScoringStartedAt(m);
+    if (!endAt) return false;
+    return Date.now() - endAt <= ONGOING_LIVE_WINDOW_MS;
+  }
+  return false;
+}
+
 function renderLive() {
   const grid = document.getElementById('live-matches-grid');
   if (!grid) return;
 
-  const matches = DB.getMatches().filter(m => {
-    const isPublic = m.publishLive !== false; 
-    if (!isPublic) return false;
-    // Show live, paused, AND scheduled/setup matches in this view if they are "active"
-    return (m.status === 'live' || m.status === 'paused' || m.status === 'scheduled' || m.status === 'setup');
-  });
+  const matches = DB.getMatches().filter(isOngoingLiveTabMatch);
 
   const uniqueMatches = Array.from(new Map(matches.map(m => [m.id, m])).values());
+  uniqueMatches.sort((a, b) => {
+    const order = { live: 0, paused: 1, completed: 2 };
+    const sa = order[a.status] ?? 3;
+    const sb = order[b.status] ?? 3;
+    if (sa !== sb) return sa - sb;
+    return (getMatchScoringStartedAt(b) || 0) - (getMatchScoringStartedAt(a) || 0);
+  });
 
   if (!uniqueMatches.length) {
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
       <div class="empty-state-icon">🏏</div>
-      <div class="empty-state-title">No Live Matches Currently</div>
-      <div class="empty-state-sub">Currently playing or paused matches will appear here</div>
+      <div class="empty-state-title">No Active Scoring Sessions</div>
+      <div class="empty-state-sub">Matches appear here while you score, and for 24 hours after the result. Scheduled fixtures are under <b>Tournament → Full Schedule</b>.</div>
     </div>`;
     return;
   }
 
-  grid.innerHTML = uniqueMatches.map(m => buildMatchCard(m, true)).join('');
+  grid.innerHTML = uniqueMatches.map(m => buildMatchCard(m, m.status !== 'completed')).join('');
 }
 
 function buildMatchCard(m, isLive) {
   const inn0 = m.innings ? m.innings[0] : null;
   const inn1 = m.innings ? m.innings[1] : null;
   const curInn = m.innings ? m.innings[m.currentInnings] : null;
-  const statusColor = m.status === 'live' ? '#00e676' : ((m.status === 'scheduled' || m.status === 'setup') ? '#00bcd4' : '#ffc107');
-  const statusLabel = m.status === 'live' ? '🔴 LIVE' : ((m.status === 'scheduled' || m.status === 'setup') ? '🗓 Scheduled' : (m.status === 'paused' ? '⏸ Paused' : '✅ COMPLETE'));
+  const statusColor =
+    m.status === 'live'
+      ? '#00e676'
+      : m.status === 'paused'
+        ? '#ffc107'
+        : m.status === 'completed'
+          ? '#7c4dff'
+          : '#00bcd4';
+  const statusLabel =
+    m.status === 'live'
+      ? '🔴 LIVE'
+      : m.status === 'paused'
+        ? '⏸ Paused'
+        : m.status === 'completed'
+          ? '✅ RESULT'
+          : '🗓 Scheduled';
   const hasPw = (m.scoringPassword || m.password || m.isLocked);
 
   const score0 = (m.status === 'scheduled' || m.status === 'setup') ? '-' : (inn0 ? `${inn0.runs}/${inn0.wickets}` : '-');
@@ -195,10 +255,10 @@ function buildMatchCard(m, isLive) {
             <span class="match-target-info" style="color:#ffc107">${targetInfo}</span>
             <span class="match-crr">${m.overs} ov · ${subText}</span>
         </div>
-        ${(m.status === 'live' || m.status === 'paused' || m.status === 'scheduled' || m.status === 'setup') ? `
+        ${(m.status === 'live' || m.status === 'paused') ? `
         <div class="match-card-actions" style="margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:12px; display:flex; justify-content:space-between; gap:10px">
             <button class="btn btn-primary" style="flex:2; font-weight:900; border-radius:12px; height:44px; display:flex; align-items:center; justify-content:center; gap:8px" onclick="event.stopPropagation(); scoreMatchRedirect('${m.id}')">
-                 ${m.status === 'live' ? '⚡ SCORE' : (m.status === 'paused' ? '🔑 RESUME' : '🏏 START')}
+                 ${m.status === 'live' ? '⚡ SCORE' : '🔑 RESUME'}
             </button>
             <button class="btn btn-ghost" style="flex:1; font-weight:800; border-radius:12px; height:44px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1)" onclick="event.stopPropagation(); generateMatchPDF('${m.id}')">
                 📄 PDF
@@ -292,18 +352,11 @@ function onTournSelect(id) {
     selectedTournId = id;
     selectedTournSubTab = 'standings';
     
-    // WebSocket Room Join
-    if (typeof socket !== 'undefined' && socket) {
-        socket.emit('joinTournament', id);
-    }
     
     renderTournDetails(id);
 }
 
 function selectTournament(id) {
-    if (selectedTournId && typeof socket !== 'undefined' && socket) {
-        socket.emit('leaveTournament', selectedTournId);
-    }
     onTournSelect(id);
     tournamentPageView = 'matches';
     renderTournamentSelector();
@@ -412,7 +465,6 @@ window.promptUploadTeamPhoto = function(tournId, teamName) {
                     if (!t.teamPhotos) t.teamPhotos = {};
                     t.teamPhotos[teamName] = b64;
                     DB.saveTournament(t);
-                    if (typeof syncToDB === 'function') syncToDB('tournament', t);
                     renderTournamentSquadsPanel(tournId);
                     showToast('✅ Team photo saved inside tournament file!', 'success');
                 }
@@ -435,6 +487,7 @@ function switchTournSubTab(tab) {
 
     const t = DB.getTournament(selectedTournId);
     if (!t) return;
+    computeTournamentStandings(t);
 
     const content = document.getElementById('tourn-sub-content');
     const bracketPanel = document.getElementById('tournament-bracket');
@@ -463,8 +516,9 @@ function renderTournDetails(id) {
 
     computeTournamentStandings(t);
 
-    const completedMatches = DB.getMatches().filter(m => m.tournamentId === id && m.status === 'completed' && m.publishLive).length;
-    const liveMatches = DB.getMatches().filter(m => m.tournamentId === id && m.status === 'live' && m.publishLive).length;
+    const tournMatches = getTournamentMatches(id);
+    const completedMatches = tournMatches.filter((m) => m.status === 'completed').length;
+    const liveMatches = tournMatches.filter((m) => m.status === 'live' || m.status === 'paused').length;
 
     const isKO = t.format === 'knockout';
 
@@ -511,7 +565,9 @@ function renderTournDetails(id) {
 
 function buildTournSubTab(t, tab) {
     if (!t) return '';
-    const sortedTeams = t.teams.map(team => ({ name: team, ...((t.standings && t.standings[team]) || {}) }))
+    const teamNames = [...new Set([...(t.teams || []), ...Object.keys(t.standings || {})])];
+    const sortedTeams = teamNames
+        .map((team) => ({ name: team, ...((t.standings && t.standings[team]) || {}) }))
         .sort((a, b) => (b.points || 0) - (a.points || 0) || (b.nrr || 0) - (a.nrr || 0));
 
     if (tab === 'standings') {
@@ -690,85 +746,25 @@ function leaderCard(rank, name, team, statVal, statLbl, sub, tournId, tournName)
     </div>`;
 }
 
-function computeTournamentStandings(t) {
-    if (!t || t.format === 'knockout') return;
-    t.standings = {};
-    t.teams.forEach(team => {
-        t.standings[team] = { played: 0, won: 0, lost: 0, tied: 0, points: 0, runsScored: 0, ballsFaced: 0, runsConceded: 0, ballsBowled: 0, nrr: 0 };
-    });
-    
-    // Filter matches for this tournament that are live, paused, or completed
-    const matches = DB.getMatches().filter(m => 
-        m.tournamentId === t.id && 
-        (m.status === 'completed' || m.status === 'live' || m.status === 'paused') && 
-        m.publishLive
-    );
-    
-    matches.forEach(m => {
-        const team1 = m.team1;
-        const team2 = m.team2;
-        const s1 = t.standings[team1];
-        const s2 = t.standings[team2];
-        if (!s1 || !s2) return;
-
-        // 1. Points & Win/Loss - ONLY for completed matches
-        if (m.status === 'completed') {
-            s1.played++;
-            s2.played++;
-
-            if (m.winner) {
-                if (t.standings[m.winner]) {
-                    t.standings[m.winner].won++;
-                    t.standings[m.winner].points += 2;
-                }
-                const loser = m.winner === team1 ? team2 : team1;
-                if (t.standings[loser]) t.standings[loser].lost++;
-            } else if (m.resultType === 'tied') {
-                s1.tied++; s1.points += 1;
-                s2.tied++; s2.points += 1;
-            } else if (m.resultType === 'abandoned') {
-                s1.points += 1;
-                s2.points += 1;
-            }
-        }
-
-        // 2. NRR Components - Includes Live data for real-time standings
-        const inn0 = m.innings && m.innings[0];
-        const inn1 = m.innings && m.innings[1];
-        if (!inn0 || !inn1) return;
-
-        const battingFirst = m.battingFirst || team1;
-        const bpo = m.ballsPerOver || 6;
-        const maxBalls = (m.overs || 0) * bpo;
-        const pps = m.playersPerSide || 11;
-
-        // All out rule: if all wickets down, use full quota of balls
-        const b0 = (inn0.wickets >= pps - 1) ? maxBalls : (inn0.balls || 0);
-        const b1 = (inn1.wickets >= pps - 1) ? maxBalls : (inn1.balls || 0);
-
-        if (battingFirst === team1) {
-            // Team 1 batted first
-            s1.runsScored += (inn0.runs || 0); s1.ballsFaced += b0;
-            s2.runsConceded += (inn0.runs || 0); s2.ballsBowled += b0;
-            s2.runsScored += (inn1.runs || 0); s2.ballsFaced += b1;
-            s1.runsConceded += (inn1.runs || 0); s1.ballsBowled += b1;
-        } else {
-            // Team 2 batted first
-            s2.runsScored += (inn0.runs || 0); s2.ballsFaced += b0;
-            s1.runsConceded += (inn0.runs || 0); s1.ballsBowled += b0;
-            s1.runsScored += (inn1.runs || 0); s1.ballsFaced += b1;
-            s2.runsConceded += (inn1.runs || 0); s2.ballsBowled += b1;
-        }
-    });
-
-    // 3. Final NRR Calculation
-    t.teams.forEach(team => {
-        const s = t.standings[team];
-        const bpo = t.ballsPerOver || 6;
-        const batRR = s.ballsFaced ? (s.runsScored / (s.ballsFaced / bpo)) : 0;
-        const bowlRR = s.ballsBowled ? (s.runsConceded / (s.ballsBowled / bpo)) : 0;
-        s.nrr = parseFloat((batRR - bowlRR).toFixed(3));
-    });
+function refreshTournamentStandingsUI() {
+    if (currentTab !== 'tournament' || !selectedTournId) return;
+    const t = DB.getTournament(selectedTournId);
+    if (!t) return;
+    computeTournamentStandings(t);
+    const content = document.getElementById('tourn-sub-content');
+    if (content && selectedTournSubTab && !['bracket', 'fixtures', 'matches'].includes(selectedTournSubTab)) {
+        content.innerHTML = buildTournSubTab(t, selectedTournSubTab);
+    }
+    const details = document.getElementById('tournament-details');
+    if (details) {
+        const tournMatches = getTournamentMatches(t.id);
+        const completedMatches = tournMatches.filter((m) => m.status === 'completed').length;
+        const liveMatches = tournMatches.filter((m) => m.status === 'live' || m.status === 'paused').length;
+        const playedEl = details.querySelector('.tsm-item:nth-child(2) .tsm-val');
+        const liveEl = details.querySelector('.tsm-item:nth-child(3) .tsm-val');
+        if (playedEl) playedEl.textContent = String(completedMatches);
+        if (liveEl) liveEl.textContent = String(liveMatches);
+    }
 }
 
 function renderRecent() {
@@ -917,7 +913,7 @@ function renderMatchDetailContent(m) {
             <div style="padding:32px 32px 24px; background: linear-gradient(135deg, #1a1a1a, #000); border-radius: 20px 20px 0 0; border-bottom: 1px solid rgba(255,255,255,0.1)">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
                     <span class="match-type-badge badge badge-${m.type === 'tournament' ? 'amber' : 'blue'}" style="margin:0">${typeLabel}</span>
-                    <a href="overlay.html?match=${m.id}" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none; font-weight:800; box-shadow: 0 4px 15px rgba(255,193,7,0.2)">
+                    <a href="overlay.html?${m.tournamentId ? 'tournament=' + m.tournamentId + '&' : ''}match=${m.id}&obs=1" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none; font-weight:800; box-shadow: 0 4px 15px rgba(255,193,7,0.2)">
                         📺 TV BROADCAST
                     </a>
                 </div>
@@ -947,12 +943,22 @@ function closeMatchDetail() {
 }
 
 async function generateMatchPDF(matchId) {
+    if (typeof html2pdf === 'undefined') {
+        showToast('PDF library loading — wait a moment and try again', 'error');
+        return;
+    }
+    if (!matchId || !DB.getMatch(matchId)) {
+        showToast('Match data not found', 'error');
+        return;
+    }
     if (typeof MatchReportEngine !== 'undefined' && MatchReportEngine.generatePDF) {
+        showToast('Generating match report…', 'default');
         await MatchReportEngine.generatePDF(matchId);
     } else {
-        showToast('Report Engine not loaded', 'error');
+        showToast('Report engine not loaded — refresh the page', 'error');
     }
 }
+window.generateMatchPDF = generateMatchPDF;
 
 // ========== PLAYER STATS CARD GENERATOR ==========
 let activeStatsPlayer = null;
@@ -1159,159 +1165,41 @@ async function generateFinalStatsCard() {
 
 async function generateTournamentPDF(tournId) {
     const t = DB.getTournament(tournId);
-    if (!t) return showToast('Tournament not found', 'error');
-
-    showToast('📊 Generating Season Analytics Review...', 'default');
+    if (!t) {
+        showToast('Tournament not found', 'error');
+        return;
+    }
     computeTournamentStandings(t);
-
-    const sortedStandings = t.teams
-        .map(name => ({ name, ...(t.standings[name] || {}) }))
-        .sort((a, b) => (b.points || 0) - (a.points || 0) || (b.nrr || 0) - (a.nrr || 0));
-
-    const allMatches = (t.matches || []).map(mId => DB.getMatch(mId)).filter(m => m);
-    const completed = allMatches.filter(m => m.status === 'completed');
-    const batsmen = getBestBatsmen(t.id).slice(0, 10);
-    const bowlers = getBestBowlers(t.id).slice(0, 10);
-    const generatedAt = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
-
-    const container = document.createElement('div');
-    // Using absolute with 0 opacity for stability
-    container.style = `position:absolute; top:0; left:0; width:1000px; background:#fff; color:#111; font-family:'Outfit',sans-serif; z-index:-1; opacity:0; pointer-events:none;`;
-
-    let html = `
-    <div style="padding:60px 50px; background:linear-gradient(135deg, #0a0e27 0%, #1a237e 100%); color:#fff; text-align:center; border-radius:0 0 30px 30px; position:relative; overflow:hidden">
-        <div style="position:absolute; top:-40px; right:-40px; width:180px; height:180px; background:rgba(255,193,7,0.1); border-radius:50%"></div>
-        <div style="font-size:56px; font-weight:950; letter-spacing:-3px; margin-bottom:5px; line-height:1">SLCRICK<span style="color:#ffc107">PRO</span></div>
-        <div style="font-size:13px; letter-spacing:8px; font-weight:400; opacity:0.6; margin-bottom:40px; text-transform:uppercase">Season Performance Analytics</div>
-        
-        <div style="font-size:42px; font-weight:900; color:#ffc107; margin-bottom:10px; line-height:1.2">${(t.name || 'Tournament').toUpperCase()}</div>
-        <div style="font-size:16px; opacity:0.8; font-weight:500; letter-spacing:1px">${capitalize(t.format || 'League')} Format · ${t.overs || 0} Overs · ${t.teams?.length || 0} Professional Teams</div>
-        
-        <div style="margin-top:60px; display:flex; justify-content:center; gap:80px">
-            <div style="text-align:center"><div style="font-size:44px; font-weight:950">${completed.length}</div><div style="font-size:10px; opacity:0.5; font-weight:900; letter-spacing:2px">MATCHES FINISHED</div></div>
-            <div style="width:1px; background:rgba(255,255,255,0.15)"></div>
-            <div style="text-align:center"><div style="font-size:44px; font-weight:950">${allMatches.length}</div><div style="font-size:10px; opacity:0.5; font-weight:900; letter-spacing:2px">SCHEDULED TOTAL</div></div>
-            <div style="width:1px; background:rgba(255,255,255,0.15)"></div>
-            <div style="text-align:center"><div style="font-size:44px; font-weight:950">${t.teams?.length || 0}</div><div style="font-size:10px; opacity:0.5; font-weight:900; letter-spacing:2px">PARTICIPATING TEAMS</div></div>
-        </div>
-    </div>
-
-    <div style="padding:60px 50px">
-        <div style="font-size:22px; font-weight:900; color:#1a237e; border-left:6px solid #ffc107; padding-left:20px; margin-bottom:30px; letter-spacing:1px">OFFICIAL LEAGUE STANDINGS</div>
-        <table style="width:100%; border-collapse:collapse; margin-bottom:60px; font-size:15px; box-shadow:0 15px 45px rgba(0,0,0,0.03); border-radius:15px; overflow:hidden">
-            <thead><tr style="background:#f1f3f8; text-align:left; color:#1a237e">
-                <th style="padding:18px">POS</th><th style="padding:18px">TEAM ENTITY</th><th style="padding:18px; text-align:center">P</th><th style="padding:18px; text-align:center">W</th><th style="padding:18px; text-align:center">L</th><th style="padding:18px; text-align:center">PTS</th><th style="padding:18px; text-align:right">NRR</th>
-            </tr></thead>
-            <tbody>
-                ${sortedStandings.map((s, i) => `
-                <tr style="border-bottom:1px solid #f0f0f0; ${i < 4 ? 'background:rgba(255,193,7,0.03)' : ''}">
-                    <td style="padding:18px; font-weight:900; color:${i < 3 ? '#ffc107' : '#aaa'}; font-size:16px">${i + 1}</td>
-                    <td style="padding:18px; font-weight:800; color:#333">${s.name || 'Unknown Team'}</td>
-                    <td style="padding:18px; text-align:center">${s.played || 0}</td>
-                    <td style="padding:18px; font-weight:700; color:#2e7d32; text-align:center">${s.won || 0}</td>
-                    <td style="padding:18px; text-align:center">${s.lost || 0}</td>
-                    <td style="padding:18px; font-weight:950; color:#1a237e; text-align:center">${s.points || 0}</td>
-                    <td style="padding:18px; font-weight:800; text-align:right; color:${(s.nrr || 0) >= 0 ? '#2e7d32' : '#c62828'}; font-family:monospace">${(s.nrr || 0).toFixed(3)}</td>
-                </tr>`).join('')}
-            </tbody>
-        </table>
-
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:45px; margin-bottom:65px">
-            <div style="background:#fcfdff; border:1px solid #eef2f7; border-radius:20px; padding:30px">
-                <div style="font-size:18px; font-weight:900; color:#1a237e; border-left:5px solid #ffc107; padding-left:15px; margin-bottom:20px; letter-spacing:1px">BATTING LEADERS</div>
-                <table style="width:100%; border-collapse:collapse; font-size:13px">
-                    <thead><tr style="background:#1a237e; color:#fff"><th style="padding:12px; border-radius:8px 0 0 8px">PLAYER</th><th style="padding:12px; text-align:center">RUNS</th><th style="padding:12px; text-align:right; border-radius:0 8px 8px 0">SR</th></tr></thead>
-                    <tbody>
-                    ${batsmen.length ? batsmen.map(b => `<tr style="border-bottom:1px solid #eef2f7"><td style="padding:12px; font-weight:700; color:#333">${b.name || 'Unknown'}</td><td style="padding:12px; font-weight:900; color:#1a237e; text-align:center">${b.runs || 0}</td><td style="padding:12px; color:#888; text-align:right; font-family:monospace">${b.sr || '0.0'}</td></tr>`).join('') : '<tr><td colspan="3" style="padding:20px; text-align:center; color:#999">No batting data available</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-            <div style="background:#fffcfc; border:1px solid #f7eeee; border-radius:20px; padding:30px">
-                <div style="font-size:18px; font-weight:900; color:#c62828; border-left:5px solid #ffc107; padding-left:15px; margin-bottom:20px; letter-spacing:1px">BOWLING LEADERS</div>
-                <table style="width:100%; border-collapse:collapse; font-size:13px">
-                    <thead><tr style="background:#c62828; color:#fff"><th style="padding:12px; border-radius:8px 0 0 8px">PLAYER</th><th style="padding:12px; text-align:center">WKTS</th><th style="padding:12px; text-align:right; border-radius:0 8px 8px 0">ECON</th></tr></thead>
-                    <tbody>
-                    ${bowlers.length ? bowlers.map(b => `<tr style="border-bottom:1px solid #f7eeee"><td style="padding:12px; font-weight:700; color:#333">${b.name || 'Unknown'}</td><td style="padding:12px; font-weight:900; color:#c62828; text-align:center">${b.wickets || 0}</td><td style="padding:12px; color:#888; text-align:right; font-family:monospace">${b.econ || '0.0'}</td></tr>`).join('') : '<tr><td colspan="3" style="padding:20px; text-align:center; color:#999">No bowling data available</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div style="font-size:18px; font-weight:900; color:#1a237e; border-left:5px solid #ffc107; padding-left:15px; margin-bottom:25px; letter-spacing:1px">FULL TOURNAMENT MATCH LOG</div>
-        <table style="width:100%; border-collapse:collapse; font-size:14px; background:#fff; border-radius:15px; overflow:hidden; border:1px solid #f0f0f0">
-            <thead><tr style="background:#f8f9fa; text-align:left; color:#1a237e"><th style="padding:18px">MATCH FIXTURE</th><th style="padding:18px; text-align:right">OFFICIAL STATUS / RESULT</th></tr></thead>
-            <tbody>
-            ${allMatches.map((m, i) => `
-                <tr style="border-bottom:1px solid #f5f5f5">
-                    <td style="padding:18px">
-                        <div style="font-weight:800; color:#333; font-size:16px">${m.team1 || 'TBD'} <span style="color:#ccc; font-weight:300; margin:0 5px">vs</span> ${m.team2 || 'TBD'}</div>
-                        <div style="font-size:11px; color:#999; margin-top:4px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px">${m.scheduledName || (m.knockout ? 'Knockout Stage' : 'Group Stage')}</div>
-                    </td>
-                    <td style="padding:18px; text-align:right">
-                         <div style="font-weight:900; font-size:15px; color:${m.status === 'completed' ? '#1b5e20' : (m.status === 'live' ? '#d32f2f' : '#666')}">${m.status === 'completed' ? (m.result || 'Match Finalized') : (m.status === 'live' ? '⚡ LIVE NOW' : '🗓 Scheduled')}</div>
-                    </td>
-                </tr>`).join('')}
-            </tbody>
-        </table>
-
-        <div style="margin-top:100px; text-align:center; padding-top:30px; border-top:1px solid #eee">
-            <div style="font-size:13px; font-weight:900; color:#ccc; letter-spacing:4px; text-transform:uppercase">SLCRICKPRO Season Management v4.0</div>
-            <div style="font-size:11px; color:#ddd; margin-top:8px; font-weight:600">Confidential Report Generated on ${generatedAt}</div>
-        </div>
-    </div>
-    `;
-
-    container.innerHTML = html;
-    document.body.appendChild(container);
-
-    const opt = {
-        margin: [10, 0, 10, 0],
-        filename: `SLCRICKPRO_Season_${(t.name || 'Tournament').replace(/\s+/g,'_')}.pdf`,
-        image: { type: 'jpeg', quality: 1.0 },
-        html2canvas: { 
-            scale: 2, 
-            useCORS: true, 
-            logging: false,
-            letterRendering: true,
-            allowTaint: false 
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-
-    try {
-        await new Promise(r => setTimeout(r, 2500));
-        await html2pdf().set(opt).from(container).save();
-        showToast('📈 Season Analytics Exported!', 'success');
-    } catch (err) {
-        console.error('Tournament PDF Export Error:', err);
-        showToast('❌ PDF Export Failed', 'error');
-    } finally {
-        container.remove();
+    showToast('Building full tournament PDF (all matches, table, stats)…', 'default');
+    if (typeof MatchReportEngine !== 'undefined' && MatchReportEngine.generateTournamentPDF) {
+        await MatchReportEngine.generateTournamentPDF(tournId);
+        return;
     }
+    showToast('PDF report engine not loaded — refresh the page', 'error');
 }
-
-// ========== GLOBAL SYNC HANDLERS ==========
-
-function renderOngoing() {
-    if (currentTab === 'live') renderLive();
-    if (currentTab === 'tournament') {
-        if (selectedTournId) {
-            renderTournDetails(selectedTournId);
-        } else {
-            renderTournamentSelector();
-        }
-    }
-    if (currentTab === 'recent') renderRecent();
-}
+window.generateTournamentPDF = generateTournamentPDF;
 
 window.switchTab = switchTab;
 window.renderTournDetails = renderTournDetails;
 window.refreshAll = refreshAll;
-window.renderOngoing = renderOngoing;
+window.computeTournamentStandings = computeTournamentStandings;
+window.getTournamentMatches = getTournamentMatches;
+window.refreshTournamentStandingsUI = refreshTournamentStandingsUI;
 
 // Handle cross-tab updates (e.g. from score-match.html)
 window.addEventListener('storage', (e) => {
     if (e.key === 'cricpro_force_update') {
         renderOngoing();
+        refreshTournamentStandingsUI();
     }
 });
+
+window.addEventListener('slcrick-live-update', () => {
+    refreshTournamentStandingsUI();
+});
+
+setInterval(() => {
+    if (currentTab === 'tournament' && selectedTournId) {
+        refreshTournamentStandingsUI();
+    }
+}, 6000);

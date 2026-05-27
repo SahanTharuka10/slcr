@@ -12,6 +12,8 @@
         rel="stylesheet" />
     <link rel="stylesheet" href="../css/main.css" />
     <link rel="stylesheet" href="../css/scorer.css" />
+    <link rel="stylesheet" href="../css/obs-popup.css" />
+    <link rel="stylesheet" href="../css/popup-score.css" />
 </head>
 
 <body class="page-wrapper">
@@ -40,25 +42,6 @@
           </div>
         </div>
         <div style="margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap" id="header-actions">
-            <div id="obs-url-panel" style="display:none;max-width:520px;font-size:11px;background:rgba(124,77,255,0.12);border:1px solid rgba(124,77,255,0.35);border-radius:10px;padding:8px 10px">
-                <div style="font-weight:800;color:#b39ddb;margin-bottom:4px">📺 OBS URLs</div>
-                <div class="obs-tournament-hint" style="font-size:10px;color:#94a3b8;margin-bottom:6px;line-height:1.35"></div>
-                <label style="font-size:9px;opacity:0.85;color:#b39ddb">🌐 Site share · <span id="obs-full-size-hint">1920×1080</span></label>
-                <input type="text" id="obs-url-website" readonly class="form-input" style="font-size:10px;height:28px;padding:4px 8px;font-family:monospace;margin-bottom:4px;border-color:rgba(124,77,255,0.45)" />
-                <label style="font-size:9px;opacity:0.7">This PC / LAN</label>
-                <input type="text" id="obs-url-combined" readonly class="form-input" style="font-size:10px;height:28px;padding:4px 8px;font-family:monospace;margin-bottom:4px" />
-                <input type="text" id="obs-url-hotkeys" readonly class="form-input" style="display:none" aria-hidden="true" />
-                <label style="font-size:9px;opacity:0.55">Optional: scorebar strip only</label>
-                <input type="text" id="obs-url-scorebar" readonly class="form-input" style="font-size:10px;height:28px;padding:4px 8px;font-family:monospace;margin-bottom:4px;opacity:0.85" />
-                <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-                    <button type="button" class="btn btn-green btn-sm" onclick="copyObsWebsiteUrl()">🌐 Site URL</button>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="openObsWebsitePreview()">👁 Preview</button>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="setupObsQuick()">⚡ Local OBS</button>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="copyObsCombinedUrl()">📋 LAN</button>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="copyObsScorebarUrl()" title="Strip only — advanced">📋 Strip</button>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="openObsSetupModal()">❓</button>
-                </div>
-            </div>
             <button class="theme-toggle" id="theme-toggle-scorer" onclick="toggleTheme()" title="Switch Day/Dark Mode" style="width:36px;height:36px">
                 <svg class="svg-theme-icon moon-icon"><use href="#icon-moon"></use></svg>
                 <svg class="svg-theme-icon sun-icon"><use href="#icon-sun"></use></svg>
@@ -418,7 +401,6 @@
                         <button type="button" class="btn-swap-ends btn-swap-ends--mobile" onclick="swapBatsmenEnds()" title="Swap ends">⇄</button>
                         <div class="mobile-batter-cell" id="mob-bat-1" onclick="setStriker(1)">
                             <div class="mobile-batter-name scorer-name-editable" id="mob-bat-name-1" onclick="event.stopPropagation();editPlayerName('batsman', 1)" title="Tap to edit name">Batter 2</div>
-                            <div class="mobile-batter-name" id="mob-bat-name-1">Batter 2</div>
                             <div class="mobile-batter-score" id="mob-bat-score-1">0</div>
                             <div class="mobile-batter-balls" id="mob-bat-balls-1">(0b)</div>
                         </div>
@@ -430,12 +412,17 @@
                         <span class="mobile-bowler-stats" id="mob-bowler-stats">0.0 ov | 0R | 0W</span>
                     </div>
 
-                    <!-- Undo / Redo compact -->
-                    <div style="display:flex; gap:8px;">
-                        <button class="btn btn-ghost btn-full" onclick="undoAction()" id="undo-btn" style="font-size:13px; padding:10px;">↩ Undo</button>
-                        <button class="btn btn-ghost btn-full" onclick="redoAction()" id="redo-btn" style="font-size:13px; padding:10px;">↪ Redo</button>
+                    <!-- Undo / Redo -->
+                    <div class="scorer-undo-row">
+                        <button type="button" class="btn btn-ghost scorer-undo-btn" onclick="undoAction()" id="undo-btn" title="Undo">↩</button>
+                        <button type="button" class="btn btn-ghost scorer-undo-btn" onclick="redoAction()" id="redo-btn" title="Redo">↪</button>
+                        <span id="last-ball-info" class="scorer-undo-hint"></span>
                     </div>
-                    <div id="last-ball-info" style="font-size:11px;color:var(--c-muted);text-align:center;"></div>
+
+                    <div id="desktop-popup-bar" class="desktop-popup-bar" style="display:none;gap:6px;flex-wrap:wrap">
+                        <button type="button" class="btn btn-ghost btn-sm" style="flex:1;min-width:120px;font-size:11px;font-weight:800" onclick="openPopupScorecardWindow()">🎛 Pop-up Score</button>
+                        <button type="button" class="btn btn-primary btn-sm" style="flex:1;min-width:120px;font-size:11px;font-weight:800" onclick="openObsPopupWindow()">📡 Pop-up OBS</button>
+                    </div>
 
                     <!-- Ball buttons -->
                     <div class="card" id="card-buttons">
@@ -546,6 +533,20 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <div class="card popup-score-extra" id="card-partnership">
+                        <div class="card-head">🤝 Partnership</div>
+                        <div class="popup-partner-stats">
+                            <div class="stat-box"><div class="stat-val" id="partner-runs">0</div><div class="stat-lbl">R</div></div>
+                            <div class="stat-box"><div class="stat-val" id="partner-balls">0</div><div class="stat-lbl">B</div></div>
+                            <div class="stat-box"><div class="stat-val" id="partner-sr">0.0</div><div class="stat-lbl">SR</div></div>
+                        </div>
+                    </div>
+
+                    <div class="card popup-score-extra" id="card-fow">
+                        <div class="card-head">💥 FoW</div>
+                        <div id="fow-list" class="popup-fow-list">No wickets yet</div>
+                    </div>
                 </div> <!-- End scoring-stats-col -->
             </div> <!-- End desktop-scoring-grid -->
         </div> <!-- End panel-scoring -->
@@ -569,29 +570,18 @@
                 </div>
 
 
-                <!-- Partnership & FoW -->
-                <div class="card" id="card-partnership" style="margin-bottom:16px">
+                <div class="card scorecard-tab-only" style="margin-bottom:16px">
                     <div class="card-head">🤝 Partnership</div>
                     <div style="display:flex;gap:24px;padding:8px 0">
-                        <div class="stat-box" style="flex:1">
-                            <div class="stat-val" id="partner-runs">0</div>
-                            <div class="stat-lbl">Runs</div>
-                        </div>
-                        <div class="stat-box" style="flex:1">
-                            <div class="stat-val" id="partner-balls">0</div>
-                            <div class="stat-lbl">Balls</div>
-                        </div>
-                        <div class="stat-box" style="flex:1">
-                            <div class="stat-val" id="partner-sr">0.0</div>
-                            <div class="stat-lbl">SR</div>
-                        </div>
+                        <div class="stat-box" style="flex:1"><div class="stat-val" id="partner-runs-sc">0</div><div class="stat-lbl">Runs</div></div>
+                        <div class="stat-box" style="flex:1"><div class="stat-val" id="partner-balls-sc">0</div><div class="stat-lbl">Balls</div></div>
+                        <div class="stat-box" style="flex:1"><div class="stat-val" id="partner-sr-sc">0.0</div><div class="stat-lbl">SR</div></div>
                     </div>
                 </div>
 
-                <!-- Fall of Wickets -->
-                <div class="card" id="card-fow">
+                <div class="card scorecard-tab-only" id="card-fow-sc">
                     <div class="card-head">💥 Fall of Wickets</div>
-                    <div id="fow-list" style="font-size:12px;color:var(--c-muted)">No wickets yet</div>
+                    <div id="fow-list-sc" style="font-size:12px;color:var(--c-muted)">No wickets yet</div>
                 </div>
 
             </div>
@@ -606,10 +596,10 @@
                 </div>
                 <div style="display:flex; gap:12px; align-items:center;">
                     <div style="background:rgba(255,255,255,0.05); border:1px solid var(--c-border); padding:8px 16px; border-radius:20px; font-weight:800; font-size:14px" id="bm-score-indicator">
-                        0/0 (0.0)
+                        0/0
                     </div>
                     <div style="background:rgba(0, 200, 83, 0.15); color:#00e676; border:1px solid rgba(0, 200, 83, 0.3); padding:8px 16px; border-radius:20px; font-weight:800; font-size:12px">
-                        LIVE • <span id="bm-vs-indicator">A vs B</span>
+                        LIVE • <span id="bm-vs-indicator">Overlay linked</span>
                     </div>
                 </div>
             </div>
@@ -842,8 +832,8 @@
                     <!-- MATCHES PANEL -->
                     <div class="card" style="border:1px solid rgba(0,230,118,0.2); background:rgba(0,0,0,0.2); display:flex; flex-direction:column; max-height:300px;">
                         <div class="card-head" style="font-size:11px; margin-bottom:8px; color:#00e676; display:flex; justify-content:space-between; align-items:center; flex-shrink:0">
-                            <span>📅 MATCHES</span>
-                            <span id="bm-match-count" style="font-size:10px; opacity:0.5">0 matches</span>
+                            <span>📡 LIVE MATCH + LINK</span>
+                            <span id="bm-match-count" style="font-size:10px; opacity:0.5">0 live</span>
                         </div>
                         <div id="bm-match-list" style="overflow-y:auto; flex:1; padding-right:2px; scrollbar-width:thin">
                             <div style="padding:16px;text-align:center;opacity:0.4;font-size:11px">Loading matches...</div>
@@ -1140,36 +1130,50 @@
                         container.innerHTML = '<div style="padding:16px;text-align:center;opacity:0.4;font-size:12px">No tournament matches found</div>';
                         return;
                     }
-                    if (countEl) countEl.textContent = t.matches.length + ' matches';
+                    const liveMatches = t.matches
+                        .map((mId) => DB.getMatch(mId))
+                        .filter((m) => m && ['live', 'paused'].includes(String(m.status || '').toLowerCase()));
+                    if (countEl) countEl.textContent = `${liveMatches.length} live`;
+                    if (!liveMatches.length) {
+                        container.innerHTML = '<div style="padding:16px;text-align:center;opacity:0.4;font-size:12px">No live/paused match</div>';
+                        return;
+                    }
 
                     let html = '';
-                    t.matches.forEach((mId, idx) => {
-                        const m = DB.getMatch(mId);
-                        if (!m) return;
+                    liveMatches.forEach((m, idx) => {
+                        const mId = m.id;
                         const isActive = mId === activeId;
-                        const rawStatus = (m.status || 'scheduled').toLowerCase();
-                        const isCompleted = rawStatus === 'completed' || rawStatus === 'finished' || rawStatus === 'complete';
-                        const isLive = rawStatus === 'live';
-                        const statusColor = isLive ? '#00e676' : isCompleted ? '#7c4dff' : '#ffc107';
-                        const statusText = isLive ? '● LIVE' : isCompleted ? '✓ COMPLETE' : '○ SCHEDULED';
                         const inn = m.innings && m.innings[m.currentInnings || 0];
-                        const scoreStr = (inn && isLive) ? `${inn.runs||0}/${inn.wickets||0}` : (isCompleted ? 'FT' : '—');
-
-                        html += `<div onclick="switchBroadcastMatch('${mId}')" style="
-                            display:flex; align-items:center; gap:10px; padding:9px 10px;
-                            border-radius:10px; cursor:pointer; margin-bottom:5px;
+                        const scoreStr = inn ? `${inn.runs || 0}/${inn.wickets || 0}` : '—';
+                        html += `<div style="
+                            padding:10px;border-radius:10px;margin-bottom:6px;
                             background:${isActive ? 'rgba(0,230,118,0.1)' : 'rgba(255,255,255,0.03)'};
-                            border:1px solid ${isActive ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.06)'};
-                            transition:all 0.2s" onmouseover="this.style.background='rgba(255,255,255,0.07)'" onmouseout="this.style.background='${isActive ? 'rgba(0,230,118,0.1)' : 'rgba(255,255,255,0.03)'}'">
-                            <div style="flex:1; min-width:0">
-                                <div style="font-weight:800; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${m.team1||'TBD'} vs ${m.team2||'TBD'}</div>
-                                <div style="font-size:9px; color:${statusColor}; margin-top:2px; font-weight:700">${statusText} · Match ${idx+1}</div>
+                            border:1px solid ${isActive ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.08)'};">
+                            <div onclick="switchBroadcastMatch('${mId}')" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                                <div style="flex:1;min-width:0">
+                                    <div style="font-weight:800;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.team1||'TBD'} vs ${m.team2||'TBD'}</div>
+                                    <div style="font-size:9px;color:#00e676;margin-top:2px;font-weight:700">● ${String(m.status || 'live').toUpperCase()} · Match ${idx + 1}</div>
+                                </div>
+                                <div style="font-weight:900;font-size:12px;color:${isActive ? '#00e676' : 'var(--c-muted)'};font-family:monospace">${scoreStr}</div>
+                                ${isActive ? '<div style="font-size:8px;background:#00e676;color:#000;padding:2px 5px;border-radius:5px;font-weight:900;flex-shrink:0">ON AIR</div>' : ''}
                             </div>
-                            <div style="font-weight:900; font-size:12px; color:${isActive?'#00e676':'var(--c-muted)'}; font-family:monospace">${scoreStr}</div>
-                            ${isActive ? '<div style="font-size:8px;background:#00e676;color:#000;padding:2px 5px;border-radius:5px;font-weight:900;flex-shrink:0">ON AIR</div>' : ''}
+                            <button type="button" onclick="copyObsWebsiteUrlForMatch('${mId}')" style="margin-top:8px;width:100%;border:1px solid rgba(0,230,118,0.35);background:rgba(0,230,118,0.12);color:#a5f3c4;border-radius:8px;height:30px;font-size:10px;font-weight:800;cursor:pointer">🔗 COPY SITE OVERLAY LINK</button>
                         </div>`;
                     });
-                    container.innerHTML = html || '<div style="padding:16px;text-align:center;opacity:0.4">No matches</div>';
+                    container.innerHTML = html;
+                }
+
+                async function copyObsWebsiteUrlForMatch(matchId) {
+                    const m = DB.getMatch(matchId);
+                    if (!m) return showToast('Match not found', 'error');
+                    const url = await window.getObsWebsiteUrl?.(m.id, m.tournamentId);
+                    if (!url) return showToast('Overlay URL unavailable', 'error');
+                    try {
+                        await navigator.clipboard.writeText(url);
+                        showToast('🌐 Live overlay link copied', 'success');
+                    } catch (_) {
+                        showToast(url, 'default');
+                    }
                 }
 
                 // ── Match Switcher ────────────────────────────
@@ -1230,7 +1234,8 @@
         </div>
         <div class="content-container" style="max-width:720px; margin: 0 auto;">
             
-            <div class="card" style="margin-bottom:20px; text-align: center; display: flex; justify-content: center; gap: 10px;">
+            <div class="card" style="margin-bottom:20px; text-align: center; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
+                 <button class="btn btn-green" onclick="downloadTournamentSummaryPDF()">📄 Download Tournament PDF</button>
                  <button class="btn btn-primary" onclick="openTournamentMatchesModal(currentMatch.tournamentId)">📅 Match Schedule</button>
                  <button class="btn btn-ghost" onclick="location.href='../index.html'">🏠 Home</button>
             </div>
@@ -1508,7 +1513,7 @@
 
             <div class="form-group">
                 <label class="form-label">Runs scored on wicket ball</label>
-                <div style="display:flex;gap:8px">
+                <div class="modal-runs-pick modal-runs-pick--4">
                     <button class="wr-btn active" data-val="0" onclick="selectWicketRuns(this)">0</button>
                     <button class="wr-btn" data-val="1" onclick="selectWicketRuns(this)">1</button>
                     <button class="wr-btn" data-val="2" onclick="selectWicketRuns(this)">2</button>
@@ -1536,11 +1541,6 @@
             <div class="modal-sub" id="new-batsman-sub">Enter batsman details</div>
 
             <div class="form-group">
-                <label class="form-label">Player ID (Optional – auto-fill from database)</label>
-                <div style="display:flex;gap:8px">
-                    <input type="text" class="form-input" id="new-bat-pid" placeholder="e.g. CP-001" />
-                    <button class="btn btn-ghost" onclick="lookupPlayer()" style="flex-shrink:0">🔍 Find</button>
-                </div>
                 <div id="player-lookup-result" style="margin-top:8px;font-size:13px;color:#00e676"></div>
             </div>
 
@@ -1577,9 +1577,6 @@
             <div class="form-group" style="padding-bottom:12px;border-bottom:1px solid var(--c-border)">
                 <label class="form-label" style="color:var(--c-amber)">Striker</label>
                 <div style="display:flex;gap:8px;margin-bottom:8px">
-                    <input type="text" class="form-input" id="open-bat1-pid" placeholder="Player ID (Optional)"
-                        style="width:120px" />
-                    <button class="btn btn-ghost btn-sm" onclick="lookupPlayerOpen(1)">🔍</button>
                     <input type="text" class="form-input" id="open-bat1-name" placeholder="Name..." style="flex:1"
                         list="db-players-list" oninput="applySquadNameInput(this,'batting','batsman')" />
                 </div>
@@ -1589,9 +1586,6 @@
             <div class="form-group" style="padding-bottom:12px">
                 <label class="form-label" style="color:var(--c-amber)">Non-Striker</label>
                 <div style="display:flex;gap:8px;margin-bottom:8px">
-                    <input type="text" class="form-input" id="open-bat2-pid" placeholder="Player ID (Optional)"
-                        style="width:120px" />
-                    <button class="btn btn-ghost btn-sm" onclick="lookupPlayerOpen(2)">🔍</button>
                     <input type="text" class="form-input" id="open-bat2-name" placeholder="Name..." style="flex:1"
                         list="db-players-list" oninput="applySquadNameInput(this,'batting','nonstriker')" />
                 </div>
@@ -1609,14 +1603,6 @@
             <div style="font-size:48px;text-align:center;margin-bottom:8px">⚾</div>
             <div class="modal-title">New Bowler</div>
             <div class="modal-sub">Select bowler for the next over</div>
-
-            <div class="form-group">
-                <label class="form-label">Player ID (Optional)</label>
-                <div class="bowler-id-group">
-                    <input type="text" class="form-input" id="new-bowl-pid" placeholder="e.g. CP-001" />
-                    <button class="btn btn-ghost" onclick="lookupBowler()">🔍 Find</button>
-                </div>
-            </div>
 
             <div class="form-group">
                 <label class="form-label">Bowler Name</label>
@@ -1640,7 +1626,7 @@
         <div class="modal-box">
             <div class="modal-title">Wide Ball</div>
             <div class="modal-sub">Extra runs (overthrows)? <small style="opacity:0.6">+1 wide penalty auto-added</small></div>
-            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin:16px 0">
+            <div class="modal-runs-pick modal-runs-pick--wide">
                 <button class="wr-btn active" data-val="0" onclick="selectWideRuns(this)">
                     <div style="font-size:10px;opacity:0.6">ONLY</div>WD
                 </button>
@@ -1673,15 +1659,11 @@
         <div class="modal-box">
             <div class="modal-title" id="bye-modal-title">Bye Runs</div>
             <div class="modal-sub">How many runs?</div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin:16px 0">
-                <button class="wr-btn" data-val="1" onclick="selectByeRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">1</button>
-                <button class="wr-btn" data-val="2" onclick="selectByeRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">2</button>
-                <button class="wr-btn" data-val="3" onclick="selectByeRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">3</button>
-                <button class="wr-btn" data-val="4" onclick="selectByeRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">4</button>
+            <div class="modal-runs-pick modal-runs-pick--4">
+                <button class="wr-btn active" data-val="1" onclick="selectByeRuns(this)">1</button>
+                <button class="wr-btn" data-val="2" onclick="selectByeRuns(this)">2</button>
+                <button class="wr-btn" data-val="3" onclick="selectByeRuns(this)">3</button>
+                <button class="wr-btn" data-val="4" onclick="selectByeRuns(this)">4</button>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-ghost" onclick="closeModal('modal-bye')">Cancel</button>
@@ -1695,19 +1677,13 @@
         <div class="modal-box">
             <div class="modal-title">No Ball Runs</div>
             <div class="modal-sub">Extra runs from the bat?</div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin:16px 0">
-                <button class="wr-btn" data-val="0" onclick="selectNoballRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">0</button>
-                <button class="wr-btn" data-val="1" onclick="selectNoballRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">1</button>
-                <button class="wr-btn" data-val="2" onclick="selectNoballRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">2</button>
-                <button class="wr-btn" data-val="3" onclick="selectNoballRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">3</button>
-                <button class="wr-btn" data-val="4" onclick="selectNoballRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">4</button>
-                <button class="wr-btn" data-val="6" onclick="selectNoballRuns(this)"
-                    style="flex:1;padding:16px;font-size:20px">6</button>
+            <div class="modal-runs-pick modal-runs-pick--6">
+                <button class="wr-btn active" data-val="0" onclick="selectNoballRuns(this)">0</button>
+                <button class="wr-btn" data-val="1" onclick="selectNoballRuns(this)">1</button>
+                <button class="wr-btn" data-val="2" onclick="selectNoballRuns(this)">2</button>
+                <button class="wr-btn" data-val="3" onclick="selectNoballRuns(this)">3</button>
+                <button class="wr-btn" data-val="4" onclick="selectNoballRuns(this)">4</button>
+                <button class="wr-btn" data-val="6" onclick="selectNoballRuns(this)">6</button>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-ghost" onclick="closeModal('modal-noball')">Cancel</button>
@@ -1971,6 +1947,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="../js/match-report.js"></script>
+    <script src="../js/tournament-standings.js"></script>
     <script src="../js/broadcast.js"></script>
     <script src="../js/obs-setup.js"></script>
     <script src="../js/match-draw-bridge.js"></script>

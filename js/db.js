@@ -19,16 +19,13 @@
 
     // Global persistence on visibility change (modern best practice)
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-            console.log('📡 [SLCRICKPRO] App hidden, triggering cloud sync...');
-            if (typeof syncCloudData === 'function') syncCloudData({ forceRefresh: true, silent: true });
+        if (document.visibilityState === 'hidden' && window.desktopAPI) {
+            window.desktopAPI.requestPersist();
         }
     });
 
-    // Handle reliable page exit
-    window.addEventListener('pagehide', (event) => {
-        console.log('📡 [SLCRICKPRO] Page hiding, ensuring final sync...');
-        if (typeof syncCloudData === 'function') syncCloudData({ forceRefresh: true, silent: true });
+    window.addEventListener('pagehide', () => {
+        if (window.desktopAPI) window.desktopAPI.requestPersist();
     });
 })();
 
@@ -44,120 +41,118 @@ const DB_KEYS = {
     REPORTS: 'cricpro_reports',
 };
 
-const MATCH_HISTORY_STORAGE_LIMIT = 20;
-const LOCAL_MATCH_CACHE_LIMIT = 48;
-const LOCAL_COMPLETED_MATCH_CACHE_LIMIT = 16;
-let _quotaNoticeShown = false;
+const LOCAL_MATCH_STORE_MAX = () => (window.SLCRICK_DESKTOP ? 100 : 32);
 
-function stripEmbeddedMediaForStorage(value) {
-    if (!value || typeof value !== 'object') return value;
-    Object.keys(value).forEach(key => {
-        const item = value[key];
-        if (typeof item === 'string') {
-            if (item.startsWith('data:')) value[key] = '';
-            return;
-        }
-        if (item && typeof item === 'object') stripEmbeddedMediaForStorage(item);
+/** Site-root asset URL — works from /pages/* and index (avoids /pages/assets/ 404). */
+function resolveAssetUrl(url) {
+    if (url == null || url === '') return '';
+    const s = String(url).trim();
+    if (!s) return '';
+    if (/^(data:|blob:|https?:)/i.test(s)) return s;
+    const m = s.match(/(?:^|\/)(?:\.\.\/)*assets\/(.+)$/i);
+    if (m) return `/assets/${m[1]}`;
+    if (s.startsWith('/')) return s;
+    if (s.startsWith('assets/')) return `/${s}`;
+    return s;
+}
+
+function defaultTeamPhotoUrl() {
+    return '/assets/default-team.svg';
+}
+
+function defaultPlayerPhotoUrl() {
+    return '/assets/default-player.svg';
+}
+
+function stripDataUrlFields(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    ['photo', 'team1Photo', 'team2Photo', 'banner', 'logo'].forEach((key) => {
+        const v = obj[key];
+        if (typeof v === 'string' && v.startsWith('data:')) delete obj[key];
     });
-    return value;
 }
 
-function compactMatchesForQuota(matches) {
-    if (!Array.isArray(matches)) return matches;
-    const sorted = matches
-        .filter(m => m && m.id)
-        .slice()
-        .sort((a, b) => (b.lastUpdated || b.createdAt || 0) - (a.lastUpdated || a.createdAt || 0));
-    const active = sorted.filter(m => !['completed', 'finished'].includes(String(m.status || '').toLowerCase()));
-    const completed = sorted.filter(m => ['completed', 'finished'].includes(String(m.status || '').toLowerCase()));
-    return [...active, ...completed.slice(0, LOCAL_COMPLETED_MATCH_CACHE_LIMIT)]
-        .slice(0, LOCAL_MATCH_CACHE_LIMIT)
-        .sort((a, b) => (a.createdAt || a.lastUpdated || 0) - (b.createdAt || b.lastUpdated || 0));
-}
-
-function isQuotaExceededError(error) {
-    return error && (
-        error.name === 'QuotaExceededError' ||
-        error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
-        error.code === 22 ||
-        error.code === 1014
-    );
-}
-
-function isActiveMatchStatus(status) {
-    const s = String(status || '').toLowerCase();
-    return s === 'live' || s === 'paused';
-}
-
-function prepareMatchForPersistence(match) {
+/** Light copy for localStorage — keeps live score, drops undo stacks & huge photos */
+function slimMatchForLocalStorage(match) {
     if (!match || typeof match !== 'object') return match;
-    const copy = JSON.parse(JSON.stringify(match));
+    let copy;
+    try {
+        copy = JSON.parse(JSON.stringify(match));
+    } catch (_) {
+        return match;
+    }
+    delete copy._scoringUi;
+    delete copy._pendingUiConsumer;
     delete copy._isSyncing;
     delete copy._isBackgroundSync;
-
-    const active = isActiveMatchStatus(copy.status);
-
-    // Browser cache: only live/paused matches keep undo history; others stay lite.
-    if (!active) {
-        delete copy.history;
-        delete copy.redoStack;
-    } else {
-        if (Array.isArray(copy.history) && copy.history.length > MATCH_HISTORY_STORAGE_LIMIT) {
-            copy.history = copy.history.slice(-MATCH_HISTORY_STORAGE_LIMIT);
-        }
-        if (Array.isArray(copy.redoStack) && copy.redoStack.length > MATCH_HISTORY_STORAGE_LIMIT) {
-            copy.redoStack = copy.redoStack.slice(-MATCH_HISTORY_STORAGE_LIMIT);
-        }
+    delete copy._authRetried;
+    delete copy.history;
+    delete copy.redoStack;
+    stripDataUrlFields(copy);
+    if (copy.teamPhotos && typeof copy.teamPhotos === 'object') {
+        Object.keys(copy.teamPhotos).forEach((k) => {
+            const p = copy.teamPhotos[k];
+            if (typeof p === 'string' && p.startsWith('data:')) delete copy.teamPhotos[k];
+        });
+        if (!Object.keys(copy.teamPhotos).length) delete copy.teamPhotos;
     }
-    return stripEmbeddedMediaForStorage(copy);
+    if (Array.isArray(copy.innings)) {
+        copy.innings = copy.innings.map((inn) => {
+            if (!inn) return inn;
+            const i = { ...inn };
+            if (Array.isArray(i.overHistory) && i.overHistory.length > 2) {
+                i.overHistory = i.overHistory.slice(-2);
+            }
+            if (Array.isArray(i.batsmen)) {
+                i.batsmen = i.batsmen.map((b) => {
+                    const x = { ...b };
+                    if (x.photo && String(x.photo).startsWith('data:')) delete x.photo;
+                    return x;
+                });
+            }
+            if (Array.isArray(i.bowlers)) {
+                i.bowlers = i.bowlers.map((b) => {
+                    const x = { ...b };
+                    if (x.photo && String(x.photo).startsWith('data:')) delete x.photo;
+                    return x;
+                });
+            }
+            return i;
+        });
+    }
+    return copy;
 }
 
-/** Lite row for scheduled/completed matches — saves localStorage space on the public site. */
-function prepareMatchForLocalCache(match) {
-    const copy = prepareMatchForPersistence(match);
-    if (isActiveMatchStatus(copy.status)) return copy;
-    return {
-        id: copy.id,
-        tournamentId: copy.tournamentId,
-        tournamentName: copy.tournamentName,
-        team1: copy.team1,
-        team2: copy.team2,
-        status: copy.status,
-        overs: copy.overs,
-        ballsPerOver: copy.ballsPerOver,
-        currentInnings: copy.currentInnings,
-        innings: copy.innings,
-        publishLive: copy.publishLive,
-        lastUpdated: copy.lastUpdated,
-        createdAt: copy.createdAt,
-        scheduledName: copy.scheduledName,
-        type: copy.type,
-        _cloudLite: true,
-    };
-}
-
-function prepareMatchesForPersistence(matches) {
-    if (!Array.isArray(matches)) return matches;
-    const prepared = matches.map((m) =>
-        isActiveMatchStatus(m?.status) ? prepareMatchForPersistence(m) : prepareMatchForLocalCache(m)
+function pruneMatchesForStorage(arr) {
+    const MAX = LOCAL_MATCH_STORE_MAX();
+    const list = (arr || []).filter((m) => m && m.id);
+    const live = list.filter((m) => m.status === 'live' || m.status === 'paused');
+    const liveIds = new Set(live.map((m) => m.id));
+    const published = list.filter(
+        (m) => !liveIds.has(m.id) && m.publishLive !== false
     );
-    return compactMatchesForQuota(prepared);
-}
-
-function logQuotaNotice(keptCount) {
-    if (_quotaNoticeShown) return;
-    _quotaNoticeShown = true;
-    console.info(
-        `[SLCRICKPRO] Browser storage limit — keeping ${keptCount} recent matches in cache. Older data stays on the server.`
-    );
-}
-
-function pruneLegacyLocalStorage() {
-    ['hotkey_match_id', 'hotkey_mode'].forEach((k) => {
-        try {
-            if (localStorage.getItem(k) != null) localStorage.removeItem(k);
-        } catch (_) {}
+    const pubIds = new Set(published.map((m) => m.id));
+    const rest = list.filter((m) => !liveIds.has(m.id) && !pubIds.has(m.id));
+    const byTs = (a, b) => (b.lastUpdated || b.scoringStartedAt || 0) - (a.lastUpdated || a.scoringStartedAt || 0);
+    published.sort(byTs);
+    rest.sort(byTs);
+    const out = [];
+    const seen = new Set();
+    [...live, ...published, ...rest].forEach((m) => {
+        if (seen.has(m.id) || out.length >= MAX) return;
+        seen.add(m.id);
+        out.push(m);
     });
+    return out;
+}
+
+function shouldStoreRemoteMatchLocally(m) {
+    if (!m || !m.id || m.deleted) return false;
+    if (m.status === 'live' || m.status === 'paused') return true;
+    if (m.publishLive === true) return true;
+    const ts = m.lastUpdated || m.scoringStartedAt || 0;
+    if (Date.now() - ts < 21 * 86400000) return true;
+    return false;
 }
 
 // SLCRICKPRO – Theme Logic is now handled via inline scripts in HTML files to prevent FOUC
@@ -316,46 +311,105 @@ window.showInputModal = function(message, defaultValue = '') {
     });
 };
 
+function _persistEntityFiles(type, entity) {
+    if (!window.SLCRICK_DESKTOP || !window.desktopAPI || !entity?.id) return;
+    try {
+        if (type === 'match' && window.desktopAPI.saveMatchFile) {
+            window.desktopAPI.saveMatchFile(entity);
+        }
+        if (type === 'tournament' && window.desktopAPI.saveTournamentFile) {
+            window.desktopAPI.saveTournamentFile(entity);
+        }
+    } catch (e) {
+        console.warn('[DB] file save', e);
+    }
+}
+
 const DB = {
     getCloudURL() {
-        const configured = window.CRICPRO_CLOUD_CONFIG && window.CRICPRO_CLOUD_CONFIG.backendUrl;
-        if (configured && configured.trim()) return configured.trim();
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            return "http://localhost:3000";
-        }
-        return window.BACKEND_BASE_URL || "";
+        if (window.SLCRICK_SYNC) return window.SLCRICK_SYNC.getBackendUrl();
+        return '';
     },
 
     // ---------- SECURE STORAGE ----------
+    _recoverStorageQuota(key, val) {
+        let recovered = false;
+        if (key === DB_KEYS.MATCHES && Array.isArray(val)) {
+            const slim = pruneMatchesForStorage(val.map(slimMatchForLocalStorage));
+            try {
+                const str = JSON.stringify(slim);
+                localStorage.setItem(key, 'SECURE_' + btoa(encodeURIComponent(str)));
+                recovered = true;
+            } catch (_) {}
+        }
+        if (!recovered) {
+            const n = this._clearPhotoCacheKeys();
+            if (n > 0 && key === DB_KEYS.MATCHES) {
+                try {
+                    const slim = pruneMatchesForStorage(
+                        (Array.isArray(val) ? val : this.getMatches()).map(slimMatchForLocalStorage)
+                    );
+                    const str = JSON.stringify(slim);
+                    localStorage.setItem(key, 'SECURE_' + btoa(encodeURIComponent(str)));
+                    recovered = true;
+                } catch (_) {}
+            }
+        }
+        if (!recovered && key === DB_KEYS.MATCHES) {
+            const live = this.getMatches().filter(
+                (m) => m.status === 'live' || m.status === 'paused'
+            );
+            try {
+                const str = JSON.stringify(live.map(slimMatchForLocalStorage));
+                localStorage.setItem(key, 'SECURE_' + btoa(encodeURIComponent(str)));
+                recovered = true;
+            } catch (_) {}
+        }
+        return recovered;
+    },
     _secureSet(key, val) {
-        const payload = key === DB_KEYS.MATCHES ? prepareMatchesForPersistence(val) : val;
-        try {
-            const str = JSON.stringify(payload);
+        const write = (data) => {
+            const str = JSON.stringify(data);
             const enc = btoa(encodeURIComponent(str));
             localStorage.setItem(key, 'SECURE_' + enc);
-        } catch (e) {
-            if (key === DB_KEYS.MATCHES && isQuotaExceededError(e)) {
-                pruneLegacyLocalStorage();
-                try {
-                    const compacted = compactMatchesForQuota(
-                        Array.isArray(payload) ? payload : prepareMatchesForPersistence(val)
-                    );
-                    const compactedStr = JSON.stringify(compacted);
-                    const compactedEnc = btoa(encodeURIComponent(compactedStr));
-                    localStorage.setItem(key, 'SECURE_' + compactedEnc);
-                    logQuotaNotice(compacted.length);
-                    return;
-                } catch (retryErr) {
-                    if (!_quotaNoticeShown) {
-                        _quotaNoticeShown = true;
-                        console.warn('[SLCRICKPRO] Local cache full — using cloud data only.', retryErr);
-                    }
-                    return;
-                }
+        };
+        try {
+            let payload = val;
+            if (key === DB_KEYS.MATCHES && Array.isArray(val)) {
+                payload = pruneMatchesForStorage(val.map(slimMatchForLocalStorage));
             }
-            if (!_quotaNoticeShown) console.error('Storage err', e);
+            write(payload);
+            if (window.SLCRICK_DESKTOP && window.desktopAPI) {
+                window.desktopAPI.requestPersist();
+            }
+        } catch (e) {
+            const isQuota =
+                e &&
+                (e.name === 'QuotaExceededError' ||
+                    e.code === 22 ||
+                    e.code === 1014 ||
+                    /quota/i.test(String(e.message || e)));
+            if (isQuota && this._recoverStorageQuota(key, val)) {
+                if (typeof showToast === 'function') {
+                    showToast('Storage was full — old match data trimmed. Live scores kept.', 'default');
+                }
+                if (window.SLCRICK_DESKTOP && window.desktopAPI) {
+                    window.desktopAPI.requestPersist();
+                }
+                return;
+            }
+            console.error('Storage err', e);
+            if (typeof showToast === 'function') {
+                showToast(
+                    '❌ Save failed (browser storage full). Settings → Clear completed matches, or clear photo cache.',
+                    'error'
+                );
+            }
         }
     },
+    slimMatchForLocalStorage,
+    pruneMatchesForStorage,
+    shouldStoreRemoteMatchLocally,
     _secureGet(key, def) {
         const raw = localStorage.getItem(key);
         if (!raw) return def;
@@ -387,7 +441,6 @@ const DB = {
     },
     _syncAllPlayers(arr) {
         // Bulk push all players to MongoDB
-        arr.forEach(p => syncToDB('player', p));
     },
     addPlayer(player) {
         const arr = this.getPlayers();
@@ -419,7 +472,6 @@ const DB = {
 
         // Sync to MongoDB
         const syncPayload = { ...player, photo: localStorage.getItem('cricpro_photo_' + id) || '' };
-        syncToDB('player', syncPayload);
         return player;
     },
     generatePlayerId(arr) {
@@ -468,7 +520,6 @@ const DB = {
         this.savePlayers(arr);
 
         const syncPayload = { ...arr[idx], photo: localStorage.getItem('cricpro_photo_' + id) || '' };
-        syncToDB('player', syncPayload);
 
         return arr[idx];
     },
@@ -479,7 +530,6 @@ const DB = {
             arr[idx].stats = { ...arr[idx].stats, ...stats };
             this.savePlayers(arr);
             // Also sync updated stats to MongoDB
-            syncToDB('player', arr[idx]);
         }
     },
 
@@ -492,7 +542,6 @@ const DB = {
     },
     _syncAllTeams(arr) {
         // Bulk push all teams to MongoDB
-        arr.forEach(t => syncToDB('team', t));
     },
     updateTeamStats(teamName, stats) {
         const arr = this.getTeams();
@@ -500,7 +549,6 @@ const DB = {
         if (idx !== -1) {
             arr[idx].stats = { ...arr[idx].stats, ...stats };
             this.saveTeams(arr);
-            syncToDB('team', arr[idx]);
         }
     },
     addTeam(team) {
@@ -523,40 +571,43 @@ const DB = {
         arr.push(team);
         this.saveTeams(arr);
         // Sync to MongoDB
-        syncToDB('team', team);
         return team;
     },
 
     getTeamPhoto(teamIdOrName, tournamentId = '') {
         const key = `cricpro_team_photo_${teamIdOrName}${tournamentId ? '_' + tournamentId : ''}`;
         const photo = localStorage.getItem(key);
-        if (photo) return photo;
-        
-        // Fallback to global team photo if tournament specific not found
+        if (photo) return resolveAssetUrl(photo) || photo;
+
         const globalKey = `cricpro_team_photo_${teamIdOrName}`;
         const globalPhoto = localStorage.getItem(globalKey);
-        if (globalPhoto) return globalPhoto;
+        if (globalPhoto) return resolveAssetUrl(globalPhoto) || globalPhoto;
 
-        const isPage = window.location.pathname.includes('/pages/');
-        return isPage ? '../assets/default-team.svg' : 'assets/default-team.svg';
+        return defaultTeamPhotoUrl();
     },
 
     saveTeamPhoto(teamIdOrName, dataUrl, tournamentId = '') {
         if (!dataUrl) return;
         const key = `cricpro_team_photo_${teamIdOrName}${tournamentId ? '_' + tournamentId : ''}`;
         localStorage.setItem(key, dataUrl);
+        if (window.desktopAPI) window.desktopAPI.requestPersist();
     },
 
     getPlayerPhoto(playerId) {
-        const isPage = window.location.pathname.includes('/pages/');
-        const fallback = isPage ? '../assets/default-player.svg' : 'assets/default-player.svg';
+        const fallback = defaultPlayerPhotoUrl();
         if (!playerId) return fallback;
-        return localStorage.getItem('cricpro_photo_' + playerId) || fallback;
+        const stored = localStorage.getItem('cricpro_photo_' + playerId);
+        return stored ? resolveAssetUrl(stored) || stored : fallback;
     },
+
+    resolveAssetUrl,
+    defaultTeamPhotoUrl,
+    defaultPlayerPhotoUrl,
 
     savePlayerPhoto(playerId, dataUrl) {
         if (!playerId || !dataUrl) return;
         localStorage.setItem('cricpro_photo_' + playerId, dataUrl);
+        if (window.desktopAPI) window.desktopAPI.requestPersist();
     },
 
     // ---------- MATCHES ----------
@@ -564,43 +615,82 @@ const DB = {
         return this._secureGet(DB_KEYS.MATCHES, []);
     },
     saveMatches(arr) {
-        this._secureSet(DB_KEYS.MATCHES, arr);
+        this._secureSet(DB_KEYS.MATCHES, arr || []);
     },
     getMatch(id) {
         return this.getMatches().find(m => m.id === id);
     },
-    saveMatch(match, skipCloud = false) {
+    saveMatch(match, skipCloud = false, options = {}) {
         match.lastUpdated = Date.now();
+        if ((match.status === 'live' || match.status === 'paused') && match.publishLive !== false) {
+            match.publishLive = true;
+        }
         const arr = this.getMatches();
         const idx = arr.findIndex(m => m.id === match.id);
-        const storedMatch = prepareMatchForPersistence(match);
-        if (idx !== -1) arr[idx] = storedMatch; else arr.push(storedMatch);
+        const prev = idx !== -1 ? arr[idx] : null;
+        const nowScoring =
+            match.status === 'live' || match.status === 'paused';
+        const wasScoring =
+            prev &&
+            (prev.status === 'live' ||
+                prev.status === 'paused' ||
+                prev.status === 'completed');
+        if (nowScoring && !wasScoring && !match.scoringStartedAt) {
+            match.scoringStartedAt = Date.now();
+        }
+        if (idx !== -1) arr[idx] = match;
+        else arr.push(match);
         this._secureSet(DB_KEYS.MATCHES, arr);
-        if (!skipCloud) syncToDB('match', match);
+        if (!options.skipForceUpdate) {
+            localStorage.setItem('cricpro_force_update', Date.now().toString());
+        }
+        const skipPublish =
+            options.skipPublish ||
+            window._batchRosterSave ||
+            window._desktopApplyingRemoteMatch;
+        if (window.desktopAPI && !skipPublish) {
+            DB._schedulePublishMatch(match);
+        }
+        if (!skipCloud && typeof window.syncToDB === 'function') {
+            window.syncToDB('match', match);
+        }
+        if (!options.skipFilePersist) {
+            _persistEntityFiles('match', match);
+        }
+    },
+    _publishMatchTimer: null,
+    _publishMatchQueued: null,
+    _schedulePublishMatch(match) {
+        DB._publishMatchQueued = match;
+        clearTimeout(DB._publishMatchTimer);
+        const delay = window.SLCRICK_DESKTOP ? 100 : 450;
+        DB._publishMatchTimer = setTimeout(() => {
+            const m = DB._publishMatchQueued;
+            DB._publishMatchQueued = null;
+            if (m && window.desktopAPI) window.desktopAPI.publishMatch(m);
+        }, delay);
     },
     // New: specialized save that ensures we get a token back for new tournaments
     async saveTournamentWithAuth(tourn) {
         tourn.lastUpdated = Date.now();
+        const pw = tourn.scoringPassword || tourn.password;
+        if (tourn.id && pw) {
+            try {
+                localStorage.setItem(`tourn_pw_${tourn.id}`, pw);
+            } catch (_) {}
+        }
         const arr = this.getTournaments();
         const idx = arr.findIndex(t => t.id === tourn.id);
         if (idx !== -1) arr[idx] = tourn; else arr.push(tourn);
         this._secureSet(DB_KEYS.TOURNAMENTS, arr);
 
-        // Sync and capture token if returned
-        if (BACKEND_BASE_URL) {
-            try {
-                const resp = await fetch(BACKEND_BASE_URL + '/sync/tournament', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(tourn)
-                });
-                const d = await resp.json();
-                if (d.token) {
-                    localStorage.setItem('cricpro_token', d.token);
-                    localStorage.setItem('cricpro_token_expiry', (Date.now() + d.expiresInMs).toString());
-                }
-            } catch(e) { console.warn('Cloud save error:', e); }
+        localStorage.setItem('cricpro_force_update', Date.now().toString());
+        if (window.desktopAPI) window.desktopAPI.publishTournament(tourn);
+        if (typeof window.renderResumeMatches === 'function') window.renderResumeMatches();
+        if (typeof window.syncToDB === 'function') {
+            window.syncToDB('tournament', tourn);
         }
+        _persistEntityFiles('tournament', tourn);
     },
     deleteMatch(id) {
         let arr = this.getMatches();
@@ -614,16 +704,14 @@ const DB = {
                 this.saveTournament(t);
             }
         });
-        this.deleteMatchFromCloud(id);
+        if (window.desktopAPI?.deleteMatchFile) {
+            window.desktopAPI.deleteMatchFile(id).catch(() => {});
+        }
     },
-    deleteMatchFromCloud(id) {
-        if (!BACKEND_BASE_URL) return;
-        fetch(BACKEND_BASE_URL + '/sync/matches/' + id, { method: 'DELETE' })
-            .catch(() => {});
-    },
+    deleteMatchFromCloud(id) {},
     createMatch(config) {
         const match = {
-            id: 'MATCH-' + Date.now(),
+            id: 'MATCH-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
             createdAt: Date.now(),
             status: 'setup', // setup | live | paused | completed
             publishLive: true, // Default to true so matches show up on mobile/others by default
@@ -668,9 +756,6 @@ const DB = {
         const all = this._secureGet(DB_KEYS.REPORTS, []);
         all.push(report);
         this._secureSet(DB_KEYS.REPORTS, all);
-        if (typeof syncToDB === 'function') {
-            syncToDB('report', report);
-        }
     },
 
     createInnings(battingTeam, bowlingTeam) {
@@ -721,13 +806,31 @@ const DB = {
     getTournament(id) {
         return this.getTournaments().find(t => t.id === id);
     },
-    saveTournament(tourn, skipCloud = false) {
+    saveTournament(tourn, skipCloud = false, options = {}) {
         tourn.lastUpdated = Date.now();
+        const pw = tourn.scoringPassword || tourn.password;
+        if (tourn.id && pw) {
+            try {
+                localStorage.setItem(`tourn_pw_${tourn.id}`, pw);
+            } catch (_) {}
+        }
         const arr = this.getTournaments();
         const idx = arr.findIndex(t => t.id === tourn.id);
         if (idx !== -1) arr[idx] = tourn; else arr.push(tourn);
         this._secureSet(DB_KEYS.TOURNAMENTS, arr);
-        if (!skipCloud) syncToDB('tournament', tourn);
+        if (!options.skipForceUpdate) {
+            localStorage.setItem('cricpro_force_update', Date.now().toString());
+        }
+        const skipPublish = options.skipPublish || window._batchRosterSave;
+        if (window.desktopAPI && !skipPublish) {
+            window.desktopAPI.publishTournament(tourn);
+        }
+        if (!skipCloud && typeof window.syncToDB === 'function') {
+            window.syncToDB('tournament', tourn);
+        }
+        if (!options.skipFilePersist) {
+            _persistEntityFiles('tournament', tourn);
+        }
     },
     deleteTournament(id) {
         // Cascade delete all matches belonging to this tournament
@@ -737,19 +840,13 @@ const DB = {
         this.saveMatches(mArr);
         
         // Sync match deletions to cloud
-        matchesToDelete.forEach(m => this.deleteMatchFromCloud(m.id));
 
         // Delete the tournament record
         let arr = this.getTournaments();
         arr = arr.filter(t => t.id !== id);
         this.saveTournaments(arr);
-        this.deleteTournamentFromCloud(id);
     },
-    deleteTournamentFromCloud(id) {
-        if (!BACKEND_BASE_URL) return;
-        fetch(BACKEND_BASE_URL + '/sync/tournaments/' + id, { method: 'DELETE' })
-            .catch(() => {});
-    },
+    deleteTournamentFromCloud(id) {},
     async createTournament(cfg) {
         const t = {
             id: 'TOURN-' + Date.now(),
@@ -762,7 +859,7 @@ const DB = {
             matches: [],
             standings: {},
             createdAt: Date.now(),
-            status: 'active',
+            status: 'scheduled',
             isOfficial: cfg.isOfficial || false,
             matchCount: cfg.matchCount || 0,
             totalTeams: cfg.totalTeams || cfg.teams.length,
@@ -773,41 +870,49 @@ const DB = {
 
         if (t.format === 'knockout') {
             this._generateKnockoutMatches(t);
-        } else if (cfg.matchCount > 0) {
-            for (let i = 1; i <= cfg.matchCount; i++) {
-                const match = this.createMatch({
-                    type: 'tournament',
-                    tournamentId: t.id,
-                    tournamentName: t.name,
-                    team1: "TBD", team2: "TBD",
-                    overs: t.overs, ballsPerOver: t.ballsPerOver,
-                    scoringPassword: t.scoringPassword
-                }, true); // skipCloud during initial creation
-                match.status = 'scheduled';
-                match.scheduledName = `Match ${i}`;
-                match.publishLive = true; // Tournament matches should be visible to everyone
-                this.saveMatch(match, true);
-                t.matches.push(match.id);
-            }
+        } else if (cfg.matchCount > 0 || (t.format === 'league' && (cfg.teams || []).length >= 2)) {
+            this._generateLeagueMatches(t, cfg);
         }
         
         // Save tournament and preserve scoring token if any
         await this.saveTournamentWithAuth(t);
         
-        // SEQUENTIAL SYNC: Sync matches to cloud one by one to avoid overwhelming server
-        if (t.matches.length > 0) {
-            console.log("🕒 Bulk syncing tournament matches...");
-            for (const mId of t.matches) {
-                const m = this.getMatch(mId);
-                if (m) syncToDB('match', m);
-                await new Promise(r => setTimeout(r, 100)); // Small delay
-            }
-        }
-        
         // Force UI refresh if available
         if (typeof renderOngoing === 'function') renderOngoing();
-        
+        if (typeof window.renderResumeMatches === 'function') window.renderResumeMatches();
+
         return t;
+    },
+
+    _generateLeagueMatches(t, cfg) {
+        const teams = cfg.teams || t.teams || [];
+        const pairs = [];
+        for (let i = 0; i < teams.length; i++) {
+            for (let j = i + 1; j < teams.length; j++) {
+                pairs.push([teams[i], teams[j]]);
+            }
+        }
+        const total = Math.max(cfg.matchCount || 0, pairs.length) || pairs.length;
+        for (let i = 0; i < total; i++) {
+            const pair = pairs[i];
+            const match = this.createMatch({
+                type: 'tournament',
+                tournamentId: t.id,
+                tournamentName: t.name,
+                team1: pair ? pair[0] : 'TBD',
+                team2: pair ? pair[1] : 'TBD',
+                overs: t.overs,
+                ballsPerOver: t.ballsPerOver,
+                scoringPassword: t.scoringPassword,
+            });
+            match.status = 'scheduled';
+            match.scheduledName = pair
+                ? `${pair[0]} vs ${pair[1]}`
+                : (i < pairs.length ? `Match ${i + 1}` : `Playoff / Final ${i - pairs.length + 1}`);
+            match.publishLive = true;
+            this.saveMatch(match);
+            t.matches.push(match.id);
+        }
     },
 
     _generateKnockoutMatches(t) {
@@ -880,17 +985,9 @@ const DB = {
         // Sync every product to MongoDB so all devices see updates
         arr.forEach(p => syncProductToDB(p));
     },
-    deleteProductFromCloud(id) {
-        if (!BACKEND_BASE_URL) return;
-        fetch(BACKEND_BASE_URL + '/sync/products/' + id, { method: 'DELETE' })
-            .catch(() => {});
-    },
+    deleteProductFromCloud(id) {},
 
-    deletePlayerFromCloud(id) {
-        if (!BACKEND_BASE_URL) return;
-        fetch(BACKEND_BASE_URL + '/players/' + id, { method: 'DELETE' })
-            .catch(() => {});
-    },
+    deletePlayerFromCloud(id) {},
     // ---------- ORDERS ----------
     getOrders() {
         return this._secureGet(DB_KEYS.ORDERS, []);
@@ -905,15 +1002,9 @@ const DB = {
         order.status = 'pending';
         arr.push(order);
         this.saveOrders(arr);
-        
-        // Sync to MongoDB Cloud
-        if (typeof syncToDB === 'function') {
-            syncToDB('order', order);
-        }
         return order;
     },
     addTeamToSheets(team) {
-        syncToDB('team', team);
     },
 
     // ---------- SETTINGS ----------
@@ -933,7 +1024,6 @@ const DB = {
     savePosts(arr) {
         this._secureSet(DB_KEYS.POSTS, arr);
         // Sync to cloud if needed
-        arr.forEach(p => syncToDB('post', p));
     },
     addPost(post) {
         const arr = this.getPosts();
@@ -997,6 +1087,7 @@ const DB = {
         };
     },
 
+  /** Remove match data locally (+ cloud if connected). Keeps DB/sync settings intact. */
     async purgeAllMatchData(options = {}) {
         const {
             completedOnly = false,
@@ -1013,7 +1104,14 @@ const DB = {
         const removedIds = new Set(removing.map((m) => m.id));
 
         for (const m of removing) {
-            if (deleteFromCloud) this.deleteMatchFromCloud(m.id);
+            if (deleteFromCloud && typeof this.deleteMatchFromCloud === 'function') {
+                this.deleteMatchFromCloud(m.id);
+            }
+            if (window.desktopAPI?.deleteMatchFile) {
+                try {
+                    await window.desktopAPI.deleteMatchFile(m.id);
+                } catch (_) {}
+            }
         }
 
         matches = matches.filter((m) => !removedIds.has(m.id));
@@ -1049,502 +1147,74 @@ const DB = {
             this._clearMatchDrawCache();
             localStorage.removeItem('hotkey_match_id');
             localStorage.removeItem('hotkey_mode');
+            if (window.desktopAPI?.purgeAllMatchFiles) {
+                try {
+                    await window.desktopAPI.purgeAllMatchFiles();
+                } catch (_) {}
+            }
         }
 
         localStorage.setItem('cricpro_force_update', Date.now().toString());
+        if (window.desktopAPI?.requestPersist) window.desktopAPI.requestPersist();
+
         return { deletedCount: removing.length, remaining: matches.length };
     },
 
     clearPhotoCache() {
-        return this._clearPhotoCacheKeys();
+        const n = this._clearPhotoCacheKeys();
+        if (window.desktopAPI?.requestPersist) window.desktopAPI.requestPersist();
+        return n;
     },
 };
 
-// ============================================================
-//  BACKEND SYNC → MongoDB Atlas (via Express server)
-// ============================================================
-
-// Auto-detected Backend & Socket
-// ============================================
-// HOW TO DEPLOY TO THE INTERNET
-// ============================================
-const IS_PRODUCTION = !(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'); 
-const CLOUD_RUNTIME_CONFIG = window.CRICPRO_CLOUD_CONFIG || {};
-const CONFIGURED_BACKEND_URL = (CLOUD_RUNTIME_CONFIG.backendUrl || localStorage.getItem('cricpro_backend_url') || '').trim();
-
-const DEFAULT_PRODUCTION_API = 'https://slcrickpro.onrender.com';
-let BACKEND_BASE_URL;
-if (CONFIGURED_BACKEND_URL) {
-    BACKEND_BASE_URL = CONFIGURED_BACKEND_URL;
-} else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    BACKEND_BASE_URL = `http://${window.location.hostname}:${window.location.port || 3000}`;
-} else if (IS_PRODUCTION) {
-    BACKEND_BASE_URL = DEFAULT_PRODUCTION_API;
-} else {
-    BACKEND_BASE_URL = "";
-}
-
-// Clear old cache if in production
-if (IS_PRODUCTION) {
-    localStorage.removeItem('cricpro_backend_url');
-}
-
-// Expose globally so inline scripts (loginToMatch, etc.) can reference it
-window.BACKEND_BASE_URL = BACKEND_BASE_URL;
-
-// Expose globally so inline scripts can reference it
-// NOTE: Only one syncToDB defined below (the canonical one at line ~694)
+window.DB = DB;
+globalThis.DB = DB;
 
 // ============================================================
-//  SMART SERVER WAKE-UP (Render free tier cold-start fix)
+//  Cloud sync — optional (js/sync-client.js, load after db.js)
 // ============================================================
-let _serverAwake = false;
-let _wakePromise = null;
+window.BACKEND_BASE_URL = window.BACKEND_BASE_URL || '';
+window._isGlobalSyncCompleted = false;
 
-async function wakeUpServer(maxAttempts = 5) {
-    if (!BACKEND_BASE_URL) return false;
-    if (_serverAwake) return true;
-    if (_wakePromise) return _wakePromise;
-
-    _wakePromise = (async () => {
-        for (let i = 0; i < maxAttempts; i++) {
-            try {
-                // Use no-cors so CORS policy NEVER blocks the wake-up ping.
-                // With no-cors we get an opaque response — we just need to know
-                // if the request resolves (server alive) vs rejects (server down/sleeping).
-                const r = await fetch(`${BACKEND_BASE_URL}/api/ping`, {
-                    method: 'GET',
-                    cache: 'no-store',
-                    mode: 'no-cors',           // Bypass CORS — we don't read the body
-                    signal: AbortSignal.timeout(10000)
-                });
-                // If we reach here without throwing → server is responding
-                console.log('🟢 Server is awake and responding.');
-                _serverAwake = true;
-                // Keep-alive: silent ping every 9 minutes to prevent Render sleep
-                setInterval(() => fetch(`${BACKEND_BASE_URL}/api/ping`, {
-                    cache: 'no-store', mode: 'no-cors'
-                }).catch(() => {}), 9 * 60 * 1000);
-                return true;
-            } catch (e) {
-                const delay = (i + 1) * 3000; // 3s → 6s → 9s → 12s → 15s
-                if (i < maxAttempts - 1) {
-                    console.warn(`⏳ Server warming up... retry ${i + 1}/${maxAttempts} in ${delay / 1000}s`);
-                    await new Promise(res => setTimeout(res, delay));
-                }
-            }
-        }
-        console.warn('⚠️ Server did not respond. App will use local cache and retry in background.');
-        _wakePromise = null;
-        // Schedule a background retry in 30s
-        setTimeout(() => { _wakePromise = null; wakeUpServer(); }, 30000);
-        return false;
-    })();
-
-    return _wakePromise;
-}
-
-// ============================================================
-//  GLOBAL SOCKET.IO — Single instance, shared across all pages
-// ============================================================
-let socket = null;
-if (BACKEND_BASE_URL && typeof io !== 'undefined') {
-    // Connect socket ONLY after server wakes up to avoid connection flood
-    wakeUpServer().then(awake => {
-        if (!awake) return;
-        socket = io(BACKEND_BASE_URL, {
-            path: '/socket.io',
-            transports: ['websocket', 'polling'],
-            reconnectionAttempts: 15,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 8000,
-            timeout: 15000,
-            closeOnBeforeunload: false, // Prevent 'unload' related violations
-            allowEIO3: true,
-        });
-        window._cricproSocket = socket;
-
-        socket.on('connect_error', (err) => console.warn('🔴 Socket connect_error:', err && err.message ? err.message : err));
-        socket.on('connect_timeout', () => console.warn('🔴 Socket connect_timeout'));
-        socket.on('reconnect_error', (err) => console.warn('🔴 Socket reconnect_error:', err && err.message ? err.message : err));
-        socket.on('reconnect_failed', () => console.warn('🔴 Socket reconnect_failed'));
-
-        socket.on('connect', () => {
-            console.log('📡 Real-time Socket: CONNECTED to', BACKEND_BASE_URL);
-            _serverAwake = true;
-            // Join the global broadcast room immediately
-            socket.emit('join_global', {});
-            // Also join any active match room (for both scorer page and TV overlay)
-            const urlParams = new URLSearchParams(window.location.search);
-            const activeMatchId = urlParams.get('matchId') || urlParams.get('match');
-            if (activeMatchId) {
-                socket.emit('join_match', activeMatchId);
-                console.log('🏏 Joined match room:', activeMatchId);
-            }
-        });
-
-        socket.on('disconnect', (reason) => console.info('Socket disconnected; polling fallback active:', reason || 'unknown'));
-
-        // ── scoreUpdate: server broadcasts full match data → update local cache & render
-        socket.on('scoreUpdate', (data) => {
-            if (!data || !data.id) return;
-            console.log('⚡ scoreUpdate received for', data.id);
-            
-            const localMatches = DB.getMatches();
-            const existingIdx = localMatches.findIndex(m => m.id === data.id);
-            const localMatch = existingIdx !== -1 ? localMatches[existingIdx] : null;
-
-            const cloudTime = data.lastUpdated || 0;
-            const localTime = localMatch ? (localMatch.lastUpdated || 0) : 0;
-
-            if (!localMatch || cloudTime >= localTime) {
-                if (existingIdx !== -1) localMatches[existingIdx] = data;
-                else localMatches.push(data);
-                DB.saveMatches(localMatches);
-                if (typeof renderOngoing === 'function') renderOngoing();
-                if (typeof updateTicker === 'function') updateTicker();
-                if (typeof renderLive === 'function') renderLive();
-                if (typeof renderOverlay === 'function') renderOverlay();
-                localStorage.setItem('cricpro_force_update', Date.now().toString());
-            }
-        });
-
-        // ── globalUpdate: any change to match or tournament
-        socket.on('globalUpdate', (info) => {
-            if (info && info.type !== 'joined') console.log('🌍 globalUpdate received:', info?.type);
-            if (info && info.type === 'match_deleted' && info.id) {
-                const mArr = DB.getMatches().filter(m => m.id !== info.id);
-                DB._secureSet(DB_KEYS.MATCHES, mArr);
-            }
-            if (info && info.type === 'tournament_deleted' && info.id) {
-                const tArr = DB.getTournaments().filter(t => t.id !== info.id);
-                DB._secureSet(DB_KEYS.TOURNAMENTS, tArr);
-                const mArr = DB.getMatches().filter(m => m.tournamentId !== info.id);
-                DB._secureSet(DB_KEYS.MATCHES, mArr);
-            }
-            if (info && info.type === 'tournament_completed' && info.id) {
-                const tArr = DB.getTournaments().map(t => {
-                    if (t.id === info.id) t.status = 'completed';
-                    return t;
-                });
-                DB._secureSet(DB_KEYS.TOURNAMENTS, tArr);
-                if (typeof window.renderOngoing === 'function') window.renderOngoing();
-            }
-            if (typeof syncCloudData === 'function') syncCloudData({ forceRefresh: true, silent: true });
-        });
-
-        // ── broadcast_command (TV overlay hotkey events)
-        socket.on('broadcast_command', (data) => {
-            console.log('📺 broadcast_command received:', data?.cmd);
-            const commandData = data && data.data ? data.data : data;
-            const isOverlayPage = window.location.pathname.includes('overlay');
-            if (!isOverlayPage && typeof handleBroadcastCommand === 'function') {
-                handleBroadcastCommand(data?.cmd, commandData);
-            }
-            if (typeof handleBroadcastEvent === 'function') handleBroadcastEvent(data);
-        });
-
-        socket.on('broadcastCmd', (data) => {
-            if (typeof handleBroadcastEvent === 'function') handleBroadcastEvent(data);
-        });
-    }); // end wakeUpServer().then()
-}
-
-/**
- * Sync a player or team to MongoDB.
- * type: 'player' | 'team'
- */
-function syncToCloudServices(type, data) {
-    if (!window.CricproCloud || !data) return;
-
-    try {
-        if (type === 'match') {
-            const matchPayload = prepareMatchForPersistence(data);
-            window.CricproCloud.syncLiveMatch(matchPayload).catch(() => {});
-            window.CricproCloud.saveSupabaseRecord('matches', {
-                id: matchPayload.id,
-                data: matchPayload,
-                updated_at: new Date().toISOString()
-            }).catch(() => {});
-        } else if (type === 'tournament') {
-            window.CricproCloud.saveSupabaseRecord('tournaments', {
-                id: data.id,
-                data,
-                updated_at: new Date().toISOString()
-            }).catch(() => {});
-        } else if (type === 'player') {
-            window.CricproCloud.saveSupabaseRecord('players', {
-                id: data.id || data.playerId,
-                data,
-                updated_at: new Date().toISOString()
-            }).catch(() => {});
-        } else if (type === 'team') {
-            window.CricproCloud.saveSupabaseRecord('teams', {
-                id: data.id,
-                data,
-                updated_at: new Date().toISOString()
-            }).catch(() => {});
-        } else if (type === 'report') {
-            window.CricproCloud.saveSupabaseRecord('match_reports', {
-                id: data.id,
-                match_id: data.matchId,
-                data,
-                updated_at: new Date().toISOString()
-            }).catch(() => {});
-        }
-    } catch (e) {
-        console.warn('[Cloud] Optional sync failed:', e.message);
+DB.handshake = async function (id, password) {
+    if (window.SLCRICK_SYNC?.handshake) return window.SLCRICK_SYNC.handshake(id, password);
+    const pwd = String(password || '').trim();
+    const stored = localStorage.getItem(`tourn_pw_${id}`);
+    if (stored && String(stored).trim() === pwd) {
+        const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
+        grants[id] = true;
+        localStorage.setItem('cricpro_grants', JSON.stringify(grants));
+        return { ok: true, offline: true };
     }
-}
-
-function getStoredTournamentScoringToken(tournamentId) {
-    if (!tournamentId) return null;
-    try {
-        const authMap = JSON.parse(localStorage.getItem('cricpro_scoring_auth') || '{}');
-        const auth = authMap[tournamentId];
-        if (!auth || !auth.token || !auth.exp || auth.exp < Date.now()) return null;
-        if (auth.token === 'local-token' || auth.token === 'local-creator' || auth.token === 'cloud-verified') return null;
-        return auth.token;
-    } catch (_) {
-        return null;
-    }
-}
-
-function requestTournamentScoringToken(tournamentId, password) {
-    if (!BACKEND_BASE_URL || !tournamentId || !password) return Promise.resolve(null);
-    return fetch(BACKEND_BASE_URL + '/api/handshake', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: tournamentId, type: 'tournament', password })
-    })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => {
-        if (d && d.ok && d.token) {
-            localStorage.setItem('cricpro_token', d.token);
-            if (d.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + d.expiresInMs).toString());
-            return d.token;
-        }
-        return null;
-    })
-    .catch(() => null);
-}
-
-function isScorerOrAdminPage() {
-    const path = window.location.pathname || '';
-    return path.includes('score-match') || path.includes('admin');
-}
-
-function canPushLocalMatchToCloud(match) {
-    if (!match || !match.id) return false;
-    if (!match.tournamentId) return true;
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return true;
-    if (isScorerOrAdminPage()) return true;
-    if (localStorage.getItem('cricpro_token') || getStoredTournamentScoringToken(match.tournamentId)) return true;
-    if (localStorage.getItem(`tourn_pw_${match.tournamentId}`)) return true;
-
-    const tournament = (DB && DB.getTournament) ? DB.getTournament(match.tournamentId) : null;
-    return !(tournament && (tournament.scoringPassword || tournament.password || tournament.isLocked));
-}
-
-function syncToDB(type, data) {
-    syncToCloudServices(type, data);
-    if (!BACKEND_BASE_URL) return;
-    const syncPayload = type === 'match' ? prepareMatchForPersistence(data) : data;
-    let endpoint = '';
-    if (type === 'player') {
-        endpoint = '/players';
-        // Map playerId to id for backend compatibility
-        if (syncPayload && !syncPayload.id && syncPayload.playerId) {
-            syncPayload.id = syncPayload.playerId;
-        }
-    }
-    else if (type === 'team') endpoint = '/teams';
-    else if (type === 'match') endpoint = '/sync/match';
-    else if (type === 'tournament') {
-        endpoint = '/sync/tournament';
-        // Include team photos in the sync payload for broadcast consistency across devices
-        if (syncPayload && syncPayload.teams) {
-            syncPayload.teamPhotos = syncPayload.teamPhotos || {};
-            syncPayload.teams.forEach(teamName => {
-                const photo = DB.getTeamPhoto(teamName, syncPayload.id);
-                if (photo && photo.startsWith('data:')) {
-                    syncPayload.teamPhotos[teamName] = photo;
-                }
-            });
-        }
-    }
-    else if (type === 'order') endpoint = '/sync/order';
-    else if (type === 'post') endpoint = '/sync/post';
-    else if (type === 'report') {
-        const id = data.matchId || 'unknown';
-        endpoint = `/api/matches/${id}/report`;
-    }
-
-    if (data?._isSyncing) return;
-    data._isSyncing = true;
-
-    console.log(`📡 Syncing ${type} to: ${BACKEND_BASE_URL + endpoint}`);
-    let token = localStorage.getItem('cricpro_token');
-    if (!token && type === 'match' && syncPayload && syncPayload.tournamentId) {
-        token = getStoredTournamentScoringToken(syncPayload.tournamentId);
-    }
-    const expiry = parseInt(localStorage.getItem('cricpro_token_expiry') || '0');
-    if (expiry && Date.now() > expiry) {
-        console.warn('Sync token expired (local expiration). Clearing it.');
-        token = null;
-        localStorage.removeItem('cricpro_token');
-        localStorage.removeItem('cricpro_token_expiry');
-    }
-
-    if (!token && type === 'match' && syncPayload && syncPayload.tournamentId && !data._authRetry) {
-        const storedPassword = localStorage.getItem(`tourn_pw_${syncPayload.tournamentId}`);
-        if (storedPassword) {
-            data._authRetry = true;
-            requestTournamentScoringToken(syncPayload.tournamentId, storedPassword).then(newToken => {
-                data._isSyncing = false;
-                if (newToken) syncToDB(type, data);
-            });
-            return;
-        }
-    }
-
-    // Security check: Only skip if NOT on localhost AND the tournament is explicitly locked AND we have no valid token.
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isScoringPage = isScorerOrAdminPage();
-    
-    if (!isLocal && !isScoringPage && type === 'match' && syncPayload && syncPayload.tournamentId && !token) {
-        const tournament = (DB && DB.getTournament) ? DB.getTournament(syncPayload.tournamentId) : null;
-        const locked = tournament && (tournament.scoringPassword || tournament.password || tournament.isLocked);
-        if (locked) {
-            console.warn(`🔐 Sync [${syncPayload.id}] blocked: Tournament is locked and no token found.`);
-            data._isSyncing = false;
-            return;
-        }
-    }
-
-    const headers = {
-        'Content-Type': 'application/json',
-        'x-api-key': 'slcrickpro-v1'
-    };
-    if (token) headers['x-scoring-token'] = token;
-
-    fetch(BACKEND_BASE_URL + endpoint, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(syncPayload),
-    })
-    .then(async (r) => {
-        data._isSyncing = false;
-        if (r.status === 401) {
-            console.warn('Scoring token expired or invalid (401). Clearing local token.');
-            localStorage.removeItem('cricpro_token');
-            localStorage.removeItem('cricpro_token_expiry');
-            if (type === 'match' && syncPayload && syncPayload.tournamentId && !data._authRetry401) {
-                const storedPassword = localStorage.getItem(`tourn_pw_${syncPayload.tournamentId}`);
-                if (storedPassword) {
-                    data._authRetry401 = true;
-                    const newToken = await requestTournamentScoringToken(syncPayload.tournamentId, storedPassword);
-                    if (newToken) {
-                        data._isSyncing = false;
-                        syncToDB(type, data);
-                        return null;
-                    }
-                }
-            }
-            showToast('🔐 Scoring token expired, please re-open tournament and unlock again', 'error');
-            return null;
-        }
-        if (!r.ok) {
-            const text = await r.text();
-            console.warn(`❌ Sync [${type}] failed with status ${r.status}:`, text);
-            return null;
-        }
-        console.log(`✅ Sync [${type}] succeeded for ${syncPayload.id || syncPayload.playerId}`);
-        return r.json();
-    })
-    .then(d => {
-        if (!d || !d.ok) return;
-        
-        // Mark as synced locally
-        const updateSyncFlag = (getFn, saveFn, key) => {
-            const arr = getFn();
-            const idToMatch = syncPayload.id || syncPayload.playerId;
-            const idx = arr.findIndex(item => (item.id === idToMatch || item.playerId === idToMatch));
-            if (idx !== -1) {
-                arr[idx]._isCloudSynced = true;
-                arr[idx].synced = true;
-                arr[idx].lastUpdated = Date.now();
-                saveFn(arr);
-            }
-        };
-
-        if (type === 'match') updateSyncFlag(() => DB.getMatches(), (a) => DB._secureSet(DB_KEYS.MATCHES, a));
-        if (type === 'tournament') updateSyncFlag(() => DB.getTournaments(), (a) => DB._secureSet(DB_KEYS.TOURNAMENTS, a));
-        if (type === 'player') updateSyncFlag(() => DB.getPlayers(), (a) => DB.savePlayers(a));
-        if (type === 'team') updateSyncFlag(() => DB.getTeams(), (a) => DB.saveTeams(a));
-
-        if (d.error === 'Unauthorized scoring session') {
-            console.warn('Scoring token expired or invalid.');
-            localStorage.removeItem('cricpro_token');
-            localStorage.removeItem('cricpro_token_expiry');
-            showToast('🔄 Sync limited: Please re-authorize session', 'default');
-        }
-    })
-    .catch(err => {
-        data._isSyncing = false;
-        console.error(`❌ Sync failed to ${BACKEND_BASE_URL + endpoint}:`, err);
-        if (typeof showToast === 'function' && !data._isBackgroundSync) {
-            showToast('⚠️ Sync limited: Network connection issue.', 'error');
-        }
-    });
-
-}
-window.syncToDB = syncToDB; // Expose globally for other files
-
-/**
- * Handle password verification before scoring a remote match.
- */
-
-DB.handshake = async function(id, password) {
     const type = id.startsWith('MATCH') ? 'match' : 'tournament';
-    try {
-        if (!BACKEND_BASE_URL) return { ok: false, error: 'No backend URL configured' };
-
-        const r = await fetch(BACKEND_BASE_URL + '/api/handshake', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, type, password })
-        });
-
-        const d = await r.json();
-        if (r.ok && d.ok) {
-            if (d.token) {
-                localStorage.setItem('cricpro_token', d.token);
-                if (d.expiresInMs) localStorage.setItem('cricpro_token_expiry', (Date.now() + d.expiresInMs).toString());
-            }
-            const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
-            grants[id] = true;
-            localStorage.setItem('cricpro_grants', JSON.stringify(grants));
-            return { ok: true };
-        }
-
-        return { ok: false, error: (d && d.error) ? d.error : 'Access Denied' };
-    } catch (e) {
-        console.error('DB.handshake error', e);
-        return { ok: false, error: 'Connection failed' };
+    const obj = type === 'match' ? DB.getMatch(id) : DB.getTournament(id);
+    if (!obj) return { ok: false, error: 'Not found' };
+    const pw = obj.scoringPassword || obj.password;
+    if (pw && String(pw).trim() === pwd) {
+        const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
+        grants[id] = true;
+        localStorage.setItem('cricpro_grants', JSON.stringify(grants));
+        if (type === 'tournament') localStorage.setItem(`tourn_pw_${id}`, pwd);
+        return { ok: true };
     }
+    if (!pw && !obj.isLocked) {
+        const grants = JSON.parse(localStorage.getItem('cricpro_grants') || '{}');
+        grants[id] = true;
+        localStorage.setItem('cricpro_grants', JSON.stringify(grants));
+        return { ok: true };
+    }
+    return { ok: false, error: 'Wrong password' };
 };
 
-/**
- * Unified Cloud sync wrapper (Legacy pullGlobalData)
- */
-window.pullGlobalData = async function(showFeedback = false) {
-    if (showFeedback) showToast('🔄 Syncing with Cloud...', 'default');
-    const res = await syncCloudData({ forceRefresh: true, silent: !showFeedback });
+window.pullGlobalData = async function (showFeedback) {
+    if (window.SLCRICK_SYNC) return window.SLCRICK_SYNC.pullGlobalData(showFeedback);
     window._isGlobalSyncCompleted = true;
     if (typeof window.renderResumeMatches === 'function') window.renderResumeMatches();
-    return res;
+    if (typeof renderOngoing === 'function') renderOngoing();
+    return { ok: true, offline: true };
 };
+
+window.syncToDB = function () {};
 
 // ================================================
 // UTILITY FUNCTIONS (used across all pages)
@@ -1552,7 +1222,7 @@ window.pullGlobalData = async function(showFeedback = false) {
 
 function escapeHTML(str) {
     if (typeof str !== 'string') return str || '';
-    return str.replace(/[&<>'"]/g, tag => ({
+    return str.replace(/[&<>'"]/g, (tag) => ({
         '&': '&amp;',
         '<': '&lt;',
         '>': '&gt;',
@@ -1654,327 +1324,5 @@ function showErrorInsideProgram(msg, url, lineNo) {
     if (txt) txt.innerHTML += `<div>↳ ${msg} @ ${lineNo||'?'}</div>`;
 }
 
-// Service Worker Registration
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW failed:', err));
-    });
-}
+/* Offline desktop — no service worker */
 
-// ============================================================
-//  UNIFIED CLOUD SYNC & REAL-TIME LOGIC
-// ============================================================
-let _isSyncingCloud = false;
-let _lastSyncTime = 0;
-const SYNC_DEBOUNCE_MS = 2000; // 2 second debounce
-
-function applyRemoteMatches(remoteMatches, options = {}) {
-    if (!Array.isArray(remoteMatches)) return false;
-    const localMatches = DB.getMatches();
-    const matchMap = new Map(localMatches.filter(m => m && m.id).map(m => [m.id, m]));
-    let anyUpdated = false;
-
-    remoteMatches.filter(m => m && m.id && !m.deleted).forEach(remoteMatch => {
-        const localMatch = matchMap.get(remoteMatch.id);
-        if (!localMatch || (remoteMatch.lastUpdated || remoteMatch.cloudUpdatedAt || 0) >= (localMatch.lastUpdated || 0)) {
-            if (!localMatch || JSON.stringify(localMatch) !== JSON.stringify(remoteMatch)) {
-                anyUpdated = true;
-            }
-            matchMap.set(remoteMatch.id, remoteMatch);
-        }
-    });
-
-    if (anyUpdated || options.forceRefresh) {
-        DB.saveMatches(Array.from(matchMap.values()));
-        if (typeof renderOngoing === 'function') renderOngoing();
-        if (typeof updateTicker === 'function') updateTicker();
-        if (typeof renderLive === 'function') renderLive();
-        if (typeof renderSystemMatches === 'function') renderSystemMatches();
-        if (typeof renderOverlay === 'function') renderOverlay();
-        localStorage.setItem('cricpro_force_update', Date.now().toString());
-    }
-
-    return anyUpdated;
-}
-
-async function syncFirebaseCloudData(options = {}) {
-    if (!window.CricproCloud) return false;
-
-    const [firebaseMatches, supabaseMatches, supabaseTournaments, supabasePlayers, supabaseTeams] = await Promise.all([
-        window.CricproCloud.hasFirebaseConfig() ? window.CricproCloud.getLiveMatches() : Promise.resolve([]),
-        window.CricproCloud.hasSupabaseConfig() ? window.CricproCloud.getSupabaseRecords('matches') : Promise.resolve([]),
-        window.CricproCloud.hasSupabaseConfig() ? window.CricproCloud.getSupabaseRecords('tournaments') : Promise.resolve([]),
-        window.CricproCloud.hasSupabaseConfig() ? window.CricproCloud.getSupabaseRecords('players') : Promise.resolve([]),
-        window.CricproCloud.hasSupabaseConfig() ? window.CricproCloud.getSupabaseRecords('teams') : Promise.resolve([])
-    ]);
-
-    applyRemoteMatches([...(supabaseMatches || []), ...(firebaseMatches || [])], options);
-
-    if (Array.isArray(supabaseTournaments) && supabaseTournaments.length) {
-        DB.saveTournaments(supabaseTournaments);
-    }
-    if (Array.isArray(supabasePlayers) && supabasePlayers.length) {
-        DB.savePlayers(supabasePlayers.map(p => ({ ...p, playerId: p.playerId || p.id })));
-    }
-    if (Array.isArray(supabaseTeams) && supabaseTeams.length) {
-        DB.saveTeams(supabaseTeams);
-    }
-
-    window._isGlobalSyncCompleted = true;
-    if (typeof window.renderResumeMatches === 'function') window.renderResumeMatches();
-    return Boolean((firebaseMatches && firebaseMatches.length) || (supabaseMatches && supabaseMatches.length));
-}
-
-(function initFirebaseRealtime() {
-    if (!window.CricproCloud || !window.CricproCloud.hasFirebaseConfig()) return;
-    window.CricproCloud.subscribeLiveMatches((matches) => {
-        applyRemoteMatches(matches, { forceRefresh: true });
-    }).catch(() => {});
-})();
-
-async function syncCloudData(options = {}) {
-    const backendUrl = BACKEND_BASE_URL || (typeof DB !== 'undefined' ? DB.getCloudURL() : null);
-    if (!backendUrl) {
-        await syncFirebaseCloudData(options);
-        return;
-    }
-    if (_isSyncingCloud) return;
-    
-    // Debounce: ignore rapid-fire requests (e.g. from globalUpdate flood)
-    const now = Date.now();
-    if (options.silent && (now - _lastSyncTime < SYNC_DEBOUNCE_MS)) {
-        return;
-    }
-    _lastSyncTime = now;
-
-    if (document.hidden && !options.forceRefresh) return;
-    if (window._isEditingRoster && !options.forceRefresh) return;
-
-
-    // Silent background syncs should still try once; Socket.IO/wake flags can lag behind page load.
-    if (!_serverAwake && !options.forceRefresh) {
-        wakeUpServer(1).catch(() => {});
-    }
-
-    _isSyncingCloud = true;
-    const NOW = Date.now();
-    const DAY_MS = 24 * 60 * 60 * 1000;
-
-    try {
-        const [mReq, tReq, pReq, tmReq] = await Promise.all([
-            fetch(`${backendUrl}/sync/matches`, { signal: AbortSignal.timeout(30000) }).catch(() => ({ ok: false })),
-            fetch(`${backendUrl}/sync/tournaments`, { signal: AbortSignal.timeout(30000) }).catch(() => ({ ok: false })),
-            fetch(`${backendUrl}/players`, { signal: AbortSignal.timeout(30000) }).catch(() => ({ ok: false })),
-            fetch(`${backendUrl}/teams`, { signal: AbortSignal.timeout(30000) }).catch(() => ({ ok: false }))
-        ]);
-
-        // Validate responses before parsing
-        if (!mReq.ok || !tReq.ok || !pReq.ok || !tmReq.ok) {
-            const errReq = [mReq, tReq, pReq, tmReq].find(r => !r.ok);
-            if (errReq) {
-                try {
-                    const errBody = await errReq.json();
-                    console.error(`📡 Sync: Server returned error for ${errReq.url}:`, errBody.details || errBody.error || 'Unknown error');
-                } catch(e) {
-                    console.warn('📡 Sync: Cloud requests failed with status', errReq.status);
-                }
-            }
-            if (!options.silent) console.warn('📡 Sync: Cloud requests failed. Preserving local cache.');
-            _isSyncingCloud = false;
-            return;
-        }
-
-        const matchData = await mReq.json();
-        const tournData = await tReq.json();
-        const playerData = await pReq.json();
-        const teamData = await tmReq.json();
-
-        // 1. Sync Players (Preserve local if remote is empty or error)
-        if (playerData && Array.isArray(playerData) && (playerData.length > 0 || options.forceRefresh)) {
-            const localPlayers = DB.getPlayers();
-            const playerMap = new Map();
-            playerData.forEach(p => {
-                const id = p.id || p.playerId || p._id;
-                if (id) playerMap.set(id, { ...p, playerId: id });
-            });
-            // Re-add local players that might not be on cloud yet
-            localPlayers.forEach(lp => {
-                if (!lp.playerId) return; // Skip broken records
-                if (!playerMap.has(lp.playerId)) {
-                    if (lp._isCloudSynced) {
-                        // Deleted from cloud
-                        console.log(`🗑️ Sync: Local player ${lp.playerId} was deleted from cloud. Removing locally.`);
-                    } else if (!options.silent) {
-                        // Only push back if it's NOT a silent/background sync (respect "don't push" loops)
-                        playerMap.set(lp.playerId, lp);
-                        if (!lp._isSyncing) {
-                            console.log(`🔄 Sync: Pushing new player ${lp.playerId} to cloud`);
-                            try { syncToDB('player', { ...lp, _isBackgroundSync: true }); } catch(e) {}
-                        }
-                    } else {
-                        // In a silent sync, we preserve local data but don't re-push to avoid loops.
-                        playerMap.set(lp.playerId, lp);
-                    }
-                }
-            });
-            DB.savePlayers(Array.from(playerMap.values()));
-        }
-        
-        // 2. Sync Teams
-        if (teamData && Array.isArray(teamData) && teamData.length > 0) {
-            const localTeams = DB.getTeams();
-            const teamMap = new Map();
-            teamData.forEach(t => {
-                if (t.id) teamMap.set(t.id, t);
-            });
-            
-            localTeams.forEach(lt => {
-                if (!lt.id) return;
-                if (!teamMap.has(lt.id)) {
-                    if (lt._isCloudSynced) {
-                        console.log(`🗑️ Sync: Local team ${lt.id} was deleted from cloud. Removing locally.`);
-                    } else if (!options.silent) {
-                        teamMap.set(lt.id, lt);
-                        if (!lt._isSyncing) {
-                            console.log(`🔄 Sync: Pushing new team ${lt.id} to cloud`);
-                            try { syncToDB('team', { ...lt, _isBackgroundSync: true }); } catch(e) {}
-                        }
-                    } else {
-                        teamMap.set(lt.id, lt);
-                    }
-                }
-            });
-            DB.saveTeams(Array.from(teamMap.values()));
-        }
-
-        // 3. Sync Matches
-        const remoteMatches = matchData && Array.isArray(matchData.matches) ? matchData.matches : (Array.isArray(matchData) ? matchData : []);
-        if (remoteMatches.length > 0 || options.forceRefresh) {
-            const localMatches = DB.getMatches();
-            let anyUpdated = false;
-            
-            // Create a merged set
-            const matchMap = new Map();
-            
-            // Add remote matches (filter out deleted ones)
-            remoteMatches.filter(cm => !cm.deleted).forEach(cm => {
-                const lm = localMatches.find(x => x.id === cm.id);
-                // Rule: If local version is newer (higher timestamp), keep local
-                if (lm && (lm.lastUpdated || 0) > (cm.lastUpdated || 0)) {
-                    matchMap.set(lm.id, lm);
-                } else {
-                    if (!lm || JSON.stringify(lm) !== JSON.stringify(cm)) anyUpdated = true;
-                    matchMap.set(cm.id, cm);
-                }
-            });
-
-            // Sync local matches back to remote OR delete them locally if they were removed from the cloud.
-            localMatches.forEach(lm => {
-                if (!lm.id) return;
-                if (!matchMap.has(lm.id)) {
-                    // Match exists locally but not on cloud
-                    if (lm._isCloudSynced || lm.synced) {
-                        // It was synced before, but now it's gone from cloud (e.g. server reset)
-                        // Instead of deleting locally, we RE-PUSH to restore the server state.
-                        console.log(`🔄 Sync: Local match ${lm.id} missing from remote. Re-pushing to restore...`);
-                        lm._isCloudSynced = false; 
-                        lm.synced = false;
-                    }
-                    
-                    matchMap.set(lm.id, lm);
-                    anyUpdated = true;
-                    if (canPushLocalMatchToCloud(lm)) {
-                        console.log(`🔄 Sync: Pushing match ${lm.id} to cloud`);
-                        try { syncToDB('match', { ...lm, _isSyncing: false, _isBackgroundSync: true }); } catch(e) {}
-                    }
-                }
-            });
-
-            if (anyUpdated || options.forceRefresh) {
-                DB.saveMatches(Array.from(matchMap.values()));
-                if (typeof renderOngoing === 'function') renderOngoing();
-                if (typeof updateTicker === 'function') updateTicker();
-                if (typeof renderLive === 'function') renderLive();
-                if (typeof renderSystemMatches === 'function') renderSystemMatches();
-                localStorage.setItem('cricpro_force_update', Date.now().toString());
-            }
-        }
-
-        // 4. Sync Tournaments
-        const remoteTournaments = tournData && Array.isArray(tournData.tournaments) ? tournData.tournaments : (Array.isArray(tournData) ? tournData : []);
-        if (remoteTournaments.length > 0 || options.forceRefresh) {
-            const localTournaments = DB.getTournaments();
-            let anyTUpdated = false;
-            const tournMap = new Map();
-
-            remoteTournaments.forEach(ct => {
-                const lt = localTournaments.find(x => x.id === ct.id);
-                
-                // Extract and persist team photos if they exist in the remote payload
-                if (ct.teamPhotos) {
-                    Object.entries(ct.teamPhotos).forEach(([teamName, dataUrl]) => {
-                        DB.saveTeamPhoto(teamName, dataUrl, ct.id);
-                    });
-                    delete ct.teamPhotos; // Keep the tournament record lightweight
-                }
-
-                if (lt && (lt.lastUpdated || 0) > (ct.lastUpdated || 0)) {
-                    tournMap.set(lt.id, lt);
-                } else {
-                    if (!lt || JSON.stringify(lt) !== JSON.stringify(ct)) anyTUpdated = true;
-                    tournMap.set(ct.id, ct);
-                }
-            });
-
-            localTournaments.forEach(lt => {
-                if (!lt.id) return;
-                if (!tournMap.has(lt.id)) {
-                    if (lt._isCloudSynced) {
-                        console.log(`🔄 Sync: Local tournament ${lt.id} missing from remote. Re-pushing...`);
-                        lt._isCloudSynced = false;
-                    }
-                    
-                    tournMap.set(lt.id, lt);
-                    anyTUpdated = true;
-                    console.log(`🔄 Sync: Pushing tournament ${lt.id} to cloud`);
-                    try { syncToDB('tournament', lt); } catch(e) {}
-                }
-            });
-
-            if (anyTUpdated || options.forceRefresh) {
-                DB.saveTournaments(Array.from(tournMap.values()));
-                if (typeof renderTournamentSelector === 'function') renderTournamentSelector();
-                if (typeof renderOngoing === 'function') renderOngoing();
-                if (typeof window.renderResumeMatches === 'function') window.renderResumeMatches();
-                if (typeof renderTournamentsAdmin === 'function') renderTournamentsAdmin();
-                if (typeof renderRequests === 'function') renderRequests();
-            }
-        }
-
-    } catch (err) {
-        if (err.name !== 'AbortError' && err.name !== 'TimeoutError') {
-            console.warn('📡 Sync Error:', err.message);
-        }
-    } finally {
-        _isSyncingCloud = false;
-    }
-}
-
-// Wait for server to wake, then pull data immediately
-wakeUpServer().then(awake => {
-    if (awake) {
-        syncCloudData({ forceRefresh: true });
-        console.log('🔄 Initial cloud sync triggered after server wake-up.');
-    }
-});
-
-// Polled background sync. Fetch polling is the reliability fallback for cross-device updates.
-const _isOverlayTab  = window.location.pathname.includes('overlay.html');
-const _isPublicTab   = window.location.pathname.includes('ongoing-matches.html');
-const _isContributor = window.location.pathname.includes('score-match.html') || window.location.pathname.includes('admin.html');
-const _pollIntervalMs = _isOverlayTab ? 3000 : (_isPublicTab ? 4000 : (_isContributor ? 3000 : 12000));
-setInterval(() => {
-    if (BACKEND_BASE_URL || (window.CricproCloud && (window.CricproCloud.hasFirebaseConfig() || window.CricproCloud.hasSupabaseConfig()))) {
-        syncCloudData({ forceRefresh: _isPublicTab || _isContributor, silent: true });
-    }
-}, _pollIntervalMs);

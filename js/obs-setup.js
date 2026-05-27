@@ -159,8 +159,10 @@
     } catch (_) {
       if (typeof showToast === 'function') showToast(url, 'default');
     }
-    const inp = document.getElementById('obs-url-website');
-    if (inp) inp.value = url;
+    ['obs-setup-url-website', 'obs-url-website'].forEach((id) => {
+      const inp = document.getElementById(id);
+      if (inp) inp.value = url;
+    });
     return url;
   };
 
@@ -180,10 +182,10 @@
     } catch (_) {
       if (typeof showToast === 'function') showToast(url, 'default');
     }
-    const combinedInp = document.getElementById('obs-url-combined');
-    const hk = document.getElementById('obs-url-hotkeys');
-    if (combinedInp) combinedInp.value = url;
-    if (hk) hk.value = url;
+    ['obs-setup-url-combined', 'obs-url-combined', 'obs-setup-url-hotkeys', 'obs-url-hotkeys'].forEach((id) => {
+      const inp = document.getElementById(id);
+      if (inp) inp.value = url;
+    });
     return url;
   };
 
@@ -203,8 +205,10 @@
     } catch (_) {
       if (typeof showToast === 'function') showToast(url, 'default');
     }
-    const inp = document.getElementById('obs-url-scorebar');
-    if (inp) inp.value = url;
+    ['obs-setup-url-scorebar', 'obs-url-scorebar'].forEach((id) => {
+      const inp = document.getElementById(id);
+      if (inp) inp.value = url;
+    });
     return url;
   };
 
@@ -378,14 +382,10 @@
     }
     if (m?.innings) {
       const inn = m.innings[m.currentInnings || 0] || { runs: 0, wickets: 0, balls: 0 };
-      const overs =
-        typeof formatOvers === 'function'
-          ? formatOvers(inn.balls)
-          : Math.floor(inn.balls / 6) + '.' + (inn.balls % 6);
       const scoreEl = document.getElementById('bm-score-indicator');
       const vsEl = document.getElementById('bm-vs-indicator');
-      if (scoreEl) scoreEl.textContent = `${inn.runs}/${inn.wickets} (${overs})`;
-      if (vsEl) vsEl.textContent = `${m.team1} vs ${m.team2}`;
+      if (scoreEl) scoreEl.textContent = `${inn.runs}/${inn.wickets}`;
+      if (vsEl) vsEl.textContent = 'Overlay linked';
       const t1lbl = document.getElementById('btn-team1-label');
       const t2lbl = document.getElementById('btn-team2-label');
       if (t1lbl) t1lbl.textContent = m.team1 || 'TEAM A';
@@ -404,57 +404,47 @@
     if (modal) modal.style.display = 'none';
   };
 
+  function setObsUrlFields(ids, value) {
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = value || '';
+    });
+  }
+
   window.refreshObsSetupPanel = async function () {
     const { matchId, tournamentId } = currentMatchIds();
-    const panel = document.getElementById('obs-url-panel');
-    const combinedInp = document.getElementById('obs-url-combined');
-    const websiteInp = document.getElementById('obs-url-website');
-    const hk = document.getElementById('obs-url-hotkeys');
-    const sb = document.getElementById('obs-url-scorebar');
     if (!hasObsContext()) {
-      if (sb) sb.value = '';
-      if (hk) hk.value = '';
-      if (combinedInp) combinedInp.value = '';
-      if (websiteInp) websiteInp.value = '';
-      if (panel) panel.style.display = 'none';
+      setObsUrlFields(
+        [
+          'obs-setup-url-scorebar',
+          'obs-url-scorebar',
+          'obs-setup-url-combined',
+          'obs-url-combined',
+          'obs-setup-url-hotkeys',
+          'obs-url-hotkeys',
+          'obs-setup-url-website',
+          'obs-url-website',
+        ],
+        ''
+      );
       return;
     }
     const combinedUrl = await window.getObsCombinedUrl(matchId, tournamentId);
     const websiteUrl = await window.getObsWebsiteUrl(matchId, tournamentId);
     const sbUrl = await window.getObsScorebarUrl(matchId, tournamentId);
-    if (combinedInp) combinedInp.value = combinedUrl;
-    if (websiteInp) websiteInp.value = websiteUrl;
-    if (hk) hk.value = combinedUrl;
-    if (sb) sb.value = sbUrl;
-    const combinedModal = document.getElementById('obs-setup-url-combined');
-    const websiteModal = document.getElementById('obs-setup-url-website');
-    const sbModal = document.getElementById('obs-setup-url-scorebar');
-    const hkModal = document.getElementById('obs-setup-url-hotkeys');
-    if (combinedModal) combinedModal.value = combinedUrl;
-    if (websiteModal) websiteModal.value = websiteUrl;
-    if (sbModal) sbModal.value = sbUrl;
-    if (hkModal) hkModal.value = combinedUrl;
+    setObsUrlFields(['obs-setup-url-combined', 'obs-url-combined'], combinedUrl);
+    setObsUrlFields(['obs-setup-url-hotkeys', 'obs-url-hotkeys'], combinedUrl);
+    setObsUrlFields(['obs-setup-url-website', 'obs-url-website'], websiteUrl);
+    setObsUrlFields(['obs-setup-url-scorebar', 'obs-url-scorebar'], sbUrl);
     const sizeHint = document.getElementById('obs-scorebar-size-hint');
     const sizeHintModal = document.getElementById('obs-setup-size-hint');
-    const fullHint = document.getElementById('obs-full-size-hint');
     if (sizeHint) sizeHint.textContent = '1920×1080';
-    if (fullHint) fullHint.textContent = '1920×1080';
     if (sizeHintModal) sizeHintModal.textContent = '1920×1080';
-
-    if (panel) {
-      panel.style.display = 'block';
-      const hint = panel.querySelector('.obs-tournament-hint');
-      if (hint) {
-        hint.textContent = tournamentId
-          ? `★ Site share · ${combinedObsSizeLabel()} · slcrickpro.live · Publish ON`
-          : `Site + local · ${combinedObsSizeLabel()} · scorebar + hotkey graphics`;
-      }
-    }
   };
 
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
-      window.refreshObsSetupPanel();
+      if (hasObsContext()) window.refreshObsSetupPanel();
       window.refreshBroadcastPreview();
     }, 1200);
     setInterval(() => {

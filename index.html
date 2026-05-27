@@ -11,7 +11,7 @@
   <meta name="keywords" content="slcrickpro, cricket scoring, slcrickpro live, nrr generator, cricket tournament management, sri lanka cricket scoring, live matches" />
   <meta name="author" content="SLCRICKPRO Team" />
   <meta name="robots" content="index, follow" />
-  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" type="image/png" href="/assets/icon.png" />
   <link rel="icon" type="image/png" href="assets/logo.png" />
   
   <!-- Open Graph / Social SEO -->
@@ -102,10 +102,6 @@
           <a href="pages/posts.html" class="header-btn-sm posts-btn-glow" title="Community Posts">
             <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 16V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z"/><path d="M12 18v4l4-4"/><path d="M2 12h5"/></svg>
             <span>Posts</span>
-          </a>
-          <a href="pages/settings.html" class="header-btn-sm" id="header-sync-link" style="background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.35)" title="Cloud sync (desktop)">
-            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M20 12h4"/><path d="M12 18v4"/><path d="M2 12h4"/></svg>
-            <span>Sync</span>
           </a>
         </div>
         <div class="header-meta">
@@ -306,10 +302,14 @@
       </div>
   </div>
 
+  <script src="js/cloud-config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/socket-loader.js"></script>
   <script src="js/sync-client.js"></script>
   <script src="js/realtime-manager.js"></script>
+  <script src="js/live-sync.js"></script>
+  <script src="js/website-live-feed.js"></script>
+  <script src="js/broadcast-link.js"></script>
   <script>
     function openFeedbackModal() {
         document.getElementById('user-feedback-msg').value = '';

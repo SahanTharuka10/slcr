@@ -3,14 +3,17 @@
  * Requires: cloud-config.js, db.js, socket-loader.js, realtime-manager.js
  */
 (function (global) {
-  function applyRemoteMatch(data) {
+  function applyRemoteMatch(data, opts) {
     if (!data?.id || !global.DB) return;
     const list = global.DB.getMatches();
     const idx = list.findIndex((m) => m.id === data.id);
     const local = idx >= 0 ? list[idx] : null;
-    const cloudTs = data.lastUpdated || 0;
+    const cloudTs = data.lastUpdated || data.cloudUpdatedAt || 0;
     const localTs = local?.lastUpdated || 0;
-    if (local && localTs > cloudTs) return;
+    const fromSocket = !!(opts && opts.fromSocket);
+    const liveish = data.status === 'live' || data.status === 'paused';
+    if (local && !fromSocket && !liveish && localTs > cloudTs) return;
+    if (local && !fromSocket && liveish && localTs > cloudTs + 2000) return;
 
     if (idx >= 0) list[idx] = data;
     else list.push(data);
@@ -23,6 +26,11 @@
     if (typeof global.renderOngoing === 'function') global.renderOngoing();
     if (typeof global.renderLive === 'function') global.renderLive();
     if (typeof global.updateTicker === 'function') global.updateTicker();
+    try {
+      global.dispatchEvent(
+        new CustomEvent('slcrick-live-update', { detail: { type: 'match', id: data.id } })
+      );
+    } catch (_) {}
   }
 
   function wireSocketHandlers(sock) {
@@ -31,7 +39,7 @@
 
     const onUpdate = (payload) => {
       const match = payload?.match || payload?.data || payload;
-      applyRemoteMatch(match);
+      applyRemoteMatch(match, { fromSocket: true });
     };
 
     sock.on('scoreUpdate', onUpdate);
@@ -52,17 +60,50 @@
     });
   }
 
+  function joinAllLiveRooms() {
+    if (!global.DB) return;
+    const live = global.DB.getMatches().filter(
+      (m) => m?.id && (m.status === 'live' || m.status === 'paused') && m.publishLive !== false
+    );
+    live.slice(0, 6).forEach((m) => {
+      global.SLCRICK_REALTIME?.joinMatch?.(m.id);
+      if (m.tournamentId) global.SLCRICK_REALTIME?.joinTournament?.(m.tournamentId);
+    });
+  }
+
+  function startWebsitePolling() {
+    if (global.SLCRICK_DESKTOP || global._slcrickWebsitePollStarted) return;
+    global._slcrickWebsitePollStarted = true;
+    const tick = () => {
+      if (!global.SLCRICK_SYNC?.isEnabled?.()) return;
+      const run =
+        global.SLCRICK_SYNC.syncCloudData ||
+        global.syncCloudData;
+      if (typeof run === 'function') {
+        run({ silent: true, forceRefresh: true }).catch(() => {});
+      }
+    };
+    tick();
+    setInterval(tick, 8000);
+  }
+
   async function start() {
     if (global.SLCRICK_REALTIME) {
-      global.SLCRICK_REALTIME.on('scoreUpdate', (data) => applyRemoteMatch(data));
-      await global.SLCRICK_REALTIME.install({ force: false });
+      global.SLCRICK_REALTIME.on('scoreUpdate', (data) =>
+        applyRemoteMatch(data, { fromSocket: true })
+      );
+      const forceConnect = !global.SLCRICK_DESKTOP;
+      await global.SLCRICK_REALTIME.install({ force: forceConnect });
       const sock = global.SLCRICK_REALTIME.socket;
       if (sock) wireSocketHandlers(sock);
+      joinAllLiveRooms();
+      if (!global.SLCRICK_DESKTOP) startWebsitePolling();
       return;
     }
 
     if (global._cricproSocket) {
       wireSocketHandlers(global._cricproSocket);
+      if (!global.SLCRICK_DESKTOP) startWebsitePolling();
       return;
     }
   }

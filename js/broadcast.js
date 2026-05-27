@@ -148,10 +148,13 @@ function collectSquadPlayersForTeam(m, teamName) {
             if (!inn) return;
             const bat = inn.battingTeam || '';
             const bowl = inn.bowlingTeam || '';
-            if (bat !== teamName && bowl !== teamName) return;
-            [...(inn.batsmen || []), ...(inn.bowlers || [])].forEach((p, idx) =>
-                pushPlayer(p, idx)
-            );
+            // Fallback must remain team-specific: never mix both squads.
+            if (bat === teamName) {
+                (inn.batsmen || []).forEach((p, idx) => pushPlayer(p, idx));
+            }
+            if (bowl === teamName) {
+                (inn.bowlers || []).forEach((p, idx) => pushPlayer(p, idx));
+            }
         });
     }
 

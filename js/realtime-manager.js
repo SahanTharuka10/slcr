@@ -35,7 +35,8 @@
   Object.values(Events).forEach((e) => listeners.set(e, new Set()));
 
   const WAKE_COOLDOWN_MS = 45000;
-  const REST_FALLBACK_MS = 50000;
+  const REST_FALLBACK_MS = 10000;
+  const WEBSITE_SAFETY_POLL_MS = 8000;
   const WAKE_PATH = '/sync/matches';
 
   function on(event, fn) {
@@ -70,7 +71,10 @@
   }
 
   function isSyncEnabled() {
-    if (global.SLCRICK_SYNC?.isEnabled) return !!global.SLCRICK_SYNC.isEnabled();
+    if (global.SLCRICK_SYNC?.isEnabled?.()) return true;
+    if (!global.SLCRICK_DESKTOP && (global.BACKEND_BASE_URL || global.CRICPRO_CLOUD_CONFIG?.backendUrl)) {
+      return true;
+    }
     return !!(global.BACKEND_BASE_URL || global.CRICPRO_CLOUD_CONFIG?.backendUrl);
   }
 
@@ -396,13 +400,31 @@
     log('info', 'Realtime disconnected');
   }
 
+  let _websiteSafetyTimer = null;
+
+  function startWebsiteSafetyPoll() {
+    if (global.SLCRICK_DESKTOP || _websiteSafetyTimer) return;
+    _websiteSafetyTimer = setInterval(() => {
+      if (!isSyncEnabled()) return;
+      if (global.SLCRICK_SYNC?.syncCloudData) {
+        global.SLCRICK_SYNC.syncCloudData({ silent: true, forceRefresh: true }).catch(() => {});
+      }
+    }, WEBSITE_SAFETY_POLL_MS);
+  }
+
   function install(options = {}) {
     if (!options.force && !isSyncEnabled()) {
       disconnect();
       return Promise.resolve(null);
     }
-    if (_socket?.connected && !options.force) return Promise.resolve(_socket);
-    return connect(options);
+    if (_socket?.connected && !options.force) {
+      startWebsiteSafetyPoll();
+      return Promise.resolve(_socket);
+    }
+    return connect(options).then((s) => {
+      startWebsiteSafetyPoll();
+      return s;
+    });
   }
 
   function joinMatch(matchId) {

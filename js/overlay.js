@@ -109,10 +109,29 @@ function stampBroadcastOverlay(el) {
     return el;
 }
 
+/** Stable id for deduping SYNC_SCORE — must not reuse cmd|timestamp (same‑ms collisions). */
+function broadcastDedupeSig(payload) {
+    const cmd = payload?.cmd || '';
+    const ts = payload.timestamp || payload.relayTs || 0;
+    if ((cmd === 'SYNC_SCORE' || cmd === 'SYNC_MATCH') && payload.data?.match) {
+        const m = payload.data.match;
+        if (m?.id) {
+            const inn = m.innings?.[m.currentInnings || 0];
+            let sk = '';
+            if (inn) {
+                const overLen = (inn.currentOver || []).length;
+                sk = `${m.currentInnings}|${inn.runs}|${inn.wickets}|${inn.balls}|${inn.strikerIdx}|${inn.currentBowlerIdx}|${overLen}`;
+            }
+            return `${cmd}:${m.id}|${sk}|${String(m.lastUpdated ?? '')}`;
+        }
+    }
+    return `${cmd}|${ts}`;
+}
+
 function applyBroadcastPayload(payload) {
     if (!payload || !payload.cmd) return;
     const ts = payload.timestamp || payload.relayTs || Date.now();
-    const sig = `${payload.cmd}|${ts}`;
+    const sig = broadcastDedupeSig(payload);
 
     if (payload.matchId && !matchId) matchId = payload.matchId;
     if (payload.matchId && matchId && payload.matchId !== matchId) {
@@ -137,8 +156,9 @@ function applyBroadcastPayload(payload) {
     if (payload.tournamentId && !tournId) tournId = payload.tournamentId;
 
     if (sig === _lastBroadcastCmdSig) return;
-    if (ts && ts <= _lastBroadcastCmdTs) return;
-    _lastBroadcastCmdTs = ts;
+    const syncCmd = payload.cmd === 'SYNC_SCORE' || payload.cmd === 'SYNC_MATCH';
+    if (!syncCmd && ts && ts < _lastBroadcastCmdTs) return;
+    _lastBroadcastCmdTs = syncCmd ? Math.max(_lastBroadcastCmdTs || 0, ts) : ts;
     _lastBroadcastCmdSig = sig;
     handleBroadcastCommand(payload.cmd, payload.data || {});
 }
@@ -203,7 +223,11 @@ function hydrateOverlayMediaFromMatch(m) {
     if (!m || typeof DB === 'undefined') return;
     if (m.teamPhotos && typeof m.teamPhotos === 'object') {
         Object.entries(m.teamPhotos).forEach(([teamName, photo]) => {
-            if (photo) DB.saveTeamPhoto(teamName, photo, m.tournamentId);
+            if (!photo) return;
+            const normalized = DB.resolveAssetUrl ? DB.resolveAssetUrl(photo) : photo;
+            if (normalized && !String(normalized).includes('default-team')) {
+                DB.saveTeamPhoto(teamName, normalized, m.tournamentId);
+            }
         });
     }
     const inn = m.innings?.[m.currentInnings || 0];
@@ -258,7 +282,9 @@ function applyCloudScorePayload(data) {
     hydrateOverlayMediaFromMatch(m);
     if (typeof DB !== 'undefined' && DB.saveMatch) {
         window._desktopApplyingRemoteMatch = true;
-        DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
+        try {
+            DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
+        } catch (_) {}
         window._desktopApplyingRemoteMatch = false;
     }
     const fp = overlayMatchFingerprint(m);
@@ -269,9 +295,10 @@ function applyCloudScorePayload(data) {
         ts > _lastCloudMatchUpdated ||
         scoreKey !== _lastRenderedScoreKey;
     if (changed) {
-        _lastOverlayFingerprint = fp;
+        /* Do NOT set _lastOverlayFingerprint/_lastRenderedScoreKey here —
+         renderOverlay → overlayNeedsRender uses those to decide whether to repaint.
+         Updating them early caused “poisoned” cache (e.g. publishMatch before SYNC_SCORE). */
         _lastCloudMatchUpdated = ts;
-        _lastRenderedScoreKey = scoreKey;
         renderOverlay();
     }
 }
@@ -413,7 +440,25 @@ function overlayModeFromTheme(themeValue) {
 })();
 
 if (typeof OVERLAY_DEFAULT_PLAYER_PHOTO === 'undefined') {
-    var OVERLAY_DEFAULT_PLAYER_PHOTO = '../assets/default-player.svg';
+    var OVERLAY_DEFAULT_PLAYER_PHOTO =
+        (typeof DB !== 'undefined' && DB.defaultPlayerPhotoUrl)
+            ? DB.defaultPlayerPhotoUrl()
+            : '/assets/default-player.svg';
+}
+
+function overlayDefaultTeamPhoto() {
+    return typeof DB !== 'undefined' && DB.defaultTeamPhotoUrl
+        ? DB.defaultTeamPhotoUrl()
+        : '/assets/default-team.svg';
+}
+
+function overlayResolveTeamLogo(raw) {
+    const resolved =
+        typeof DB !== 'undefined' && DB.resolveAssetUrl
+            ? DB.resolveAssetUrl(raw)
+            : raw;
+    if (resolved && !String(resolved).includes('default-team')) return resolved;
+    return '';
 }
 
 function overlaySquadHasCustomPhoto(photo) {
@@ -442,7 +487,11 @@ function overlayEscapeHtml(str) {
 
 function overlayPlayerPhotoUrl(photo) {
     const p = photo && String(photo).trim();
-    if (p && p.length > 10) return p;
+    if (p && p.length > 10) {
+        const resolved =
+            typeof DB !== 'undefined' && DB.resolveAssetUrl ? DB.resolveAssetUrl(p) : p;
+        if (resolved && !String(resolved).includes('default-player')) return resolved;
+    }
     return OVERLAY_DEFAULT_PLAYER_PHOTO;
 }
 
@@ -506,12 +555,12 @@ function overlayResolvePlayerPhoto(player, role, matchCtx) {
 }
 
 function overlayTeamLogoUrl(teamName, tournamentId) {
-    if (!teamName) return '../assets/default-team.svg';
+    if (!teamName) return overlayDefaultTeamPhoto();
     if (typeof DB !== 'undefined' && DB.getTeamPhoto) {
         const fromDb = DB.getTeamPhoto(teamName, tournamentId);
         if (fromDb && !String(fromDb).includes('default-team')) return fromDb;
     }
-    return '../assets/default-team.svg';
+    return overlayDefaultTeamPhoto();
 }
 
 function overlayTournamentSubtitle(m) {
@@ -2259,8 +2308,6 @@ function overlayProfileStatRows(data, label) {
         ];
     }
     return [
-        { lbl: 'Matches', val: data.careerMatches ?? 0 },
-        { lbl: 'Runs', val: data.careerRuns ?? 0 },
         { lbl: 'This Inn', val: data.playerRuns ?? 0 },
         { lbl: 'Balls', val: data.playerBalls ?? 0 },
     ];

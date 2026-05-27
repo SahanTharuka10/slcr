@@ -176,29 +176,49 @@ function showModeSelectionModal(match) {
     renderModeSelection();
 }
 
-function openScorerDashboard(matchId) {
-    // Back to CLASSIC INLINE FLOW - Load match in current tab
-    const m = DB.getMatch(matchId);
-    if (!m) {
+async function openScorerDashboard(matchId) {
+    let m = DB.getMatch(matchId);
+    if (!m && typeof window.pullGlobalData === 'function') {
         showToast('Getting match data...', 'default');
-        window.pullGlobalData().then(() => {
-            const m2 = DB.getMatch(matchId);
-            if (m2) loadMatch(m2);
-            else showToast('Match not found locally.', 'error');
+        await window.pullGlobalData();
+        m = DB.getMatch(matchId);
+    }
+    if (!m) {
+        showToast('Match not found locally.', 'error');
+        return;
+    }
+    const tid = m.tournamentId || '';
+    if (tid && typeof window.ensureTournamentAccess === 'function') {
+        const allowed = await window.ensureTournamentAccess(tid, {
+            type: 'match',
+            matchId,
+            tournamentId: tid
         });
+        if (!allowed) return;
+    } else if (typeof window.matchNeedsPassword === 'function' && window.matchNeedsPassword(m, tid ? DB.getTournament(tid) : null)) {
+        if (typeof window.showMatchLoginScreen === 'function') {
+            window.showMatchLoginScreen(m, { type: 'match', matchId });
+        }
         return;
     }
     loadMatch(m);
 }
 
-function openHotkeyPanel(matchId) {
-    // Load the match inline and switch to the Broadcast Master tab
+async function openHotkeyPanel(matchId) {
     const m = DB.getMatch(matchId);
     if (!m) {
         showToast('Match data not found', 'error');
         return;
     }
-    // Load match data into current session
+    const tid = m.tournamentId || '';
+    if (tid && typeof window.ensureTournamentAccess === 'function') {
+        const allowed = await window.ensureTournamentAccess(tid, {
+            type: 'match',
+            matchId,
+            tournamentId: tid
+        });
+        if (!allowed) return;
+    }
     loadMatch(m);
     // After a short delay (for the scoring screen to render), switch to broadcast tab
     setTimeout(() => {
