@@ -382,25 +382,29 @@ async function installCloudOverlayLive() {
         }
     });
 
+    const cloudPollMs = document.body.classList.contains('obs-capture-mode') ? 600 : 1200;
     setInterval(() => {
         if (matchId) fetchCloudMatchSnapshot();
         else if (tournId) pollMatchApi();
-    }, 2000);
+    }, cloudPollMs);
 }
 
 try {
     const searchStr = window.location.search || '';
     if (searchStr.includes('?')) {
         const urlParams = new URLSearchParams(searchStr);
-        matchId = urlParams.get('match') || urlParams.get('matchId') || null;
+        const explicitMatch = urlParams.get('match') || urlParams.get('matchId') || null;
+        matchId = explicitMatch;
         tournId = urlParams.get('tournament') || urlParams.get('tournamentId') || null;
-        
+
         // Safety clean up to avoid any hashes breaking the ID
         if (matchId && matchId.includes('#')) matchId = matchId.split('#')[0];
         if (tournId && tournId.includes('#')) tournId = tournId.split('#')[0];
         const obsFlag = urlParams.get('obs') === '1';
         const previewFlag = urlParams.get('preview') === '1' || urlParams.get('preview') === 'true';
-        if (tournId && obsFlag && !previewFlag) {
+        // Tournament-only OBS URL (no matchId) → auto-follow live match in that tournament.
+        // Keep explicit matchId when both are present (site + desktop must target same match).
+        if (tournId && obsFlag && !previewFlag && !explicitMatch) {
             matchId = null;
         }
     }
@@ -408,9 +412,8 @@ try {
     console.error("URL Params Error safely caught:", e);
 }
 
-// Tournament URL or no match id → follow live match in that tournament automatically
+// No match id in URL → follow live match (optionally scoped by tournament)
 if (!matchId) isMasterOverlay = true;
-if (tournId) isMasterOverlay = true;
 
 let refreshInterval;
 let currentPopupView = null;
@@ -775,7 +778,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!matchId && !isMasterOverlay) return;
         if (overlayLayer === 'hotkeys') return;
         const now = Date.now();
-        if (_pollMatchInFlight || now - _lastPollMatchTs < 700) return;
+        const minGap = shouldUseCloudLive() ? 400 : 700;
+        if (_pollMatchInFlight || now - _lastPollMatchTs < minGap) return;
         _pollMatchInFlight = true;
         _lastPollMatchTs = now;
         try {
@@ -871,7 +875,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     if (!inPreviewIframe) {
         pollTick();
-        const pollMs = onDesktop ? 2500 : isObsMode ? 900 : 600;
+        const pollMs = onDesktop ? 2500 : shouldUseCloudLive() ? (isObsMode ? 500 : 700) : isObsMode ? 900 : 600;
         setInterval(pollTick, pollMs);
     }
 

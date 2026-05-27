@@ -78,7 +78,10 @@
       return live.buildShareOverlayUrl(mid, theme, tid);
     }
     const q = ['obs=1', 'layer=combined', 'theme=' + encodeURIComponent(theme)];
-    if (mid) q.push('matchId=' + encodeURIComponent(mid));
+    if (mid) {
+        q.push('matchId=' + encodeURIComponent(mid));
+        q.push('match=' + encodeURIComponent(mid));
+    }
     if (tid) q.push('tournament=' + encodeURIComponent(tid));
     return PUBLIC_SITE + '/pages/overlay.html?' + q.join('&');
   };

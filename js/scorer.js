@@ -4047,6 +4047,9 @@ function flushOverlaySignal() {
             tournamentId: currentMatch.tournamentId || null,
             timestamp: Date.now(),
         });
+        if (window.SLCRICK_SYNC?.isEnabled?.() && window.SLCRICK_SYNC.pushLiveMatchNow) {
+            window.SLCRICK_SYNC.pushLiveMatchNow(currentMatch).catch(() => {});
+        }
         return;
     }
     if (_scorerBC) {
