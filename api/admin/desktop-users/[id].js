@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const { applyCors, parseBody, requireAdmin } = require('../../lib/http');
-const { getPool } = require('../../lib/db');
+const { getDb } = require('../../lib/db');
 
 module.exports = async (req, res) => {
   applyCors(req, res);
@@ -10,7 +10,13 @@ module.exports = async (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'User id required' });
 
-  const db = getPool();
+  let db;
+  try {
+    db = await getDb();
+  } catch (e) {
+    const code = e.code === 'NO_DATABASE_URL' ? 503 : 500;
+    return res.status(code).json({ error: e.message || 'Database unavailable' });
+  }
 
   if (req.method === 'PATCH') {
     const body = parseBody(req);

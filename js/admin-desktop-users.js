@@ -89,6 +89,12 @@
     if (res.status === 401) {
       return 'Admin session expired — logout and login again with site PIN (slcrickpro@2026).';
     }
+    if (res.status === 503) {
+      return (
+        data.error ||
+        'Vercel: add DATABASE_URL (Supabase Postgres URL) in project env vars, then redeploy.'
+      );
+    }
     if (res.status === 404) {
       return (
         'Desktop users API unavailable. On Vercel: set DATABASE_URL env var and redeploy. ' +

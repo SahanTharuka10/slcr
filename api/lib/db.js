@@ -1,10 +1,16 @@
 const { Pool } = require('pg');
+const { ensureDesktopSchema } = require('./schema');
 
 let pool;
+let schemaReady;
 
 function getPool() {
   if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL is not set (add it in Vercel → Settings → Environment Variables)');
+    const err = new Error(
+      'DATABASE_URL is not set on Vercel. Add your Supabase Postgres URL in Project → Settings → Environment Variables, then redeploy.'
+    );
+    err.code = 'NO_DATABASE_URL';
+    throw err;
   }
   if (!pool) {
     pool = new Pool({
@@ -17,4 +23,13 @@ function getPool() {
   return pool;
 }
 
-module.exports = { getPool };
+async function getDb() {
+  const db = getPool();
+  if (!schemaReady) {
+    await ensureDesktopSchema(db);
+    schemaReady = true;
+  }
+  return db;
+}
+
+module.exports = { getPool, getDb };

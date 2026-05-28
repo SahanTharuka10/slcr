@@ -1,30 +1,27 @@
 const bcrypt = require('bcrypt');
 const { applyCors, parseBody, requireAdmin, newEntityId } = require('../lib/http');
-const { getPool } = require('../lib/db');
+const { getDb } = require('../lib/db');
+const { mapUserRow } = require('../lib/schema');
 
 module.exports = async (req, res) => {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (!requireAdmin(req, res)) return;
 
-  const db = getPool();
+  let db;
+  try {
+    db = await getDb();
+  } catch (e) {
+    const code = e.code === 'NO_DATABASE_URL' ? 503 : 500;
+    return res.status(code).json({ error: e.message || 'Database unavailable' });
+  }
 
   if (req.method === 'GET') {
     try {
-      const { rows } = await db.query(
-        `SELECT id, username, "displayName", active, "createdAt", "lastLoginAt"
-         FROM desktop_users ORDER BY "createdAt" DESC NULLS LAST`
-      );
-      return res.status(200).json({
-        users: rows.map((u) => ({
-          id: u.id,
-          username: u.username,
-          displayName: u.displayName,
-          active: u.active !== false,
-          createdAt: u.createdAt,
-          lastLoginAt: u.lastLoginAt,
-        })),
-      });
+      const { rows } = await db.query('SELECT * FROM desktop_users');
+      const users = rows.map(mapUserRow).filter(Boolean);
+      users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return res.status(200).json({ users });
     } catch (e) {
       console.error('desktop-users GET', e);
       return res.status(500).json({ error: e.message || 'Failed to list users' });
