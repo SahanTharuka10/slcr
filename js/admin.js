@@ -75,7 +75,8 @@ async function loginAdmin() {
                 sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
                 sessionStorage.setItem('isAdmin', 'true');
                 cloudOk = true;
-                showToast('🔓 Admin panel unlocked (cloud)', 'success');
+                const via = onLiveSite ? 'Vercel' : 'Render';
+                showToast('🔓 Admin panel unlocked (' + via + ')', 'success');
             } else if (onLiveSite) {
                 showToast(data.message || 'Wrong PIN — use slcrickpro@2026 for cloud admin', 'error');
             }

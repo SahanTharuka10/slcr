@@ -29,6 +29,26 @@
     return sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
   }
 
+  /** Vercel admin API uses JWT (has a dot). Old Render tokens are hex-only. */
+  function isCloudJwtToken(token) {
+    return typeof token === 'string' && token.includes('.');
+  }
+
+  function clearStaleCloudSession() {
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    sessionStorage.removeItem('isAdmin');
+  }
+
+  function ensureCloudAdminSession() {
+    if (!isLiveSite()) return;
+    const token = getAdminToken();
+    if (!token) return;
+    if (!isCloudJwtToken(token)) {
+      clearStaleCloudSession();
+      throw new Error('Please log out and sign in again with PIN slcrickpro@2026 (cloud session updated).');
+    }
+  }
+
   function adminHeaders() {
     const token = getAdminToken();
     return {
@@ -39,19 +59,12 @@
 
   async function wakeBackend(base) {
     try {
-      await fetch(base + '/api/ping', { cache: 'no-store', mode: 'cors' });
+      await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
     } catch (_) {}
   }
 
   async function checkDesktopUsersApi(base) {
     try {
-      const probe = await fetch(base + '/api/admin/desktop-users', {
-        cache: 'no-store',
-        mode: 'cors',
-      });
-      if (probe.status === 401 || probe.status === 403) return true;
-      if (probe.ok) return true;
-
       const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
       if (ver.ok) {
         const data = await ver.json().catch(() => ({}));
@@ -111,12 +124,13 @@
         '</code> · Desktop users API: <strong style="color:' +
         (ok ? '#22c55e' : '#ff6b6b') +
         '">' +
-        (ok ? 'READY' : 'NOT DEPLOYED — redeploy Render') +
+        (ok ? 'READY' : 'NOT AVAILABLE — check Vercel DATABASE_URL') +
         '</strong>';
     });
   }
 
   async function adminFetch(path, options = {}) {
+    ensureCloudAdminSession();
     const base = getBackendUrl();
     _apiBase = base;
     await wakeBackend(base);
@@ -126,6 +140,9 @@
       headers: { ...adminHeaders(), ...(options.headers || {}) },
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && isLiveSite()) {
+      clearStaleCloudSession();
+    }
     if (!res.ok) throw new Error(apiErrorMessage(res, data, options.context || 'Request', base));
     return data;
   }
@@ -138,6 +155,12 @@
   async function renderDesktopUsersAdmin() {
     const list = document.getElementById('desktop-users-list');
     if (!list) return;
+
+    if (isLiveSite()) {
+      const t = getAdminToken();
+      if (t && !isCloudJwtToken(t)) clearStaleCloudSession();
+    }
+
     updateCloudHint();
 
     if (!getAdminToken()) {

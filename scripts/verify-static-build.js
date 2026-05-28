@@ -11,6 +11,7 @@ const required = [
   'js/admin-desktop-users.js',
   'js/cloud-config.js',
   'api/version.js',
+  'api/ping.js',
   'api/admin/desktop-users.js',
 ];
 
