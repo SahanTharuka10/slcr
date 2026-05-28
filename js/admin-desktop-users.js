@@ -3,6 +3,7 @@
  */
 (function () {
   const ADMIN_TOKEN_KEY = 'slcrick_admin_token';
+  const API_BASE_KEY = 'slcrick_admin_api_base';
   const RENDER_API = 'https://slcrickpro.onrender.com';
 
   function isLiveSite() {
@@ -10,7 +11,19 @@
     return h.includes('slcrickpro.live') || h.includes('www.slcrickpro');
   }
 
+  function getBackendCandidates() {
+    if (!isLiveSite()) return [getBackendUrl()];
+    const origin = location.origin.replace(/\/$/, '');
+    const saved = (sessionStorage.getItem(API_BASE_KEY) || '').trim();
+    const list = [];
+    if (saved) list.push(saved);
+    list.push(RENDER_API, origin);
+    return [...new Set(list.filter(Boolean))];
+  }
+
   function getBackendUrl() {
+    const saved = (sessionStorage.getItem(API_BASE_KEY) || '').trim();
+    if (isLiveSite() && saved) return saved;
     if (isLiveSite()) return RENDER_API;
     if (window.SLCRICK_DESKTOP) return RENDER_API;
     const fromSync =
@@ -50,6 +63,13 @@
 
   async function checkDesktopUsersApi(base) {
     try {
+      const probe = await fetch(base + '/api/admin/desktop-users', {
+        cache: 'no-store',
+        mode: 'cors',
+        headers: adminHeaders(),
+      });
+      if (probe.status === 401 || probe.ok) return true;
+
       const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
       if (ver.ok) {
         const data = await ver.json().catch(() => ({}));
@@ -109,39 +129,68 @@
     el.style.display = 'block';
     el.style.color = 'var(--c-muted)';
     el.innerHTML = 'API: <code>' + base + '</code> · Checking server…';
-    checkDesktopUsersApi(base).then((ok) => {
-      el.innerHTML =
-        'API: <code>' +
-        base +
-        '</code> · Desktop users API: <strong style="color:' +
-        (ok ? '#22c55e' : '#ff6b6b') +
-        '">' +
-        (ok ? 'READY' : 'NOT DEPLOYED — redeploy Render (slcr main)') +
-        '</strong>';
-    });
+    Promise.all(getBackendCandidates().map((b) => checkDesktopUsersApi(b).then((ok) => ({ b, ok })))).then(
+      (results) => {
+        const hit = results.find((r) => r.ok);
+        el.innerHTML =
+          'API: <code>' +
+          (hit ? hit.b : base) +
+          '</code> · Desktop users API: <strong style="color:' +
+          (hit ? '#22c55e' : '#ff6b6b') +
+          '">' +
+          (hit ? 'READY' : 'Need Render deploy OR Vercel DATABASE_URL') +
+          '</strong>';
+      }
+    );
   }
 
   async function adminFetch(path, options = {}) {
-    const base = getBackendUrl();
-    _apiBase = base;
-    await wakeBackend(base);
-    const url = base + path;
-    const res = await fetch(url, {
-      ...options,
-      headers: { ...adminHeaders(), ...(options.headers || {}) },
-    });
-    let data = {};
-    const text = await res.text().catch(() => '');
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch (_) {
-      data = { error: text || res.statusText };
+    const candidates = getBackendCandidates();
+    let lastErr = null;
+
+    for (const base of candidates) {
+      _apiBase = base;
+      await wakeBackend(base);
+      const url = base + path;
+      let res;
+      try {
+        res = await fetch(url, {
+          ...options,
+          headers: { ...adminHeaders(), ...(options.headers || {}) },
+        });
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
+
+      let data = {};
+      const text = await res.text().catch(() => '');
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        data = { error: text || res.statusText };
+      }
+
+      if (res.status === 401) {
+        if (isLiveSite()) clearStaleCloudSession();
+        throw new Error(apiErrorMessage(res, data, options.context || 'Request', base));
+      }
+
+      if (res.status === 404 || res.status === 503) {
+        lastErr = new Error(apiErrorMessage(res, data, options.context || 'Request', base));
+        continue;
+      }
+
+      if (!res.ok) {
+        lastErr = new Error(apiErrorMessage(res, data, options.context || 'Request', base));
+        continue;
+      }
+
+      sessionStorage.setItem(API_BASE_KEY, base);
+      return data;
     }
-    if (res.status === 401 && isLiveSite()) {
-      clearStaleCloudSession();
-    }
-    if (!res.ok) throw new Error(apiErrorMessage(res, data, options.context || 'Request', base));
-    return data;
+
+    throw lastErr || new Error(options.context || 'Request failed');
   }
 
   async function fetchDesktopUsers() {

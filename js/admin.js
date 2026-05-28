@@ -62,27 +62,41 @@ async function loginAdmin() {
     let cloudOk = false;
     const onLiveSite = (location.hostname || '').toLowerCase().includes('slcrickpro.live');
     if (!window.SLCRICK_DESKTOP) {
-        try {
-            const base = getAdminBackendUrl();
-            const res = await fetch(base + '/api/admin/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password: pass, pin: pass }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (res.ok && data.success && data.token) {
-                sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
-                sessionStorage.setItem('isAdmin', 'true');
-                cloudOk = true;
-                showToast('🔓 Admin panel unlocked (cloud)', 'success');
-            } else if (onLiveSite) {
-                showToast(data.message || 'Wrong PIN — use slcrickpro@2026 for cloud admin', 'error');
+        const bases = onLiveSite
+            ? [
+                  getAdminBackendUrl(),
+                  'https://slcrickpro.onrender.com',
+                  location.origin.replace(/\/$/, ''),
+              ]
+            : [getAdminBackendUrl()];
+        const tried = [...new Set(bases.filter(Boolean))];
+
+        for (const base of tried) {
+            try {
+                const res = await fetch(base + '/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password: pass, pin: pass }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success && data.token) {
+                    sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
+                    sessionStorage.setItem('slcrick_admin_api_base', base);
+                    sessionStorage.setItem('isAdmin', 'true');
+                    cloudOk = true;
+                    showToast('🔓 Admin panel unlocked (cloud)', 'success');
+                    break;
+                }
+                if (res.status === 401 && onLiveSite) {
+                    showToast(data.message || 'Wrong PIN — use slcrickpro@2026 for cloud admin', 'error');
+                    break;
+                }
+            } catch (e) {
+                console.warn('[Admin] cloud login failed for', base, e);
             }
-        } catch (e) {
-            console.warn('[Admin] cloud login failed', e);
-            if (onLiveSite) {
-                showToast('Cannot reach API — wait 30s and try again (Render waking up)', 'error');
-            }
+        }
+        if (!cloudOk && onLiveSite) {
+            showToast('Cannot reach cloud API — check Render deploy or Vercel DATABASE_URL', 'error');
         }
     }
 

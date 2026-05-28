@@ -90,4 +90,5 @@ module.exports = {
   withSupabase,
   getDatabaseUrl,
   getSupabaseConfig,
+  missingDbError,
 };
