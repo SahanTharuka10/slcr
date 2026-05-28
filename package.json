@@ -6,7 +6,8 @@
   },
   "scripts": {
     "start": "node scripts/render-start.js",
-    "build": "node scripts/verify-server-build.js",
+    "build": "node scripts/verify-static-build.js",
+    "build:server": "node scripts/verify-server-build.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

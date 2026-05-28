@@ -20,7 +20,7 @@ Auto deploy “success” වුණත් **අලුත් build fail** වු�
 1. **Service** → `slcrickpro` (හෝ API service) → **Settings**
 2. **Repository:** `SahanTharuka10/slcr` — **Branch:** `main`
 3. **Root Directory:** *(empty)* — repo root
-4. **Build Command:** `npm install && npm run build`
+4. **Build Command:** `npm install && npm run build:server` (not plain `build` — that is for Vercel static only)
 5. **Start Command:** `npm start` *(not* `node server/index.js` alone)
 6. **Environment:** `DATABASE_URL` = Supabase Postgres connection string
 7. **Events** → latest deploy → **Succeeded**? Commit `1.0.5` / `render-start`?
