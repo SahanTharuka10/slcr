@@ -1,12 +1,12 @@
 {
   "name": "slcrickpro",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "start": "node server/index.js",
-    "build": "echo 'No build step required'",
+    "start": "node scripts/render-start.js",
+    "build": "node scripts/verify-server-build.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

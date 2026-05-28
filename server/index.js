@@ -88,12 +88,20 @@ app.get('/api/ping', (req, res) => res.json({ status: 'alive', time: new Date().
 app.get('/api/version', (req, res) => {
   res.json({
     app: 'SLCRICKPRO',
-    version: '1.0.3',
+    version: '1.0.4',
     features: { desktopUsers: true, desktopLogin: true },
     db: dbType || 'initializing',
   });
 });
-app.get('/api/status', (req, res) => res.send('SLCRICKPRO_SERVER_UP'));
+app.get('/api/status', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'SLCRICKPRO_SERVER_UP',
+    build: '1.0.4',
+    features: { desktopUsers: true, desktopLogin: true },
+    db: dbType || 'initializing',
+  });
+});
 app.get('/health', async (req, res) => {
   try { await ensureDB(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: e.message }); }
 });

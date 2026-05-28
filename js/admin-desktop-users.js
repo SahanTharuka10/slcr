@@ -44,10 +44,20 @@
 
   async function checkDesktopUsersApi(base) {
     try {
-      const res = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
-      if (!res.ok) return false;
-      const data = await res.json().catch(() => ({}));
-      return data.features?.desktopUsers === true;
+      const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
+      if (ver.ok) {
+        const data = await ver.json().catch(() => ({}));
+        if (data.features?.desktopUsers === true) return true;
+      }
+      const st = await fetch(base + '/api/status', { cache: 'no-store', mode: 'cors' });
+      if (!st.ok) return false;
+      const text = await st.text();
+      try {
+        const data = JSON.parse(text);
+        return data.features?.desktopUsers === true || data.build >= '1.0.4';
+      } catch (_) {
+        return false;
+      }
     } catch (_) {
       return false;
     }
