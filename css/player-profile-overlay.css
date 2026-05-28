@@ -267,3 +267,94 @@
     pointer-events: none;
     z-index: 0;
 }
+
+/* OBS — compact player profile (striker / non-striker / bowler hotkeys) */
+body.obs-capture-mode .pp-card--vertical {
+    width: 228px;
+    max-width: 34vw;
+}
+
+body.obs-capture-mode .pp-card--vertical.pp-card--mini {
+    width: 210px;
+    min-height: 0;
+}
+
+body.obs-capture-mode .pp-card--vertical.pp-card--with-data {
+    width: 240px;
+    min-height: 0;
+}
+
+body.obs-capture-mode .pp-v-photo-zone {
+    height: 128px;
+    padding: 8px 12px 0;
+}
+
+body.obs-capture-mode .pp-card--mini .pp-v-photo-zone {
+    height: 108px;
+}
+
+body.obs-capture-mode .pp-v-photo-img {
+    max-height: 120px;
+}
+
+body.obs-capture-mode .pp-card--mini .pp-v-photo-img {
+    max-height: 100px;
+}
+
+body.obs-capture-mode .pp-v-initials {
+    font-size: 42px;
+}
+
+body.obs-capture-mode .pp-v-body {
+    padding: 10px 14px 12px;
+}
+
+body.obs-capture-mode .pp-v-name {
+    font-size: 17px;
+}
+
+body.obs-capture-mode .pp-card--with-data .pp-v-name {
+    font-size: 16px;
+}
+
+body.obs-capture-mode .pp-v-team {
+    font-size: 11px;
+    margin-top: 5px;
+    letter-spacing: 2px;
+}
+
+body.obs-capture-mode .pp-v-stats-grid {
+    margin-top: 10px;
+    gap: 4px;
+}
+
+body.obs-capture-mode .pp-v-stat-h {
+    font-size: 6px;
+    padding: 3px 2px;
+}
+
+body.obs-capture-mode .pp-v-stat-n {
+    font-size: 12px;
+    padding: 5px 2px;
+}
+
+body.obs-capture-mode .pp-dual-row .pp-card--vertical {
+    width: 200px;
+}
+
+body.obs-capture-mode .partnership-overlay .partnership-player-card {
+    width: 170px !important;
+}
+
+body.obs-capture-mode .partnership-overlay .partnership-player-card > div:first-child {
+    height: 150px !important;
+}
+
+body.obs-capture-mode .partnership-overlay .partnership-center-card {
+    min-width: 360px !important;
+    padding: 18px 36px !important;
+}
+
+body.obs-capture-mode .partnership-overlay .partnership-center-card > div:nth-child(3) > div:first-child {
+    font-size: 48px !important;
+}

@@ -31,6 +31,8 @@ body.preview-mode {
 /* OBS / stream — transparent frame; scorebar + hotkey popups only */
 html.obs-capture-mode,
 body.obs-capture-mode {
+    --obs-scorebar-h: 48px;
+    --obs-graphic-gap: 3px;
     background: none !important;
     background-color: rgba(0, 0, 0, 0) !important;
 }
@@ -75,6 +77,7 @@ body.obs-capture-mode .broadcast-overlay:not(.overlay-visible):not(.overlay-stay
 body.obs-capture-mode .broadcast-overlay.overlay-visible,
 body.obs-capture-mode .broadcast-overlay.overlay-stay,
 body.obs-capture-mode .broadcast-overlay.pp-overlay,
+body.obs-capture-mode .broadcast-overlay.nb-overlay,
 body.obs-capture-mode .broadcast-overlay.bo-graphic-bl,
 body.obs-capture-mode .broadcast-team-squad {
     visibility: visible !important;
@@ -85,7 +88,7 @@ body.obs-capture-mode .broadcast-team-squad,
 body.obs-capture-mode .broadcast-overlay.overlay-visible.bo-graphic-row {
     display: flex !important;
 }
-body.obs-capture-mode .broadcast-overlay.overlay-visible:not(.bo-graphic-row):not(.last-wicket-overlay):not(.be-dock-overlay):not(.crr-float-overlay):not(.next-match-overlay):not(.runs-balls-overlay) {
+body.obs-capture-mode .broadcast-overlay.overlay-visible:not(.bo-graphic-row):not(.last-wicket-overlay):not(.be-dock-overlay):not(.crr-float-overlay):not(.next-match-overlay):not(.runs-balls-overlay):not(.broadcast-team-squad) {
     display: block !important;
 }
 body.obs-capture-mode .last-wicket-overlay.overlay-visible,
@@ -145,13 +148,13 @@ body.obs-capture-mode.obs-layer-combined #overlay-container {
 }
 body.obs-layer-combined .last-wicket-overlay,
 body.obs-layer-combined .be-dock-overlay {
-    bottom: 100px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 6px);
 }
 body.obs-layer-combined .crr-float-overlay.overlay-visible {
-    bottom: 100px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 10px);
 }
 body.obs-layer-combined .broadcast-overlay.bo-graphic-bl {
-    bottom: 100px !important;
+    bottom: calc(var(--obs-scorebar-h, 48px) + var(--obs-graphic-gap, 3px)) !important;
 }
 
 /* Scorebar-only strip — bar pinned to bottom of browser source */
@@ -216,11 +219,11 @@ body.obs-strip-only .m2-pro-bar {
     margin-bottom: 0 !important;
 }
 
-/* Hotkey player cards — above scorebar, bottom-left (OBS layout) */
+/* Hotkey player cards — flush above scorebar top edge (OBS layout) */
 body.obs-capture-mode .broadcast-overlay.bo-graphic-bl {
     top: auto !important;
     left: 40px !important;
-    bottom: 92px !important;
+    bottom: calc(var(--obs-scorebar-h, 48px) + var(--obs-graphic-gap, 3px)) !important;
     transform: none !important;
 }
 body.obs-capture-mode .broadcast-overlay.bo-graphic-row {
@@ -664,16 +667,17 @@ body.obs-strip-only #overlay-container.mode-2 {
 
 .m2-pro-bar {
     width: 100%;
-    min-height: 76px;
-    --m2-block-h: 68px;
-    --m2-photo-cap: 56px;
+    min-height: 34px;
+    --m2-block-h: 36px;
+    --m2-photo-cap: 38px;
+    --m2-bowler-photo-h: 40px;
     display: grid;
     grid-template-columns:
-        minmax(52px, 0.55fr)
-        minmax(170px, 1.25fr)
-        minmax(210px, 1.55fr)
-        minmax(170px, 1.25fr)
-        minmax(52px, 0.55fr);
+        minmax(36px, 0.32fr)
+        minmax(240px, 1.75fr)
+        minmax(200px, 1.45fr)
+        minmax(180px, 1.35fr)
+        minmax(36px, 0.32fr);
     align-items: stretch;
     gap: 0;
     filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35));
@@ -685,11 +689,13 @@ body.obs-strip-only #overlay-container.mode-2 {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 4px 6px;
-    min-height: 76px;
+    padding: 2px 5px;
+    min-height: 38px;
     position: relative;
     overflow: hidden;
-    background: linear-gradient(180deg, #66bb6a 0%, #43a047 55%, #2e7d32 100%);
+    background: linear-gradient(180deg, #243b6e 0%, #1a1b41 55%, #12152e 100%);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .m2-brand--bat {
@@ -722,8 +728,8 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-brand-logo {
-    width: min(40px, var(--m2-block-h), 92%);
-    height: min(40px, var(--m2-block-h), 92%);
+    width: min(34px, var(--m2-block-h), 90%);
+    height: min(34px, var(--m2-block-h), 90%);
     aspect-ratio: 1;
     flex-shrink: 1;
     min-width: 0;
@@ -760,9 +766,9 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-brand-team {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 900;
-    color: #0f172a;
+    color: #f5f8ff;
     text-transform: uppercase;
     letter-spacing: 0.3px;
     line-height: 1.15;
@@ -772,10 +778,10 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-brand-league {
-    margin-top: 4px;
-    font-size: 8px;
+    margin-top: 3px;
+    font-size: 7px;
     font-weight: 800;
-    color: rgba(255, 255, 255, 0.95);
+    color: rgba(200, 220, 255, 0.88);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     line-height: 1.25;
@@ -788,30 +794,31 @@ body.obs-strip-only #overlay-container.mode-2 {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 4px 6px;
-    min-height: 76px;
+    padding: 1px 4px;
+    min-height: 34px;
     border-top: 1px solid rgba(255, 255, 255, 0.9);
     overflow: hidden;
 }
 
 .m2-panel--bat {
     clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
-    padding-right: 20px;
+    padding-right: 14px;
+    justify-content: center;
 }
 
 .m2-panel--bowl {
     clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%);
-    padding-left: 16px;
-    gap: 4px;
-    --m2-photo-cap: 48px;
-    --m2-bowl-photo-h: 46px;
+    padding-left: 12px;
+    padding-right: 4px;
+    justify-content: center;
+    --m2-bowler-photo-h: 44px;
 }
 
 .m2-batter-row {
     display: flex;
     align-items: center;
     justify-content: stretch;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
     max-width: 100%;
     height: var(--m2-block-h);
@@ -868,19 +875,129 @@ body.obs-strip-only #overlay-container.mode-2 {
     align-self: center;
 }
 
-.m2-panel--bowl {
-    --m2-photo-cap: 64px;
-    --m2-bowl-photo-h: 54px;
+.m2-bowl-right-col {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    min-height: 0;
 }
 
-.m2-panel--bowl .m2-bowler-block {
-    grid-template-columns: minmax(0, 1fr) minmax(0, min(var(--m2-photo-cap), var(--m2-bowl-photo-h)));
-    max-height: var(--m2-bowl-photo-h);
+.m2-bowl-right-col--solo {
+    justify-content: center;
 }
 
-.m2-panel--bowl .m2-photo-ring {
-    max-width: min(var(--m2-photo-cap), var(--m2-bowl-photo-h));
-    max-height: min(var(--m2-photo-cap), var(--m2-bowl-photo-h));
+.m2-bowl-right-col--balls {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+}
+
+.m2-bowl-right-col--balls .m2-bowler-block--right {
+    flex: 1 1 52%;
+    min-width: 0;
+    max-width: 58%;
+}
+
+.m2-bowl-right-col--balls .m2-ball-track {
+    flex: 0 0 auto;
+    margin-left: auto;
+    gap: 4px;
+}
+
+.m2-bowl-right-col--balls .m2-ball-dot {
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
+    border-width: 1.5px;
+}
+
+.m2-bowler-block--right {
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(var(--m2-bowler-photo-h), 52px));
+    gap: 5px;
+    width: 100%;
+    min-height: var(--m2-bowler-photo-h);
+    max-height: var(--m2-bowler-photo-h);
+    align-items: center;
+}
+
+.m2-photo-ring--bowl-lg {
+    width: min(var(--m2-bowler-photo-h), 52px);
+    height: min(var(--m2-bowler-photo-h), 52px);
+    max-width: 52px;
+    max-height: 52px;
+    border-width: 2px;
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
+}
+
+.m2-photo-ring--batter {
+    max-width: min(var(--m2-photo-cap), var(--m2-block-h));
+    max-height: min(var(--m2-photo-cap), var(--m2-block-h));
+}
+
+.m2-panel--bowl .m2-ball-track {
+    justify-content: flex-end;
+    gap: 4px;
+    padding-top: 0;
+}
+
+.m2-player-text--bowl {
+    gap: 1px;
+}
+
+.m2-bowler-label {
+    font-size: 7px;
+    font-weight: 900;
+    letter-spacing: 0.8px;
+    color: #5c6bc0;
+    text-transform: uppercase;
+    line-height: 1;
+}
+
+.m2-bowler-line--stats {
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 1px;
+}
+
+.m2-bowler-econ {
+    font-size: 10px;
+    font-weight: 800;
+    color: #455a64;
+    white-space: nowrap;
+}
+
+.m2-bowl-meta-strip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    font-size: 10px;
+    font-weight: 800;
+    color: #1a237e;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    line-height: 1.2;
+    padding: 2px 4px;
+}
+
+.m2-bowl-meta-team {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m2-bowl-meta-div {
+    opacity: 0.45;
+}
+
+.m2-bowl-meta-crr {
+    white-space: nowrap;
 }
 
 .m2-photo {
@@ -898,7 +1015,7 @@ body.obs-strip-only #overlay-container.mode-2 {
     gap: 5px;
     min-width: 0;
     width: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
 }
 
 .m2-batter-name {
@@ -907,16 +1024,19 @@ body.obs-strip-only #overlay-container.mode-2 {
     color: #1a237e;
     text-transform: uppercase;
     letter-spacing: 0.2px;
-    white-space: nowrap;
+    white-space: normal;
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
+    text-overflow: clip;
     line-height: 1.15;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
 
 .m2-batter-score {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 950;
     color: #0f172a;
     line-height: 1;
@@ -925,7 +1045,7 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-batter-balls {
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 700;
     color: #455a64;
     margin-left: 2px;
@@ -944,17 +1064,20 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-bowler-name {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
     color: #1a237e;
     text-transform: uppercase;
     letter-spacing: 0.2px;
-    white-space: nowrap;
+    white-space: normal;
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
+    text-overflow: clip;
     line-height: 1.15;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
 
 .m2-bowler-fig {
@@ -978,8 +1101,8 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-ball-dot {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -1024,7 +1147,7 @@ body.obs-strip-only #overlay-container.mode-2 {
     width: 100%;
     min-width: 0;
     z-index: 6;
-    margin-top: -6px;
+    margin-top: -10px;
     align-self: stretch;
 }
 
@@ -1070,8 +1193,8 @@ body.obs-strip-only #overlay-container.mode-2 {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 5px 12px 4px;
+    gap: 6px;
+    padding: 4px 10px 3px;
     width: 100%;
     min-width: 0;
     flex: 1 1 auto;
@@ -1095,7 +1218,7 @@ body.obs-strip-only #overlay-container.mode-2 {
 }
 
 .m2-live-score {
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 950;
     line-height: 1;
     letter-spacing: -0.5px;
@@ -1119,11 +1242,67 @@ body.obs-strip-only #overlay-container.mode-2 {
     text-align: center;
     background: linear-gradient(180deg, #1a0b2e 0%, #0f0518 100%);
     color: #e8eaf6;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.3px;
     padding: 3px 10px 4px;
+    white-space: normal;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+
+.m2-center-meta-main {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    line-height: 1.1;
+}
+
+.m2-center-meta-sub {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #b3e5fc;
+    text-transform: uppercase;
+    line-height: 1.1;
+}
+
+.m2-detail-meta {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+}
+
+.m2-detail-line {
+    font-size: 10px;
+    font-weight: 800;
+    color: #263238;
+    letter-spacing: 0.2px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.m2-detail-line strong {
+    color: #1a237e;
+}
+
+.m2-detail-line--accent {
+    font-size: 11px;
+    font-weight: 900;
+    color: #4a148c;
+}
+
+.m2-photo-ring--meta {
+    max-width: 58px;
+    max-height: 58px;
 }
 
 .m2-stats-strip strong {
@@ -1150,20 +1329,16 @@ body.obs-strip-only .m2-pro-bar {
 }
 
 body.obs-strip-only .m2-pro-bar {
-    --m2-block-h: 72px;
-    --m2-photo-cap: 58px;
-    min-height: 76px;
-}
-
-body.obs-strip-only .m2-panel--bowl {
-    --m2-bowl-photo-h: 48px;
-    --m2-photo-cap: 52px;
+    --m2-block-h: 40px;
+    --m2-bowler-photo-h: 44px;
+    --m2-photo-cap: 44px;
+    min-height: 42px;
 }
 
 body.obs-strip-only.mode-2-active,
 body.obs-strip-only:has(#overlay-container.mode-2) {
-    height: 88px !important;
-    max-height: 88px !important;
+    height: 64px !important;
+    max-height: 64px !important;
 }
 
 /* ============================================================
@@ -1245,7 +1420,7 @@ body.obs-layer-hotkeys #broadcast-next-match.overlay-visible {
 .crr-float-overlay {
     position: fixed;
     left: 24px;
-    bottom: 78px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 10px);
     top: auto;
     z-index: 27600;
     display: none;
@@ -1348,7 +1523,7 @@ body.obs-capture-mode #broadcast-crr-float.overlay-visible {
     position: fixed;
     right: 24px;
     left: auto;
-    bottom: 84px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 6px);
     top: auto;
     height: auto;
     min-height: 58px;
@@ -1497,7 +1672,7 @@ body.obs-capture-mode #broadcast-big-event.overlay-visible {
 }
 
 body.obs-strip-only .be-dock-overlay {
-    bottom: 80px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 6px);
     right: 12px;
 }
 
@@ -1507,7 +1682,7 @@ body.obs-strip-only .be-dock-overlay {
     left: 50%;
     right: auto;
     transform: translateX(-50%);
-    bottom: 62px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 4px);
     top: auto;
     width: 98%;
     max-width: 1900px;
@@ -1708,14 +1883,136 @@ body.obs-capture-mode #broadcast-last-wicket.overlay-visible {
     font-variant-numeric: tabular-nums;
 }
 
-body.obs-layer-hotkeys .last-wicket-overlay,
-body.obs-layer-combined .last-wicket-overlay {
-    bottom: 62px;
-}
-
 body.obs-layer-hotkeys .be-dock-overlay,
 body.obs-layer-combined .be-dock-overlay {
-    bottom: 84px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 6px);
+}
+
+/* Last wicket — thin strip flush above scorebar (OBS) */
+body.obs-capture-mode .last-wicket-overlay {
+    bottom: calc(var(--obs-scorebar-h, 48px) + 6px) !important;
+    width: auto;
+    max-width: min(920px, 96vw);
+    left: 50%;
+    transform: translateX(-50%);
+    align-items: flex-end;
+    justify-content: center;
+}
+
+body.obs-capture-mode .lw-panel {
+    width: auto;
+    max-width: min(880px, 96vw);
+    margin: 0;
+}
+
+body.obs-capture-mode .wf-chips {
+    margin-bottom: 3px;
+    gap: 4px;
+}
+
+body.obs-capture-mode .wf-chip {
+    font-size: 8px;
+    padding: 2px 8px;
+}
+
+body.obs-capture-mode .wf-card-wrap {
+    width: 100%;
+}
+
+body.obs-capture-mode .wf-card {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    width: 100%;
+    min-height: 50px;
+    max-height: 54px;
+    border-radius: 3px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+body.obs-capture-mode .wf-top {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+body.obs-capture-mode .wf-name-block {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    min-height: 50px;
+}
+
+body.obs-capture-mode .wf-inns-tag {
+    margin-bottom: 0;
+    font-size: 7px;
+    flex-shrink: 0;
+}
+
+body.obs-capture-mode .wf-name {
+    font-size: 15px;
+}
+
+body.obs-capture-mode .wf-score-block {
+    padding: 4px 10px 4px 12px;
+    margin-left: auto;
+}
+
+body.obs-capture-mode .wf-runs {
+    font-size: 22px;
+}
+
+body.obs-capture-mode .wf-balls-num {
+    font-size: 13px;
+}
+
+body.obs-capture-mode .wf-balls-lbl {
+    font-size: 7px;
+}
+
+body.obs-capture-mode .wf-star {
+    font-size: 12px;
+    margin-left: 2px;
+}
+
+body.obs-capture-mode .wf-dismissal {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    border-top: none;
+    border-bottom: none;
+    border-left: 2px solid rgba(148, 163, 184, 0.28);
+    font-size: 10px;
+    letter-spacing: 0.8px;
+    white-space: nowrap;
+}
+
+body.obs-capture-mode .wf-stats {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    background: linear-gradient(180deg, #111c2e 0%, #0a101c 100%);
+}
+
+body.obs-capture-mode .wf-stat {
+    flex-direction: column;
+    justify-content: center;
+    padding: 5px 9px;
+    min-width: 48px;
+    border-right: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+body.obs-capture-mode .wf-stat-lbl {
+    font-size: 6px;
+    letter-spacing: 1px;
+}
+
+body.obs-capture-mode .wf-stat-val {
+    font-size: 13px;
 }
 
 /* OBS timer — top right, just above scorebar */
@@ -1762,7 +2059,7 @@ body.obs-layer-hotkeys .crr-float-overlay {
 
 /* 200px OBS strip: use browser height ≥280px, or hotkeys 1080 layer */
 body.obs-strip-only .last-wicket-overlay {
-    bottom: 70px;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 6px) !important;
     width: 100%;
     max-width: 100%;
 }
@@ -1794,10 +2091,10 @@ body.obs-strip-only .crr-float-overlay {
     --m4-accent: #48cae4;
     --m4-live: #0096c7;
     --m4-stat-col: 34px;
-    width: 98%;
+    width: 99.2%;
     max-width: 1900px;
-    min-height: 72px;
-    height: 72px;
+    min-height: 62px;
+    height: 62px;
     background: var(--m4-bg);
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -1837,26 +2134,27 @@ body.obs-strip-only .crr-float-overlay {
 }
 
 .m4-logo-circle {
-    width: 48px;
-    height: 48px;
-    background: #fff;
+    width: 42px;
+    height: 42px;
+    background: var(--m4-navy);
     border-radius: 50%;
-    box-shadow: 0 2px 8px rgba(26, 27, 65, 0.12);
+    box-shadow: 0 2px 8px rgba(26, 27, 65, 0.28);
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 800;
     font-size: 11px;
-    color: var(--m4-navy);
-    border: 2px solid #fff;
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.14);
     position: relative;
     overflow: hidden;
 }
 
-.m4-logo-circle--dark {
+.m4-logo-circle--dark,
+.m4-logo-circle--team {
     background: var(--m4-navy);
     color: #fff;
-    border-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.14);
 }
 
 .m4-logo-circle img {
@@ -1875,6 +2173,7 @@ body.obs-strip-only .crr-float-overlay {
     line-height: 1;
     text-align: center;
     padding: 0 4px;
+    color: #fff;
 }
 
 /* Batters / bowler rows — shared grid for aligned columns */
@@ -1897,12 +2196,91 @@ body.obs-strip-only .crr-float-overlay {
     padding: 0 4px 0 12px;
 }
 
+.m4-bowler-section--meta {
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.m4-bowler-section--meta.is-active {
+    opacity: 1;
+}
+
+.m4-meta-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-end;
+    min-width: 0;
+}
+
+.m4-meta-photo-ring {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin-bottom: 2px;
+    box-shadow: 0 2px 7px rgba(15, 23, 42, 0.25);
+}
+
+.m4-meta-photo-ring img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 2;
+}
+
+.m4-meta-photo-fallback {
+    position: relative;
+    z-index: 1;
+    font-size: 10px;
+    font-weight: 900;
+    color: #1e293b;
+    letter-spacing: 0.04em;
+}
+
+.m4-meta-line {
+    font-size: 11px;
+    font-weight: 900;
+    color: #253245;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+}
+
+.m4-meta-line--accent {
+    font-size: 12px;
+    color: #0b7285;
+}
+
+.partnership-overlay {
+    position: fixed;
+    left: 50%;
+    right: auto;
+    bottom: calc(var(--obs-scorebar-h, 48px) + 8px);
+    top: auto;
+    transform: translateX(-50%);
+    z-index: 28620 !important;
+    pointer-events: none;
+}
+
 .m4-player {
     display: grid;
     grid-template-columns: 12px minmax(0, 1fr) var(--m4-stat-col) var(--m4-stat-col);
     align-items: center;
     column-gap: 8px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 800;
     color: var(--m4-navy);
     line-height: 1.25;
@@ -1921,10 +2299,12 @@ body.obs-strip-only .crr-float-overlay {
 
 .m4-pname {
     text-align: left;
+    font-size: 14px;
 }
 
 .m4-bname {
     text-align: right;
+    font-size: 14px;
 }
 
 .m4-player--bowler {
@@ -1944,7 +2324,7 @@ body.obs-strip-only .crr-float-overlay {
 .m4-pruns,
 .m4-bwickets {
     text-align: right;
-    font-size: 17px;
+    font-size: 19px;
     font-weight: 900;
     font-variant-numeric: tabular-nums;
     color: var(--m4-navy);
@@ -1953,10 +2333,56 @@ body.obs-strip-only .crr-float-overlay {
 .m4-pballs,
 .m4-bovers {
     text-align: right;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #5c6b7a;
     font-variant-numeric: tabular-nums;
+}
+
+/* OBS — compact batter/bowler rows on scorebar */
+body.obs-capture-mode .m4-player {
+    min-height: 17px;
+    font-size: 11px;
+    column-gap: 6px;
+}
+
+body.obs-capture-mode .m4-pname,
+body.obs-capture-mode .m4-bname {
+    font-size: 11px;
+}
+
+body.obs-capture-mode .m4-pruns,
+body.obs-capture-mode .m4-bwickets {
+    font-size: 15px;
+}
+
+body.obs-capture-mode .m4-pballs,
+body.obs-capture-mode .m4-bovers {
+    font-size: 11px;
+}
+
+body.obs-capture-mode .m4-batsmen {
+    gap: 1px;
+    padding: 0 8px 0 2px;
+}
+
+body.obs-capture-mode .striker-mark {
+    font-size: 8px;
+    width: 10px;
+}
+
+body.obs-capture-mode .m4-meta-photo-ring {
+    width: 28px;
+    height: 28px;
+}
+
+body.obs-capture-mode .m4-meta-line {
+    font-size: 9px;
+    max-width: 220px;
+}
+
+body.obs-capture-mode .m4-meta-line--accent {
+    font-size: 10px;
 }
 
 /* Center score pill */
@@ -1981,29 +2407,53 @@ body.obs-strip-only .crr-float-overlay {
 
 .m4-pill-top,
 .m4-pill-bot {
-    font-size: 9px;
+    font-size: 11px;
     color: var(--m4-accent);
-    font-weight: 800;
-    letter-spacing: 0.14em;
+    font-weight: 900;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     line-height: 1.2;
-    text-align: center;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+.m4-pill-top {
+    align-self: stretch;
+    text-align: left;
+    padding-left: 18px;
+    padding-right: 10px;
+    word-spacing: 0.2em;
+}
+
+.m4-pill-bot {
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    color: #b8f2ff;
+}
+
 .m4-pill-mid {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     flex-wrap: nowrap;
+    gap: 2px;
+}
+
+.m4-teams-row,
+.m4-score-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 10px;
+    white-space: nowrap;
 }
 
 .m4-teams {
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -2021,9 +2471,9 @@ body.obs-strip-only .crr-float-overlay {
 .m4-score-box {
     background: var(--m4-red);
     color: #fff;
-    padding: 3px 14px;
+    padding: 4px 16px;
     border-radius: 10px;
-    font-size: 22px;
+    font-size: 31px;
     font-weight: 900;
     line-height: 1.1;
     font-variant-numeric: tabular-nums;
@@ -2031,27 +2481,43 @@ body.obs-strip-only .crr-float-overlay {
     flex-shrink: 0;
 }
 
-.m4-phase-box {
+.m4-live-corner {
+    position: absolute;
+    top: 8px;
+    right: 14px;
     background: var(--m4-live);
     color: #fff;
-    padding: 3px 10px;
+    padding: 3px 9px;
     border-radius: 8px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 900;
     letter-spacing: 0.08em;
-    flex-shrink: 0;
+    line-height: 1;
 }
 
 .m4-overs {
-    font-size: 17px;
-    font-weight: 900;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+    color: #e2e8f0;
+}
+
+.m4-overs-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
 }
 
 /* Recent balls — hidden on bar (keeps DOM for optional future use) */
 .m4-recent-balls {
-    display: none !important;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    min-height: 24px;
 }
 
 .m4-ball {

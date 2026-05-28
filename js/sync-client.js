@@ -3,8 +3,11 @@
  * Load after js/db.js
  */
 (function (global) {
+  const SYNC_CLIENT_VERSION = '2.41';
   const DEFAULT_BACKEND = 'https://slcrickpro.onrender.com';
   const SETTINGS_KEY = 'cricpro_sync_settings';
+  const CLOUD_OPT_IN_KEY = 'cricpro_cloud_opt_in_v1';
+  const LOCALHOST_ONLY_KEY = 'cricpro_localhost_only_v2';
   const MATCH_HISTORY_LIMIT = 80;
   const _handshake401Logged = new Set();
   /** tournamentId -> password that already got 401 (do not retry until password changes) */
@@ -25,8 +28,13 @@
   const _tokenReqInFlight = new Map();
   const _tokenReqFailUntil = new Map();
   let _cloudTimeoutBackoffUntil = 0;
-  let _cloudTimeoutBackoffWarnAt = 0;
+  let _cloudBackoffStepMs = 20000;
+  let _cloudBackoffLastWarnAt = 0;
+  let _cloudBackoffLastMarkAt = 0;
+  const CLOUD_BACKOFF_MAX_MS = 90000;
+  const CLOUD_BACKOFF_WARN_COOLDOWN_MS = 5 * 60 * 1000;
   let _pushPauseUntil = 0;
+  const HANDSHAKE_HINT_KEY = 'cricpro_handshake_path_v2';
   function isPrimaryRenderBackend(url) {
     const s = String(url || '').toLowerCase();
     return s.includes('slcrickpro.onrender.com') || s.includes('slcrickpro.live');
@@ -39,11 +47,30 @@
         global.BACKEND_BASE_URL ||
         DEFAULT_BACKEND;
       if (isPrimaryRenderBackend(backend)) return '/api/handshake';
+      const stored = localStorage.getItem(HANDSHAKE_HINT_KEY);
+      if (stored === '/api/handshake' || stored === '/handshake') return stored;
     } catch (_) {}
     return '/api/handshake';
   }
+
+  function rememberHandshakePath(path) {
+    if (!path || path === '/sync/handshake') return;
+    _handshakePathHint = path;
+    try {
+      localStorage.setItem(HANDSHAKE_HINT_KEY, path);
+    } catch (_) {}
+  }
+
+  function handshakePathsForBackend(baseUrl) {
+    if (isPrimaryRenderBackend(baseUrl)) return ['/api/handshake'];
+    if (_handshakePathHint === '/handshake') {
+      return ['/handshake', '/api/handshake'];
+    }
+    return ['/api/handshake', '/handshake'];
+  }
   let _handshakePathHint = getDefaultHandshakePathHint();
   let _handshakeRetryAfter = 0;
+  let _syncCloudPromise = null;
 
   function formatSyncError(err) {
     if (!err) return 'unknown';
@@ -92,14 +119,44 @@
     return _cloudTimeoutBackoffUntil > Date.now();
   }
 
-  function markCloudTimeoutBackoff(err) {
-    if (!isTimeoutLike(err) && !isTransientNetworkLike(err)) return;
+  function clearCloudTimeoutBackoff() {
+    _cloudTimeoutBackoffUntil = 0;
+    _cloudBackoffStepMs = 20000;
+    _cloudBackoffLastMarkAt = 0;
+  }
+
+  function isTransientHttpStatus(status) {
+    return status === 502 || status === 503 || status === 504;
+  }
+
+  function shouldBackoffFromError(err) {
+    if (!err) return false;
+    if (isTimeoutLike(err) || isTransientNetworkLike(err)) return true;
+    const m = String(err.message || err).match(/HTTP\s+(\d{3})/i);
+    return m ? isTransientHttpStatus(Number(m[1])) : false;
+  }
+
+  function markCloudTimeoutBackoff(err, options = {}) {
+    if (!shouldBackoffFromError(err)) return;
     const now = Date.now();
-    _cloudTimeoutBackoffUntil = Math.max(_cloudTimeoutBackoffUntil, now + 2 * 60 * 1000);
-    if (now - _cloudTimeoutBackoffWarnAt > 120000) {
-      _cloudTimeoutBackoffWarnAt = now;
-      console.warn('[Sync] Cloud connection unstable — pausing sync retries briefly');
+    const pauseMs = _cloudBackoffStepMs;
+    _cloudTimeoutBackoffUntil = Math.max(_cloudTimeoutBackoffUntil, now + pauseMs);
+    if (now - _cloudBackoffLastMarkAt > 2000) {
+      _cloudBackoffStepMs = Math.min(Math.round(_cloudBackoffStepMs * 1.35), CLOUD_BACKOFF_MAX_MS);
     }
+    _cloudBackoffLastMarkAt = now;
+    const quiet =
+      options.silent ||
+      (global.SLCRICK_DESKTOP && !options.showWarn);
+    if (quiet) return;
+    if (now - _cloudBackoffLastWarnAt < CLOUD_BACKOFF_WARN_COOLDOWN_MS) return;
+    _cloudBackoffLastWarnAt = now;
+    const retrySec = Math.max(5, Math.round((_cloudTimeoutBackoffUntil - now) / 1000));
+    console.warn(
+      '[Sync] Cloud temporarily unavailable — local scoring continues. Next cloud retry in ~' +
+        retrySec +
+        's.'
+    );
   }
 
   /** Safe timeout — AbortSignal.timeout is missing in some OBS/browser builds. */
@@ -128,21 +185,81 @@
         const r = await fetchWithTimeout(url, fetchOpts, timeoutMs);
         if (r.ok || r.status === 401 || r.status === 403) {
           _serverAwake = true;
+          clearCloudTimeoutBackoff();
           return r;
         }
         lastErr = new Error('HTTP ' + r.status);
+        if (!isTransientHttpStatus(r.status)) {
+          _serverAwake = false;
+          throw lastErr;
+        }
       } catch (e) {
         lastErr = e;
       }
     }
-    markCloudTimeoutBackoff(lastErr);
     _serverAwake = false;
     throw lastErr || new Error('fetch failed');
   }
 
   function isLocalHost() {
     const h = global.location?.hostname || '';
-    return h === 'localhost' || h === '127.0.0.1';
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '';
+  }
+
+  function hasCloudOptIn() {
+    try {
+      return (
+        localStorage.getItem(CLOUD_OPT_IN_KEY) === 'true' ||
+        localStorage.getItem('cricpro_sync_user_opted_in') === 'true'
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isLocalhostOnlyMode() {
+    if (global.SLCRICK_DESKTOP) return !hasCloudOptIn();
+    if (isLocalHost()) return !hasCloudOptIn();
+    return false;
+  }
+
+  function stopCloudLoops() {
+    if (global._slcrickSyncInterval) {
+      clearInterval(global._slcrickSyncInterval);
+      global._slcrickSyncInterval = null;
+    }
+    if (global._slcrickFlushInterval) {
+      clearInterval(global._slcrickFlushInterval);
+      global._slcrickFlushInterval = null;
+    }
+    global._slcrickSyncBooted = false;
+    _flushRunning = false;
+    _isSyncingCloud = false;
+    _syncCloudPromise = null;
+  }
+
+  function applyLocalhostOnlyDefaults() {
+    if (!isLocalhostOnlyMode()) return;
+    const stored = loadStoredSettings();
+    saveSettings({
+      enabled: false,
+      userDisabled: true,
+      backendUrl: '',
+    });
+    try {
+      localStorage.setItem(LOCALHOST_ONLY_KEY, '1');
+      localStorage.setItem('cricpro_sync_enabled', 'false');
+      localStorage.removeItem('cricpro_backend_url');
+    } catch (_) {}
+    global.BACKEND_BASE_URL = '';
+    if (global.window) global.window.BACKEND_BASE_URL = '';
+    stopCloudLoops();
+    global.syncToDB = function () {};
+    global.SLCRICK_REALTIME?.disconnect?.();
+    global.SLCRICK_LIVE?.disconnect?.();
+    if (global.SLCRICK_DESKTOP && global.desktopAPI?.notifySyncSettings) {
+      global.desktopAPI.notifySyncSettings({ enabled: false });
+    }
   }
 
   function isNetworkOnline() {
@@ -186,22 +303,24 @@
     const stored = loadStoredSettings();
     const backendUrl = stored.backendUrl || DEFAULT_BACKEND;
 
-    if (global.SLCRICK_DESKTOP) {
+    if (global.SLCRICK_DESKTOP || isLocalHost()) {
       let enabled = false;
-      if (localStorage.getItem(SETTINGS_KEY)) {
+      if (hasCloudOptIn() && localStorage.getItem(SETTINGS_KEY)) {
         try {
           const cfg = JSON.parse(localStorage.getItem(SETTINGS_KEY));
           enabled = cfg.enabled === true && cfg.userDisabled !== true;
         } catch (_) {}
-      } else if (localStorage.getItem('cricpro_sync_enabled') === 'true') {
-        enabled = true;
       }
       enabled = enabled && isNetworkOnline();
-      return { ...stored, enabled, backendUrl };
+      return {
+        ...stored,
+        enabled,
+        backendUrl: enabled ? backendUrl : '',
+      };
     }
 
     let enabled = !!stored.enabled;
-    if (!isLocalHost() && !localStorage.getItem(SETTINGS_KEY) && !stored.enabled) {
+    if (!localStorage.getItem(SETTINGS_KEY) && !stored.enabled) {
       enabled = true;
     }
     return { ...stored, enabled, backendUrl };
@@ -221,13 +340,19 @@
     localStorage.setItem('cricpro_sync_enabled', next.enabled ? 'true' : 'false');
     localStorage.setItem('cricpro_backend_url', next.enabled ? next.backendUrl : '');
     if (!next.enabled) {
+      try {
+        localStorage.removeItem(CLOUD_OPT_IN_KEY);
+      } catch (_) {}
       if (global.SLCRICK_DESKTOP) global.BACKEND_BASE_URL = '';
+      if (global.window) global.window.BACKEND_BASE_URL = '';
       global.SLCRICK_REALTIME?.disconnect?.();
       global.SLCRICK_LIVE?.disconnect?.();
-      if (global._slcrickSyncInterval) {
-        clearInterval(global._slcrickSyncInterval);
-        global._slcrickSyncInterval = null;
-      }
+      stopCloudLoops();
+    } else {
+      try {
+        localStorage.setItem(CLOUD_OPT_IN_KEY, 'true');
+        localStorage.setItem('cricpro_sync_user_opted_in', 'true');
+      } catch (_) {}
     }
     if (global.desktopAPI?.notifySyncSettings) {
       global.desktopAPI.notifySyncSettings(next);
@@ -299,6 +424,25 @@
     return match;
   }
 
+  function stripMatchInlineMedia(match) {
+    if (!match || typeof match !== 'object') return match;
+    const copy = JSON.parse(JSON.stringify(match));
+    delete copy.broadcastLivePhotos;
+    delete copy.teamPhotos;
+    ['photo', 'team1Photo', 'team2Photo', 'banner', 'logo'].forEach((key) => {
+      if (typeof copy[key] === 'string' && copy[key].startsWith('data:')) delete copy[key];
+    });
+    (copy.innings || []).forEach((inn) => {
+      (inn?.batsmen || []).forEach((b) => {
+        if (b && typeof b.photo === 'string' && b.photo.startsWith('data:')) delete b.photo;
+      });
+      (inn?.bowlers || []).forEach((b) => {
+        if (b && typeof b.photo === 'string' && b.photo.startsWith('data:')) delete b.photo;
+      });
+    });
+    return copy;
+  }
+
   const _livePushSlots = new Map();
 
   function prepareMatchForPersistence(match, options = {}) {
@@ -365,6 +509,7 @@
     const url = getBackendUrl();
     if (!url || !tournamentId || !password) return null;
     if (!isNetworkOnline()) return null;
+    if (isCloudTimeoutBackoffActive()) return null;
     if ((_tokenPushFailUntil.get(tournamentId) || 0) > Date.now()) return null;
     const t = global.DB?.getTournament?.(tournamentId);
     if (!t) return null;
@@ -377,8 +522,9 @@
           method: 'POST',
           headers: buildAuthHeaders(null),
           body: JSON.stringify(payload),
+          timeoutMs: 12000,
         },
-        1
+        0
       );
       const d = await r.json().catch(() => ({}));
       if (d?.token) {
@@ -388,8 +534,11 @@
         return d.token;
       }
     } catch (e) {
-      _tokenPushFailUntil.set(tournamentId, Date.now() + 90000);
-      if (!_tokenPushWarned.has(tournamentId)) {
+      markCloudTimeoutBackoff(e, { silent: true });
+      const timeoutLike = isTimeoutLike(e);
+      _tokenPushFailUntil.set(tournamentId, Date.now() + (timeoutLike ? 5 * 60 * 1000 : 90 * 1000));
+      _tokenReqFailUntil.set(tournamentId, Date.now() + (timeoutLike ? 90 * 1000 : 30 * 1000));
+      if (!timeoutLike && !_tokenPushWarned.has(tournamentId)) {
         _tokenPushWarned.add(tournamentId);
         console.warn('[Sync] tournament push for token failed', formatSyncError(e));
       }
@@ -401,51 +550,73 @@
     const url = getBackendUrl();
     const pw = String(password || '').trim();
     if (!url || !tournamentId || !pw || pw === 'offline') return null;
+    if (isCloudTimeoutBackoffActive()) return null;
     if (_handshakeRetryAfter > Date.now()) return null;
     if (_handshakeFailedPw.get(tournamentId) === pw) return null;
+    if ((_tokenReqFailUntil.get(tournamentId) || 0) > Date.now()) return null;
+    const inFlight = _tokenReqInFlight.get(tournamentId);
+    if (inFlight) return inFlight;
 
-    const fromSync = await pushTournamentForScoringToken(tournamentId, pw);
-    if (fromSync) return fromSync;
-
-    try {
-      const r = await postHandshake(url, {
-        id: tournamentId,
-        type: 'tournament',
-        password: pw,
-      });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok && d.ok && d.token) {
-        _handshakeFailedPw.delete(tournamentId);
-        storeScoringToken(tournamentId, d.token, d.expiresInMs);
-        return d.token;
+    const reqPromise = (async () => {
+      const fromSync = await pushTournamentForScoringToken(tournamentId, pw);
+      if (fromSync) {
+        _tokenReqFailUntil.delete(tournamentId);
+        return fromSync;
       }
-      if (r.status === 401) {
-        _handshakeFailedPw.set(tournamentId, pw);
-        if (!_handshake401Logged.has(tournamentId)) {
-          _handshake401Logged.add(tournamentId);
-          const tName = global.DB?.getTournament?.(tournamentId)?.name || tournamentId;
-          console.warn(
-            `[Sync] Tournament "${tName}" — cloud password mismatch. Open Score Match → enter the scoring password you used when creating this tournament (not "offline").`
-          );
-          if (typeof global.showToast === 'function') {
-            global.showToast(
-              `Cloud sync needs the real password for "${tName}". Open Score Match and unlock with your tournament password.`,
-              'error'
+
+      try {
+        const r = await postHandshake(url, {
+          id: tournamentId,
+          type: 'tournament',
+          password: pw,
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok && d.token) {
+          _handshakeFailedPw.delete(tournamentId);
+          _tokenReqFailUntil.delete(tournamentId);
+          storeScoringToken(tournamentId, d.token, d.expiresInMs);
+          return d.token;
+        }
+        if (r.status === 401) {
+          _handshakeFailedPw.set(tournamentId, pw);
+          if (!_handshake401Logged.has(tournamentId)) {
+            _handshake401Logged.add(tournamentId);
+            const tName = global.DB?.getTournament?.(tournamentId)?.name || tournamentId;
+            console.warn(
+              `[Sync] Tournament "${tName}" — cloud password mismatch. Open Score Match → enter the scoring password you used when creating this tournament (not "offline").`
             );
+            if (typeof global.showToast === 'function') {
+              global.showToast(
+                `Cloud sync needs the real password for "${tName}". Open Score Match and unlock with your tournament password.`,
+                'error'
+              );
+            }
           }
+          _tokenReqFailUntil.set(tournamentId, Date.now() + 60 * 1000);
+        }
+      } catch (e) {
+        markCloudTimeoutBackoff(e, { silent: true });
+        if (e?.code === 'HANDSHAKE_ENDPOINT_MISSING') {
+          _handshakeRetryAfter = Date.now() + 10 * 60 * 1000;
+          _tokenReqFailUntil.set(tournamentId, Date.now() + 2 * 60 * 1000);
+          return null;
+        }
+        if (isTimeoutLike(e)) {
+          _tokenReqFailUntil.set(tournamentId, Date.now() + 90 * 1000);
+        }
+        if (!_tokenPushWarned.has('hs:' + tournamentId)) {
+          _tokenPushWarned.add('hs:' + tournamentId);
+          console.warn('[Sync] handshake failed', formatSyncError(e));
         }
       }
-    } catch (e) {
-      if (e?.code === 'HANDSHAKE_ENDPOINT_MISSING') {
-        _handshakeRetryAfter = Date.now() + 10 * 60 * 1000;
-        return null;
-      }
-      if (!_tokenPushWarned.has('hs:' + tournamentId)) {
-        _tokenPushWarned.add('hs:' + tournamentId);
-        console.warn('[Sync] handshake failed', formatSyncError(e));
-      }
+      return null;
+    })();
+    _tokenReqInFlight.set(tournamentId, reqPromise);
+    try {
+      return await reqPromise;
+    } finally {
+      _tokenReqInFlight.delete(tournamentId);
     }
-    return null;
   }
 
   function logMatchSyncBlockedOnce(tournamentId, matchId, reason) {
@@ -512,6 +683,7 @@
 
   async function authenticateAllTournaments() {
     if (!global.DB || !isEnabled() || !isNetworkOnline()) return;
+    if (isCloudTimeoutBackoffActive()) return;
     const awake = await wakeUpServer(2);
     if (!awake) return;
     const activeTournIds = new Set();
@@ -601,7 +773,10 @@
         force: maxAttempts > 2,
         reason: 'sync-client',
       });
-      if (ok) _serverAwake = true;
+      if (ok) {
+        _serverAwake = true;
+        clearCloudTimeoutBackoff();
+      }
       return ok;
     }
     if (_wakePromise) return _wakePromise;
@@ -614,6 +789,7 @@
         );
         if (r.ok || r.status === 401 || r.status === 403) {
           _serverAwake = true;
+          clearCloudTimeoutBackoff();
           return true;
         }
       } catch (_) {}
@@ -674,15 +850,32 @@
   }
 
   async function syncCloudData(options = {}) {
+    if (isCloudTimeoutBackoffActive()) {
+      return { ok: false, error: 'timeout_backoff', silent: !!options.silent };
+    }
+    if (_syncCloudPromise) return _syncCloudPromise;
+    _syncCloudPromise = syncCloudDataInner(options).finally(() => {
+      _syncCloudPromise = null;
+    });
+    return _syncCloudPromise;
+  }
+
+  async function syncCloudDataInner(options = {}) {
     const backendUrl = getBackendUrl();
     if (!backendUrl) {
       global._isGlobalSyncCompleted = true;
       return { ok: true, offline: true };
     }
+    if (isCloudTimeoutBackoffActive()) {
+      if (!options.silent) {
+        return { ok: false, error: 'timeout_backoff', offline: true };
+      }
+      return { ok: false, error: 'timeout_backoff', silent: true };
+    }
     if (!isNetworkOnline()) {
       return { ok: false, error: 'offline' };
     }
-    if (_isSyncingCloud) return;
+    if (_isSyncingCloud) return { ok: false, error: 'busy' };
     const now = Date.now();
     const debounceMs =
       _lastSyncFailAt && now - _lastSyncFailAt < SYNC_FAIL_BACKOFF_MS
@@ -693,13 +886,22 @@
 
     _isSyncingCloud = true;
     try {
-      await wakeUpServer(options.forceRefresh ? 3 : 2);
+      const awake = await wakeUpServer(options.forceRefresh ? 3 : 2);
+      if (!awake && isPrimaryRenderBackend(backendUrl)) {
+        await new Promise((r) => setTimeout(r, 1800));
+      }
 
-      const fetchOpts = { method: 'GET', cache: 'no-store', mode: 'cors' };
-      const [mReq, tReq] = await Promise.all([
-        fetchCloud(`${backendUrl}/sync/matches`, fetchOpts, 1).catch(() => null),
-        fetchCloud(`${backendUrl}/sync/tournaments`, fetchOpts, 1).catch(() => null),
-      ]);
+      const fetchOpts = { method: 'GET', cache: 'no-store', mode: 'cors', timeoutMs: 16000 };
+      const pullRetries = options.forceRefresh ? 1 : 0;
+      let mReq = null;
+      let tReq = null;
+      try {
+        mReq = await fetchCloud(`${backendUrl}/sync/matches`, fetchOpts, pullRetries);
+      } catch (_) {}
+      await new Promise((r) => setTimeout(r, 400));
+      try {
+        tReq = await fetchCloud(`${backendUrl}/sync/tournaments`, fetchOpts, pullRetries);
+      } catch (_) {}
 
       if ((!mReq || !mReq.ok) && (!tReq || !tReq.ok)) {
         _lastSyncFailAt = Date.now();
@@ -713,9 +915,10 @@
           cfg.lastSyncError = 'Server waking up — retry in a few seconds';
         }
         saveSettings(cfg);
-        if (!options.silent) {
-          console.warn('[Sync] pull failed — cloud API unreachable (Render may be cold)');
-        }
+        const pullErr = new Error(st ? 'HTTP ' + st : 'fetch_failed');
+        markCloudTimeoutBackoff(pullErr, {
+          silent: options.silent || global.SLCRICK_DESKTOP,
+        });
         return { ok: false, error: 'fetch_failed', status: st };
       }
 
@@ -778,15 +981,15 @@
       cfg.lastSyncError = null;
       saveSettings(cfg);
       _lastSyncFailAt = 0;
+      clearCloudTimeoutBackoff();
+      if (global.SLCRICK_DESKTOP) _desktopFlushIntervalMs = 15000;
       global._isGlobalSyncCompleted = true;
       return { ok: true };
     } catch (e) {
+      markCloudTimeoutBackoff(e, { silent: options.silent || global.SLCRICK_DESKTOP });
       _lastSyncFailAt = Date.now();
       _serverAwake = false;
       const msg = formatSyncError(e);
-      if (!options.silent) {
-        console.warn('[Sync] pull failed', msg);
-      }
       const cfg = loadSettings();
       cfg.lastSyncError = msg.includes('Abort') ? 'Sync timed out — server may be waking' : msg;
       saveSettings(cfg);
@@ -799,8 +1002,10 @@
   async function syncToDB(type, data) {
     const backendUrl = getBackendUrl();
     if (!backendUrl || !data) return;
-
+    if (isCloudTimeoutBackoffActive()) return;
     const background = !!data._isBackgroundSync;
+    if (background && shouldPausePushes()) return;
+
     let syncPayload =
       type === 'match'
         ? prepareMatchForPersistence(data, { background })
@@ -877,8 +1082,9 @@
           method: 'POST',
           headers,
           body: JSON.stringify(syncPayload),
+          timeoutMs: background || data._fastPush ? 12000 : 18000,
         },
-        type === 'match' && data._fastPush ? 1 : 2
+        background || (type === 'match' && data._fastPush) ? 0 : 1
       );
 
       if (type === 'tournament' && tid) {
@@ -928,6 +1134,27 @@
       }
 
       if (!r.ok) {
+        if (type === 'match' && r.status >= 500 && !data._lightRetry) {
+          data._lightRetry = true;
+          try {
+            const lightPayload = stripMatchInlineMedia(syncPayload);
+            r = await fetchCloud(
+              backendUrl + endpoint,
+              {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(lightPayload),
+                timeoutMs: 12000,
+              },
+              0
+            );
+            if (r.ok) {
+              finish();
+              return;
+            }
+          } catch (_) {}
+          _pushPauseUntil = Date.now() + (background ? 45000 : 12000);
+        }
         let detail = '';
         try {
           const errBody = await r.json();
@@ -938,7 +1165,17 @@
         }
       }
     } catch (err) {
-      console.warn('[Sync] push failed', err);
+      markCloudTimeoutBackoff(err, {
+        silent: background || !!data._fastPush || global.SLCRICK_DESKTOP,
+      });
+      if (isTimeoutLike(err)) {
+        _serverAwake = false;
+        _pushPauseUntil = Date.now() + (background ? 60000 : 25000);
+        if (global.SLCRICK_DESKTOP) _desktopFlushIntervalMs = 45000;
+      }
+      if (!background && !data._fastPush && !global.SLCRICK_DESKTOP) {
+        warnPushThrottled(type || 'unknown', err);
+      }
     } finally {
       finish();
     }
@@ -1093,17 +1330,7 @@
       throw cooldownErr;
     }
 
-    const preferModernOnly = isPrimaryRenderBackend(baseUrl);
-    const pathOrder = preferModernOnly
-      ? _handshakePathHint === '/sync/handshake'
-        ? ['/sync/handshake', '/api/handshake']
-        : ['/api/handshake', '/sync/handshake']
-      : _handshakePathHint === '/handshake'
-        ? ['/handshake', '/api/handshake', '/sync/handshake']
-        : _handshakePathHint === '/sync/handshake'
-          ? ['/sync/handshake', '/api/handshake', '/handshake']
-          : ['/api/handshake', '/sync/handshake', '/handshake'];
-    const paths = [...new Set(pathOrder)];
+    const paths = handshakePathsForBackend(baseUrl);
     const headers = buildAuthHeaders(null);
     let lastError = null;
     let sawOnly404 = true;
@@ -1128,8 +1355,9 @@
         }
         sawOnly404 = false;
         if (r.ok || r.status === 401 || r.status === 403) {
-          _handshakePathHint = path;
+          rememberHandshakePath(path);
           _serverAwake = true;
+          clearCloudTimeoutBackoff();
           return r;
         }
         lastError = new Error(`HTTP ${r.status} on ${path}`);
@@ -1151,11 +1379,20 @@
 
   function install() {
     bootstrapDesktopAutoSync();
+    if (isLocalhostOnlyMode()) {
+      applyLocalhostOnlyDefaults();
+    }
 
     const url = getBackendUrl();
     if (url) {
       global.BACKEND_BASE_URL = url;
       window.BACKEND_BASE_URL = url;
+      if (isPrimaryRenderBackend(url)) {
+        _handshakePathHint = '/api/handshake';
+        try {
+          localStorage.setItem(HANDSHAKE_HINT_KEY, '/api/handshake');
+        } catch (_) {}
+      }
     }
 
     if (global.DB) {
@@ -1187,12 +1424,7 @@
       startBackgroundSyncLoops();
     } else {
       global._isGlobalSyncCompleted = true;
-      if (global.SLCRICK_DESKTOP) {
-        global.syncToDB = function () {};
-        global.BACKEND_BASE_URL = '';
-      }
-      global.SLCRICK_REALTIME?.disconnect?.();
-      global.SLCRICK_LIVE?.disconnect?.();
+      applyLocalhostOnlyDefaults();
     }
     if (global.SLCRICK_DESKTOP && global.desktopAPI?.notifySyncSettings) {
       global.desktopAPI.notifySyncSettings({ enabled: isEnabled() });
@@ -1204,14 +1436,17 @@
     if (!global._slcrickSyncInterval) {
       global._slcrickSyncInterval = setInterval(() => {
         if (!isEnabled()) return;
+        if (isCloudTimeoutBackoffActive()) return;
         syncCloudData({ silent: true });
       }, 45000);
     }
     if (global.SLCRICK_DESKTOP && !global._slcrickFlushInterval) {
-      global._slcrickFlushInterval = setInterval(() => {
+      const runDesktopFlush = () => {
         if (!isEnabled()) return;
+        if (isCloudTimeoutBackoffActive() || shouldPausePushes()) return;
         flushQueue().catch(() => {});
-      }, 5000);
+      };
+      global._slcrickFlushInterval = setInterval(runDesktopFlush, _desktopFlushIntervalMs);
     }
   }
 
@@ -1220,47 +1455,44 @@
 
     if (!localStorage.getItem('cricpro_desktop_offline_migrated_v2')) {
       localStorage.setItem('cricpro_desktop_offline_migrated_v2', '1');
-      if (!localStorage.getItem('cricpro_sync_user_opted_in')) {
-        const stored = loadStoredSettings();
+    }
+
+    if (!localStorage.getItem(LOCALHOST_ONLY_KEY)) {
+      localStorage.setItem(LOCALHOST_ONLY_KEY, '1');
+      if (!hasCloudOptIn()) {
         saveSettings({
           enabled: false,
-          backendUrl: stored.backendUrl || DEFAULT_BACKEND,
           userDisabled: true,
+          backendUrl: '',
         });
-        global.desktopAPI?.notifySyncSettings?.({ enabled: false });
-        return;
       }
     }
 
-    const stored = loadStoredSettings();
-    const hasSettings = !!localStorage.getItem(SETTINGS_KEY);
-    const legacyOn = localStorage.getItem('cricpro_sync_enabled') === 'true';
-
-    if (!hasSettings && !legacyOn) {
-      saveSettings({
-        enabled: false,
-        backendUrl: stored.backendUrl || DEFAULT_BACKEND,
-        userDisabled: true,
-      });
-      global.desktopAPI?.notifySyncSettings?.({ enabled: false });
-      return;
-    }
-
-    if (isUserSyncDisabled()) {
-      global.desktopAPI?.notifySyncSettings?.({ enabled: false });
+    if (!hasCloudOptIn() || isUserSyncDisabled()) {
+      applyLocalhostOnlyDefaults();
       return;
     }
 
     if (!isNetworkOnline()) return;
 
-    if (hasSettings || legacyOn) {
-      saveSettings({
-        enabled: true,
-        backendUrl: stored.backendUrl || DEFAULT_BACKEND,
-        userDisabled: false,
-      });
-      global.desktopAPI?.notifySyncSettings?.({ enabled: true });
-    }
+    const stored = loadStoredSettings();
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const cfg = JSON.parse(raw);
+        if (cfg.enabled === true && cfg.userDisabled !== true) {
+          global.desktopAPI?.notifySyncSettings?.({ enabled: true });
+          return;
+        }
+      }
+    } catch (_) {}
+
+    saveSettings({
+      enabled: true,
+      userDisabled: false,
+      backendUrl: stored.backendUrl || DEFAULT_BACKEND,
+    });
+    global.desktopAPI?.notifySyncSettings?.({ enabled: true });
   }
 
   function wireDesktopAutoSync() {
@@ -1281,11 +1513,15 @@
   }
 
   let _flushRunning = false;
+  let _desktopFlushIntervalMs = 15000;
 
   async function flushQueue() {
     if (_flushRunning || !global.DB || !isEnabled()) return;
+    if (isCloudTimeoutBackoffActive() || shouldPausePushes()) return;
+    if (!isNetworkOnline()) return;
     _flushRunning = true;
     try {
+      if (isCloudTimeoutBackoffActive()) return;
       await authenticateAllTournaments();
 
       const liveMatches = global.DB.getMatches()
@@ -1329,12 +1565,16 @@
   }
 
   global.SLCRICK_SYNC = {
+    VERSION: SYNC_CLIENT_VERSION,
     DEFAULT_BACKEND,
     loadSettings,
     prefetchCloudToken,
     loadStoredSettings,
     saveSettings,
     isEnabled,
+    isLocalhostOnlyMode,
+    hasCloudOptIn,
+    applyLocalhostOnlyDefaults,
     isUserSyncDisabled,
     isNetworkOnline,
     getBackendUrl,

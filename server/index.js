@@ -105,6 +105,9 @@ const ADMIN_PIN = 'slcrickpro@2026';
 const ADMIN_TOKEN_TTL_MS = 30 * 60 * 1000;
 const ADMIN_SESSIONS = new Map();
 
+const DESKTOP_USER_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DESKTOP_USER_SESSIONS = new Map();
+
 function createAdminSession() {
     const token = crypto.randomBytes(32).toString('hex');
     ADMIN_SESSIONS.set(token, Date.now() + ADMIN_TOKEN_TTL_MS);
@@ -119,6 +122,56 @@ function validateAdminSession(token) {
         return false;
     }
     return true;
+}
+
+function getBearerToken(req) {
+    const authHeader = req.headers.authorization || '';
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+        return authHeader.slice(7).trim();
+    }
+    return (
+        req.headers['x-access-token'] ||
+        req.headers['x-desktop-token'] ||
+        req.headers['session-token'] ||
+        ''
+    );
+}
+
+function requireAdmin(req, res, next) {
+    const token = getBearerToken(req);
+    if (!validateAdminSession(token)) {
+        return res.status(401).json({ success: false, message: 'Admin session expired. Log in again.' });
+    }
+    next();
+}
+
+function createDesktopUserSession(userId) {
+    const token = crypto.randomBytes(32).toString('hex');
+    DESKTOP_USER_SESSIONS.set(token, { userId, exp: Date.now() + DESKTOP_USER_TOKEN_TTL_MS });
+    return token;
+}
+
+function validateDesktopUserSession(token) {
+    if (!token) return null;
+    const row = DESKTOP_USER_SESSIONS.get(token);
+    if (!row || row.exp < Date.now()) {
+        DESKTOP_USER_SESSIONS.delete(token);
+        return null;
+    }
+    return row.userId;
+}
+
+function requireDesktopUser(req, res, next) {
+    const userId = validateDesktopUserSession(getBearerToken(req));
+    if (!userId) {
+        return res.status(401).json({ success: false, message: 'Desktop login required.' });
+    }
+    req.desktopUserId = userId;
+    next();
+}
+
+function newEntityId(prefix) {
+    return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 }
 
 app.post('/api/admin/login', (req, res) => {
@@ -145,10 +198,239 @@ app.post('/api/admin/login', (req, res) => {
 
 // Debug: verify server is live and see config
 app.get('/api/admin/check', (req, res) => {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.split(' ')[1] || req.headers['x-access-token'];
+    const token = getBearerToken(req);
     const admin = validateAdminSession(token);
     res.json({ status: 'ok', pin_length: ADMIN_PIN.length, message: 'Server is running', admin });
+});
+
+// ─── Desktop app users (admin-managed) ───────────────────────────
+app.get('/api/admin/desktop-users', requireAdmin, async (req, res) => {
+    try {
+        await ensureDB();
+        const rows = await DesktopUser.findAll({ order: [['createdAt', 'DESC']] });
+        res.json({
+            users: rows.map((u) => ({
+                id: u.id,
+                username: u.username,
+                displayName: u.displayName,
+                active: u.active !== false,
+                createdAt: u.createdAt,
+                lastLoginAt: u.lastLoginAt,
+            })),
+        });
+    } catch (e) {
+        console.error('/api/admin/desktop-users GET', e);
+        res.status(500).json({ error: e.message || 'Failed to list users' });
+    }
+});
+
+app.post('/api/admin/desktop-users', requireAdmin, async (req, res) => {
+    const body = parseBody(req) || {};
+    const username = String(body.username || '').trim().toLowerCase();
+    const password = String(body.password || '').trim();
+    const displayName = String(body.displayName || body.username || '').trim();
+
+    if (!username || username.length < 2) {
+        return res.status(400).json({ error: 'Username required (min 2 characters)' });
+    }
+    if (!password || password.length < 4) {
+        return res.status(400).json({ error: 'Password required (min 4 characters)' });
+    }
+
+    try {
+        await ensureDB();
+        const existing = await DesktopUser.findOne({ where: { username } });
+        if (existing) return res.status(409).json({ error: 'Username already exists' });
+
+        const passwordHash = await bcrypt.hash(password, 10);
+        const now = Date.now();
+        const user = await DesktopUser.create({
+            id: newEntityId('DU'),
+            username,
+            passwordHash,
+            displayName: displayName || username,
+            active: true,
+            createdAt: now,
+            lastLoginAt: null,
+        });
+
+        res.json({
+            ok: true,
+            user: {
+                id: user.id,
+                username: user.username,
+                displayName: user.displayName,
+                active: true,
+                createdAt: user.createdAt,
+            },
+        });
+    } catch (e) {
+        console.error('/api/admin/desktop-users POST', e);
+        res.status(500).json({ error: e.message || 'Failed to create user' });
+    }
+});
+
+app.patch('/api/admin/desktop-users/:id', requireAdmin, async (req, res) => {
+    const body = parseBody(req) || {};
+    try {
+        await ensureDB();
+        const user = await DesktopUser.findByPk(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+
+        const updates = {};
+        if (typeof body.active === 'boolean') updates.active = body.active;
+        if (body.displayName != null) updates.displayName = String(body.displayName).trim();
+        if (body.password) {
+            const pw = String(body.password).trim();
+            if (pw.length < 4) return res.status(400).json({ error: 'Password min 4 characters' });
+            updates.passwordHash = await bcrypt.hash(pw, 10);
+        }
+        await user.update(updates);
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('/api/admin/desktop-users PATCH', e);
+        res.status(500).json({ error: e.message || 'Failed to update user' });
+    }
+});
+
+app.delete('/api/admin/desktop-users/:id', requireAdmin, async (req, res) => {
+    try {
+        await ensureDB();
+        const user = await DesktopUser.findByPk(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        await DesktopUserActivity.destroy({ where: { userId: user.id } });
+        await user.destroy();
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('/api/admin/desktop-users DELETE', e);
+        res.status(500).json({ error: e.message || 'Failed to delete user' });
+    }
+});
+
+app.get('/api/admin/desktop-users/:id/activity', requireAdmin, async (req, res) => {
+    try {
+        await ensureDB();
+        const user = await DesktopUser.findByPk(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        const rows = await DesktopUserActivity.findAll({
+            where: { userId: user.id },
+            order: [['createdAt', 'DESC']],
+        });
+        res.json({
+            user: {
+                id: user.id,
+                username: user.username,
+                displayName: user.displayName,
+            },
+            activity: rows.map((a) => ({
+                id: a.id,
+                tournamentId: a.tournamentId,
+                name: a.name,
+                venue: a.venue,
+                playedAt: a.playedAt,
+                format: a.format,
+                matchCount: a.matchCount,
+                status: a.status,
+                createdAt: a.createdAt,
+            })),
+        });
+    } catch (e) {
+        console.error('/api/admin/desktop-users/:id/activity', e);
+        res.status(500).json({ error: e.message || 'Failed to load activity' });
+    }
+});
+
+app.post('/api/desktop/login', async (req, res) => {
+    const body = parseBody(req) || {};
+    const username = String(body.username || '').trim().toLowerCase();
+    const password = String(body.password || '').trim();
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Username and password required' });
+    }
+    try {
+        await ensureDB();
+        const user = await DesktopUser.findOne({ where: { username } });
+        if (!user || user.active === false) {
+            return res.status(401).json({ success: false, message: 'Invalid username or password' });
+        }
+        const ok = await bcrypt.compare(password, user.passwordHash || '');
+        if (!ok) return res.status(401).json({ success: false, message: 'Invalid username or password' });
+
+        const token = createDesktopUserSession(user.id);
+        await user.update({ lastLoginAt: Date.now() });
+        res.json({
+            success: true,
+            token,
+            expiresInMs: DESKTOP_USER_TOKEN_TTL_MS,
+            user: {
+                id: user.id,
+                username: user.username,
+                displayName: user.displayName,
+            },
+        });
+    } catch (e) {
+        console.error('/api/desktop/login', e);
+        res.status(500).json({ success: false, message: e.message || 'Login failed' });
+    }
+});
+
+app.get('/api/desktop/me', requireDesktopUser, async (req, res) => {
+    try {
+        await ensureDB();
+        const user = await DesktopUser.findByPk(req.desktopUserId);
+        if (!user || user.active === false) {
+            return res.status(401).json({ success: false, message: 'Account inactive' });
+        }
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                username: user.username,
+                displayName: user.displayName,
+            },
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message || 'Failed' });
+    }
+});
+
+app.post('/api/desktop/activity', requireDesktopUser, async (req, res) => {
+    const body = parseBody(req) || {};
+    const tournamentId = body.tournamentId ? String(body.tournamentId) : null;
+    const name = String(body.name || 'Tournament').trim();
+    if (!name) return res.status(400).json({ error: 'Tournament name required' });
+
+    try {
+        await ensureDB();
+        const now = Date.now();
+        let row = null;
+        if (tournamentId) {
+            row = await DesktopUserActivity.findOne({
+                where: { userId: req.desktopUserId, tournamentId },
+            });
+        }
+        const payload = {
+            userId: req.desktopUserId,
+            tournamentId,
+            name,
+            venue: String(body.venue || '').trim() || null,
+            playedAt: String(body.playedAt || body.date || '').trim() || null,
+            format: String(body.format || '').trim() || null,
+            matchCount: parseInt(body.matchCount, 10) || 0,
+            status: String(body.status || 'scheduled').trim(),
+            meta: body.meta && typeof body.meta === 'object' ? body.meta : {},
+            createdAt: now,
+        };
+        if (row) {
+            await row.update(payload);
+        } else {
+            row = await DesktopUserActivity.create({ id: newEntityId('DUA'), ...payload });
+        }
+        res.json({ ok: true, id: row.id });
+    } catch (e) {
+        console.error('/api/desktop/activity', e);
+        res.status(500).json({ error: e.message || 'Failed to save activity' });
+    }
 });
 
 // --- DATABASE INITIALIZATION ---
@@ -159,7 +441,7 @@ const FORCE_SQLITE = process.env.FORCE_SQLITE === 'true';
 let dbType = 'sqlite';
 let sequelize = new Sequelize({ dialect: 'sqlite', storage: LOCAL_SQLITE_PATH, logging: false });
 
-let Player, Team, Match, Tournament, Product, Order, Post, Feedback, MatchReport;
+let Player, Team, Match, Tournament, Product, Order, Post, Feedback, MatchReport, DesktopUser, DesktopUserActivity;
 
 function defineModels(seq) {
   Player = seq.define('Player', {
@@ -254,6 +536,30 @@ function defineModels(seq) {
     generatedAt: { type: DataTypes.BIGINT, allowNull: false },
     version: { type: DataTypes.STRING, defaultValue: '1.0' }
   }, { timestamps: true, tableName: 'match_reports' });
+
+  DesktopUser = seq.define('DesktopUser', {
+    id: { type: DataTypes.STRING, primaryKey: true },
+    username: { type: DataTypes.STRING, unique: true },
+    passwordHash: DataTypes.STRING,
+    displayName: DataTypes.STRING,
+    active: { type: DataTypes.BOOLEAN, defaultValue: true },
+    createdAt: DataTypes.BIGINT,
+    lastLoginAt: DataTypes.BIGINT,
+  }, { timestamps: true, tableName: 'desktop_users' });
+
+  DesktopUserActivity = seq.define('DesktopUserActivity', {
+    id: { type: DataTypes.STRING, primaryKey: true },
+    userId: { type: DataTypes.STRING, allowNull: false },
+    tournamentId: DataTypes.STRING,
+    name: DataTypes.STRING,
+    venue: DataTypes.STRING,
+    playedAt: DataTypes.STRING,
+    format: DataTypes.STRING,
+    matchCount: DataTypes.INTEGER,
+    status: DataTypes.STRING,
+    meta: { type: DataTypes.JSON, defaultValue: {} },
+    createdAt: DataTypes.BIGINT,
+  }, { timestamps: true, tableName: 'desktop_user_activity' });
 }
 
 

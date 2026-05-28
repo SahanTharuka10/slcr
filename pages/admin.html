@@ -7,9 +7,7 @@
     <title>Admin Panel – SLCRICKPRO | Manage Tournaments & Players</title>
     <meta name="description" content="Official SLCRICKPRO Admin Panel for managing cricket tournament requests, match schedules, and player records." />
     <meta name="keywords" content="slcrickpro admin, softball cricket admin, cricket admin, tournament management, manage cricket matches, verify cricket players" />
-    <link
-        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap"
-        rel="stylesheet" />
+    <link rel="stylesheet" href="/css/fonts-offline.css?v=1" />
     <link rel="stylesheet" href="/css/main.css" />
     <style>
         .admin-section {
@@ -181,7 +179,34 @@
             <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('posts')" id="btn-tab-posts" style="flex: 0 0 auto; white-space: nowrap;">➕ Posts</button>
             <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('feedback')" id="btn-tab-feedback" style="flex: 0 0 auto; white-space: nowrap;">💬 Chat</button>
             <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('match-entry')" id="btn-tab-match-entry" style="flex: 0 0 auto; white-space: nowrap;">Input</button>
+            <button class="btn btn-ghost btn-sm" onclick="switchAdminTab('desktop-users')" id="btn-tab-desktop-users" style="flex: 0 0 auto; white-space: nowrap;">🖥 Desktop Users</button>
             <button class="btn btn-ghost btn-sm" onclick="logoutAdmin()" style="margin-left:auto; flex: 0 0 auto; white-space: nowrap; border-color: rgba(255,109,0,0.3); color: #ff6d3b;">Logout</button>
+        </div>
+
+        <!-- Desktop Users Tab -->
+        <div id="tab-desktop-users" class="admin-panel" style="display:none">
+            <h3 class="section-hd" style="margin-bottom:8px">Desktop App Users</h3>
+            <p style="color:var(--c-muted);margin-bottom:20px">Create username/password for desktop scorers. They log in on the PC app; each tournament they schedule is saved to the cloud database.</p>
+            <div id="desktop-users-cloud-hint" class="card" style="padding:14px;margin-bottom:20px;font-size:13px;display:none"></div>
+            <div class="card" style="padding:20px;margin-bottom:24px">
+                <h4 style="margin-bottom:14px;font-size:15px">New desktop user</h4>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-input" id="du-username" placeholder="e.g. deepu" autocomplete="off" />
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Display name</label>
+                        <input type="text" class="form-input" id="du-display" placeholder="Optional" />
+                    </div>
+                    <div class="form-group" style="margin:0">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-input" id="du-password" placeholder="Min 4 characters" autocomplete="new-password" />
+                    </div>
+                </div>
+                <button type="button" class="btn btn-green" style="margin-top:16px" onclick="createDesktopUserAdmin()">➕ Create user</button>
+            </div>
+            <div id="desktop-users-list"></div>
         </div>
 
         <!-- Requests Tab -->
@@ -582,12 +607,14 @@
 
     <div class="toast" id="toast"></div>
 
+    <script src="../js/cloud-config.js"></script>
     <script src="../js/db.js"></script>
     <script src="../js/tournament-standings.js"></script>
     <script src="../js/match-stat-bundle.js"></script>
     <script src="../js/socket-loader.js"></script>
     <script src="../js/sync-client.js"></script>
     <script src="../js/admin.js"></script>
+    <script src="../js/admin-desktop-users.js"></script>
     <script src="../js/admin-match-input.js"></script>
 </body>
 

@@ -1,0 +1,194 @@
+/* SLCRICKPRO — Next Batsman (above scorebar, OBS) */
+
+.broadcast-overlay.nb-overlay {
+    z-index: 27500;
+    display: block !important;
+}
+
+.nb-card {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    min-width: 320px;
+    max-width: min(520px, 92vw);
+    border-radius: 14px 14px 14px 4px;
+    overflow: hidden;
+    font-family: 'Outfit', 'Segoe UI', sans-serif;
+    box-shadow:
+        0 22px 48px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(255, 255, 255, 0.12) inset,
+        0 0 40px rgba(0, 230, 118, 0.12);
+    background: linear-gradient(135deg, #0a1628 0%, #0f2744 42%, #122a4a 100%);
+}
+
+.nb-accent {
+    width: 6px;
+    flex-shrink: 0;
+    background: linear-gradient(180deg, #00e676 0%, #00c853 50%, #1b5e20 100%);
+    box-shadow: 0 0 18px rgba(0, 230, 118, 0.65);
+}
+
+.nb-photo-wrap {
+    width: 118px;
+    flex-shrink: 0;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 10px 8px 0;
+    background: linear-gradient(180deg, rgba(0, 230, 118, 0.08) 0%, transparent 70%);
+    overflow: hidden;
+}
+
+.nb-photo-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        105deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.22) 48%,
+        transparent 56%
+    );
+    transform: translateX(-120%);
+    animation: nb-shine 2.4s ease-in-out 0.35s 2;
+    pointer-events: none;
+}
+
+@keyframes nb-shine {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(140%);
+    }
+}
+
+.nb-photo {
+    max-width: 100%;
+    max-height: 128px;
+    object-fit: contain;
+    object-position: bottom center;
+    filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.45));
+    position: relative;
+    z-index: 1;
+}
+
+.nb-photo-wrap--default .nb-photo {
+    max-height: 88px;
+    opacity: 0.45;
+}
+
+.nb-initials {
+    position: absolute;
+    left: 50%;
+    top: 42%;
+    transform: translate(-50%, -50%);
+    font-size: 38px;
+    font-weight: 950;
+    color: rgba(255, 255, 255, 0.2);
+    letter-spacing: 3px;
+    z-index: 0;
+}
+
+.nb-body {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 18px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+}
+
+.nb-label {
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(179, 229, 204, 0.9);
+}
+
+.nb-label em {
+    font-style: normal;
+    color: #69f0ae;
+}
+
+.nb-name {
+    font-size: clamp(20px, 2.4vw, 28px);
+    font-weight: 950;
+    color: #fff;
+    line-height: 1.05;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nb-team {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(144, 202, 249, 0.95);
+    margin-top: 2px;
+}
+
+.nb-badge {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #00e676, #00c853);
+    color: #0a1628;
+    font-size: 18px;
+    font-weight: 950;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0, 230, 118, 0.45);
+    border: 2px solid rgba(255, 255, 255, 0.35);
+}
+
+.nb-pulse-ring {
+    position: absolute;
+    right: 8px;
+    top: 6px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 230, 118, 0.5);
+    animation: nb-pulse 1.8s ease-out infinite;
+    pointer-events: none;
+}
+
+@keyframes nb-pulse {
+    0% {
+        transform: scale(0.85);
+        opacity: 0.9;
+    }
+    100% {
+        transform: scale(1.35);
+        opacity: 0;
+    }
+}
+
+body.obs-capture-mode .nb-card {
+    max-width: min(460px, 88vw);
+}
+
+body.obs-capture-mode .nb-photo-wrap {
+    width: 100px;
+}
+
+body.obs-capture-mode .nb-photo {
+    max-height: 110px;
+}
+
+body.obs-capture-mode .nb-name {
+    font-size: 22px;
+}

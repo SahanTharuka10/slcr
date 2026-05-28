@@ -178,6 +178,9 @@ const OBS_OVERLAY_SETTINGS_KEY = 'cricpro_obs_overlay_settings';
 function defaultObsOverlaySettings() {
     return {
         autoBigEvents: false,
+        detailMode: 'balls',
+        groundName: '',
+        organizedBy: '',
         timerDurationSec: 0,
         timerRunning: false,
         timerEndAt: 0,
@@ -208,6 +211,9 @@ function normalizeObsOverlaySettings(raw) {
     }
     return {
         autoBigEvents: !!src.autoBigEvents,
+        detailMode: src.detailMode === 'match' ? 'match' : 'balls',
+        groundName: String(src.groundName || src.venueName || '').trim(),
+        organizedBy: String(src.organizedBy || src.organizerName || '').trim(),
         timerDurationSec: duration,
         timerRunning: running && remaining > 0,
         timerEndAt: running && remaining > 0 ? endAt : 0,
@@ -236,6 +242,18 @@ function hydrateObsSettingsUI(settings) {
     const s = normalizeObsOverlaySettings(settings);
     const autoEl = document.getElementById('obs-auto-bigevent-toggle');
     if (autoEl) autoEl.checked = !!s.autoBigEvents;
+    const modeBallsEl = document.getElementById('obs-detail-mode-balls');
+    const modeMatchEl = document.getElementById('obs-detail-mode-match');
+    if (modeBallsEl) modeBallsEl.checked = s.detailMode !== 'match';
+    if (modeMatchEl) modeMatchEl.checked = s.detailMode === 'match';
+    const groundEl = document.getElementById('obs-ground-name');
+    if (groundEl && !groundEl.matches(':focus')) {
+        groundEl.value = s.groundName || '';
+    }
+    const orgEl = document.getElementById('obs-organized-by');
+    if (orgEl && !orgEl.matches(':focus')) {
+        orgEl.value = s.organizedBy || '';
+    }
     const secEl = document.getElementById('obs-timer-seconds');
     if (secEl && !secEl.matches(':focus')) {
         secEl.value = String(Math.max(0, s.timerDurationSec || 0));
@@ -335,15 +353,20 @@ function enrichMatchBroadcastMedia(m) {
     m.teamPhotos = m.teamPhotos || {};
     const batTeam = inn.battingTeam || m.team1;
     const bowlTeam = inn.bowlingTeam || m.team2;
+    const teamNames = new Set(
+        [m.team1, m.team2, batTeam, bowlTeam, ...Object.keys(m.teamPhotos || {})].filter(Boolean)
+    );
     if (typeof DB !== 'undefined' && DB.getTeamPhoto) {
-        if (batTeam) {
-            const batLogo = DB.getTeamPhoto(batTeam, m.tournamentId);
-            if (batLogo && !String(batLogo).includes('default-team')) m.teamPhotos[batTeam] = batLogo;
-        }
-        if (bowlTeam) {
-            const bowlLogo = DB.getTeamPhoto(bowlTeam, m.tournamentId);
-            if (bowlLogo && !String(bowlLogo).includes('default-team')) m.teamPhotos[bowlTeam] = bowlLogo;
-        }
+        teamNames.forEach((name) => {
+            const logo = DB.getTeamPhoto(name, m.tournamentId);
+            if (logo && !String(logo).includes('default-team')) m.teamPhotos[name] = logo;
+        });
+    }
+    if (m.team1Photo && !String(m.team1Photo).includes('default-team') && m.team1) {
+        m.teamPhotos[m.team1] = m.teamPhotos[m.team1] || m.team1Photo;
+    }
+    if (m.team2Photo && !String(m.team2Photo).includes('default-team') && m.team2) {
+        m.teamPhotos[m.team2] = m.teamPhotos[m.team2] || m.team2Photo;
     }
     return m;
 }
@@ -385,6 +408,74 @@ function formatOversForProfile(balls, ballsPerOver) {
     const b = balls || 0;
     const per = ballsPerOver || 6;
     return `${Math.floor(b / per)}.${b % per}`;
+}
+
+/** Next batter to face (not on crease, not dismissed). */
+function resolveNextBatsmanPlayer(m) {
+    if (!m?.innings) return null;
+    const inn = m.innings[m.currentInnings ?? 0];
+    if (!inn) return null;
+    const onCrease = new Set();
+    (inn.currentBatsmenIdx || []).forEach((idx) => {
+        const b = inn.batsmen?.[idx];
+        if (b?.name) onCrease.add(String(b.name).trim().toLowerCase());
+    });
+    const waiting = (inn.batsmen || []).filter((b) => {
+        if (!b?.name) return false;
+        const key = String(b.name).trim().toLowerCase();
+        if (onCrease.has(key)) return false;
+        if (b.notOut === false) return false;
+        if ((b.balls || 0) > 0) return false;
+        return true;
+    });
+    if (waiting.length) return waiting[0];
+
+    const batTeam = inn.battingTeam || m.team1;
+    const squad = collectSquadPlayersForTeam(m, batTeam);
+    const used = new Set(
+        (inn.batsmen || []).map((b) => (b?.name || '').trim().toLowerCase()).filter(Boolean)
+    );
+    for (const p of squad) {
+        const key = (p.name || '').trim().toLowerCase();
+        if (!key || used.has(key)) continue;
+        return {
+            name: p.name,
+            playerId: p.playerId || '',
+            photo: p.photo || '',
+            runs: 0,
+            balls: 0,
+        };
+    }
+    return null;
+}
+
+function buildNextBatsmanBroadcastData(m, overrides = {}) {
+    if (!m) return null;
+    const inn = m.innings?.[m.currentInnings ?? 0];
+    const player = resolveNextBatsmanPlayer(m);
+    const manualName = (overrides.playerName || overrides.name || '').trim();
+    const usePlayer =
+        manualName && !player
+            ? { name: manualName, runs: 0, balls: 0, playerId: '' }
+            : player
+              ? {
+                    ...player,
+                    name: manualName || player.name,
+                }
+              : manualName
+                ? { name: manualName, runs: 0, balls: 0 }
+                : null;
+    if (!usePlayer?.name) return null;
+    const base = buildPlayerProfileBroadcastData(usePlayer, m, 'striker');
+    return {
+        ...base,
+        playerName: usePlayer.name,
+        name: usePlayer.name,
+        playerPhoto: overrides.playerPhoto || overrides.photo || base.playerPhoto || '',
+        roleLabel: 'NEXT BATSMAN',
+        battingTeam: inn?.battingTeam || m.team1 || base.teamName,
+        teamName: inn?.battingTeam || m.team1 || base.teamName,
+    };
 }
 
 function buildPlayerProfileBroadcastData(player, m, role) {
@@ -622,6 +713,8 @@ const Broadcast = {
                 return buildPartnershipBroadcastData(m);
             case 'SHOW_LAST_WICKET':
                 return buildLastWicketBroadcastData(m) || data;
+            case 'SHOW_NEXT_BATSMAN':
+                return buildNextBatsmanBroadcastData(m, data) || data;
             default:
                 return data;
         }
@@ -949,6 +1042,23 @@ const Broadcast = {
         showToast('👤 Special Guest Published!', 'success');
     },
 
+    /** Next batsman — animated card above scorebar */
+    showNextBatsman(overrides = {}) {
+        const m = getBroadcastMatch();
+        if (!m) return showToast('No active match', 'error');
+        const payload = buildNextBatsmanBroadcastData(m, overrides);
+        if (!payload?.playerName && !payload?.name) {
+            return showToast('No next batsman found — enter a name or set squad', 'error');
+        }
+        this.send('SHOW_NEXT_BATSMAN', payload);
+        showToast(`🏏 Next batsman: ${payload.playerName || payload.name}`, 'success');
+    },
+
+    peekNextBatsman() {
+        const m = getBroadcastMatch();
+        return m ? buildNextBatsmanBroadcastData(m) : null;
+    },
+
     /**
      * Toggle full scorecard overlay
      */
@@ -1047,8 +1157,16 @@ const Broadcast = {
 
     getObsOverlaySettings() {
         const m = getBroadcastMatch();
-        if (m?.obsOverlaySettings) return normalizeObsOverlaySettings(m.obsOverlaySettings);
-        return readObsOverlaySettingsFromStorage();
+        if (m?.obsOverlaySettings) {
+            const normalized = normalizeObsOverlaySettings(m.obsOverlaySettings);
+            if (!normalized.groundName && m.venue) normalized.groundName = String(m.venue).trim();
+            if (!normalized.organizedBy && m.scorer) normalized.organizedBy = String(m.scorer).trim();
+            return normalized;
+        }
+        const saved = readObsOverlaySettingsFromStorage();
+        if (!saved.groundName && m?.venue) saved.groundName = String(m.venue).trim();
+        if (!saved.organizedBy && m?.scorer) saved.organizedBy = String(m.scorer).trim();
+        return saved;
     },
 
     setObsOverlaySettings(patch = {}, opts = {}) {
@@ -1160,9 +1278,16 @@ window.updateObsTimerPreview = function (settings) {
 
 window.saveObsOverlaySettings = function () {
     const auto = document.getElementById('obs-auto-bigevent-toggle')?.checked === true;
+    const detailMode =
+        document.getElementById('obs-detail-mode-match')?.checked === true ? 'match' : 'balls';
+    const groundName = (document.getElementById('obs-ground-name')?.value || '').trim();
+    const organizedBy = (document.getElementById('obs-organized-by')?.value || '').trim();
     const sec = parseInt(document.getElementById('obs-timer-seconds')?.value || '0', 10) || 0;
     Broadcast.setObsOverlaySettings({
         autoBigEvents: auto,
+        detailMode,
+        groundName,
+        organizedBy,
         timerDurationSec: Math.max(0, sec),
         timerRemainingSec: Math.max(0, sec),
         timerRunning: false,
@@ -1194,11 +1319,24 @@ window.resetObsTimer = function () {
 
 document.addEventListener('DOMContentLoaded', () => {
     hydrateObsSettingsUI(Broadcast.getObsOverlaySettings());
+    let _obsMetaDebounce = null;
+    ['obs-ground-name', 'obs-organized-by'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', () => {
+            clearTimeout(_obsMetaDebounce);
+            _obsMetaDebounce = setTimeout(() => {
+                window.saveObsOverlaySettings();
+            }, 350);
+        });
+    });
     setInterval(() => window.updateObsTimerPreview(), 1000);
 });
 
 window.buildTeamSquadBroadcastPayload = buildTeamSquadBroadcastPayload;
 window.collectSquadPlayersForTeam = collectSquadPlayersForTeam;
+window.buildNextBatsmanBroadcastData = buildNextBatsmanBroadcastData;
+window.resolveNextBatsmanPlayer = resolveNextBatsmanPlayer;
 window.buildPlayerProfileBroadcastData = buildPlayerProfileBroadcastData;
 window.buildPartnershipBroadcastData = buildPartnershipBroadcastData;
 window.buildLastWicketBroadcastData = buildLastWicketBroadcastData;

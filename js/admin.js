@@ -1,7 +1,24 @@
-// Admin JS — offline desktop (local data only)
+// Admin JS — offline PIN (desktop) + cloud PIN (live site via Render API)
 const OFFLINE_ADMIN_PIN = '1234';
+const ADMIN_TOKEN_KEY = 'slcrick_admin_token';
+const DEFAULT_BACKEND = 'https://slcrickpro.onrender.com';
 
 let currentTab = 'requests';
+
+function getAdminBackendUrl() {
+    const fromSync =
+        typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'
+            ? window.SLCRICK_SYNC.getBackendUrl()
+            : '';
+    const fromLs = (localStorage.getItem('cricpro_backend_url') || '').trim();
+    const fromCfg = (window.CRICPRO_CLOUD_CONFIG?.backendUrl || '').trim();
+    const base = (fromSync || fromLs || fromCfg || DEFAULT_BACKEND).replace(/\/$/, '');
+    if (/^https?:\/\//i.test(base)) return base;
+    if (location.protocol.startsWith('http') && !window.SLCRICK_DESKTOP) {
+        return location.origin.replace(/\/$/, '');
+    }
+    return DEFAULT_BACKEND;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.pullGlobalData === 'function') window.pullGlobalData();
@@ -14,7 +31,7 @@ function checkAdminAuth() {
     const content = document.getElementById('admin-content-section');
     if (!login || !content) return;
 
-    if (sessionStorage.getItem('isAdmin') === 'true') {
+    if (sessionStorage.getItem('isAdmin') === 'true' || sessionStorage.getItem(ADMIN_TOKEN_KEY)) {
         login.style.display = 'none';
         content.style.display = 'block';
         return;
@@ -28,9 +45,10 @@ let loginAttempts = 0;
 
 async function loginAdmin() {
     const pass = (document.getElementById('admin-password')?.value || '').trim();
+    const username = (document.getElementById('admin-username')?.value || 'admin').trim();
 
     if (!pass) {
-        showToast('❌ Enter Admin PIN (default: 1234)', 'error');
+        showToast('❌ Enter Admin PIN', 'error');
         return;
     }
 
@@ -40,23 +58,49 @@ async function loginAdmin() {
         btn.textContent = 'Logging in…';
     }
 
-    const customPin = localStorage.getItem('cricpro_admin_pin') || OFFLINE_ADMIN_PIN;
-    if (pass === customPin || pass === OFFLINE_ADMIN_PIN) {
-        loginAttempts = 0;
-        sessionStorage.setItem('isAdmin', 'true');
-        checkAdminAuth();
-        showToast('🔓 Admin panel unlocked (offline)', 'success');
-    } else {
-        loginAttempts++;
-        showToast('❌ Wrong PIN', 'error');
-        if (loginAttempts >= 2) {
-            const hint = document.getElementById('login-hint');
-            if (hint) {
-                hint.style.display = 'block';
-                hint.textContent = 'Offline default PIN: 1234';
+    let cloudOk = false;
+    if (!window.SLCRICK_DESKTOP) {
+        try {
+            const base = getAdminBackendUrl();
+            const res = await fetch(base + '/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password: pass, pin: pass }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.success && data.token) {
+                sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
+                sessionStorage.setItem('isAdmin', 'true');
+                cloudOk = true;
+                showToast('🔓 Admin panel unlocked (cloud)', 'success');
+            }
+        } catch (e) {
+            console.warn('[Admin] cloud login failed', e);
+        }
+    }
+
+    if (!cloudOk) {
+        const customPin = localStorage.getItem('cricpro_admin_pin') || OFFLINE_ADMIN_PIN;
+        if (pass === customPin || pass === OFFLINE_ADMIN_PIN) {
+            loginAttempts = 0;
+            sessionStorage.setItem('isAdmin', 'true');
+            showToast('🔓 Admin panel unlocked (offline)', 'success');
+        } else {
+            loginAttempts++;
+            showToast('❌ Wrong PIN', 'error');
+            if (loginAttempts >= 2) {
+                const hint = document.getElementById('login-hint');
+                if (hint) {
+                    hint.style.display = 'block';
+                    hint.textContent = window.SLCRICK_DESKTOP
+                        ? 'Offline PIN: 1234'
+                        : 'Site PIN: slcrickpro@2026 (or offline 1234 on desktop)';
+                }
             }
         }
     }
+
+    checkAdminAuth();
 
     if (btn) {
         btn.disabled = false;
@@ -66,12 +110,13 @@ async function loginAdmin() {
 
 function logoutAdmin() {
     sessionStorage.removeItem('isAdmin');
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
     location.reload();
 }
 
 function switchAdminTab(tab) {
     currentTab = tab;
-    const panels = ['requests', 'matches', 'tournaments', 'players', 'store', 'posts', 'feedback', 'match-entry'];
+    const panels = ['requests', 'matches', 'tournaments', 'players', 'store', 'posts', 'feedback', 'match-entry', 'desktop-users'];
     panels.forEach((p) => {
         const el = document.getElementById('tab-' + p);
         const btn = document.getElementById('btn-tab-' + p);
@@ -89,6 +134,7 @@ function switchAdminTab(tab) {
     if (tab === 'posts') renderPostsAdmin();
     if (tab === 'feedback') renderFeedbackAdmin();
     if (tab === 'match-entry' && typeof initMatchEntryTab === 'function') initMatchEntryTab();
+    if (tab === 'desktop-users' && typeof renderDesktopUsersAdmin === 'function') renderDesktopUsersAdmin();
 }
 
 function renderRequests() {

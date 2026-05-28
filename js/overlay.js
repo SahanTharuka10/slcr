@@ -87,6 +87,8 @@ let _cloudMatchMissUntil = 0;
 let _lastRenderedScoreKey = '';
 let _lastOverlayFingerprint = '';
 let _lastCloudMatchUpdated = 0;
+let _lastOverlayPollOkAt = Date.now();
+let _localOverlayEventSource = null;
 /** Match draw full-screen — cleared by STOP ALL / STOP_MATCH_DRAW / other hotkeys */
 let _matchDrawOnAir = false;
 let _obsOverlaySettings = {
@@ -98,6 +100,31 @@ let _obsOverlaySettings = {
 };
 let _obsTimerTick = null;
 
+/** Measure live scorebar height so hotkey graphics sit flush above it (OBS). */
+function overlaySyncScorebarInset() {
+    const root = document.documentElement;
+    if (!document.body.classList.contains('obs-capture-mode')) {
+        root.style.removeProperty('--obs-scorebar-h');
+        return;
+    }
+    const bar = document.getElementById('overlay-container');
+    if (!bar || bar.style.display === 'none' || !isScorebarVisible) {
+        root.style.setProperty('--obs-scorebar-h', '48px');
+        return;
+    }
+    const h = Math.ceil(bar.getBoundingClientRect().height);
+    root.style.setProperty('--obs-scorebar-h', `${Math.max(h, 36)}px`);
+}
+
+function overlayPositionAboveScorebar(el) {
+    if (!el) return;
+    el.classList.add('bo-graphic-bl');
+    el.style.top = 'auto';
+    el.style.removeProperty('bottom');
+    el.style.removeProperty('transform');
+    overlaySyncScorebarInset();
+}
+
 /** OBS hides .broadcast-overlay unless .overlay-visible — stamp every popup */
 function stampBroadcastOverlay(el) {
     if (!el) return el;
@@ -108,6 +135,7 @@ function stampBroadcastOverlay(el) {
             el.classList.contains('last-wicket-overlay') ||
             el.classList.contains('be-dock-overlay') ||
             el.classList.contains('crr-float-overlay') ||
+            el.classList.contains('partnership-overlay') ||
             el.classList.contains('next-match-overlay') ||
             el.classList.contains('runs-balls-overlay') ||
             el.style.display === 'flex';
@@ -276,7 +304,21 @@ async function pollBroadcastApi() {
 function shouldUseCloudLive() {
     if (window.desktopAPI) return false;
     const h = (window.location.hostname || '').toLowerCase();
-    return h !== 'localhost' && h !== '127.0.0.1';
+    if (!h || h === 'localhost' || h === '127.0.0.1' || h === '::1') return false;
+    if (/^192\.168\./.test(h)) return false;
+    if (/^10\./.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return false;
+    return true;
+}
+
+/** localhost / 127.0.0.1 / LAN — use local server API + SSE (not cloud). */
+function useLocalMatchFeed() {
+    return !shouldUseCloudLive();
+}
+
+function shouldPollLocalMatchApi() {
+    if (!useLocalMatchFeed()) return false;
+    return !!(matchId || isMasterOverlay);
 }
 
 function cloudBackendUrl() {
@@ -293,6 +335,90 @@ function overlayScoreKey(m) {
     if (!inn) return '';
     const overLen = (inn.currentOver || []).length;
     return `${m.currentInnings}|${inn.runs}|${inn.wickets}|${inn.balls}|${inn.strikerIdx}|${inn.currentBowlerIdx}|${overLen}`;
+}
+
+/** Single number for current innings — never accept a payload that regresses this. */
+function overlayInningsProgress(m) {
+    const inn = m?.innings?.[m?.currentInnings ?? 0];
+    if (!inn) return 0;
+    return (inn.runs || 0) * 100000 + (inn.wickets || 0) * 1000 + (inn.balls || 0);
+}
+
+function overlayAcceptIncomingMatch(incoming, existing, options = {}) {
+    if (!incoming?.id) return false;
+    if (!existing) return true;
+    if (incoming.id !== existing.id) return false;
+
+    const inProg = overlayInningsProgress(incoming);
+    const exProg = overlayInningsProgress(existing);
+    if (inProg < exProg) return false;
+
+    if (options.trustIncoming) return true;
+
+    const inTs = Number(incoming.lastUpdated || incoming.cloudUpdatedAt || 0);
+    const exTs = Number(existing.lastUpdated || existing.cloudUpdatedAt || 0);
+
+    if (inProg > exProg) return true;
+
+    if (options.allowLocalPoll) {
+        if (!inTs && !exTs) return inProg >= exProg;
+        if (inTs && exTs && inTs >= exTs - 1500) return true;
+        return inProg === exProg && inTs >= exTs;
+    }
+
+    if (inTs && exTs > inTs + 1200) return false;
+    if (!inTs && exTs > 0) return false;
+    return inTs >= exTs;
+}
+
+function getOverlayDetailSettings(m) {
+    const src = m?.obsOverlaySettings && typeof m.obsOverlaySettings === 'object' ? m.obsOverlaySettings : {};
+    const detailMode = src.detailMode === 'match' ? 'match' : 'balls';
+    const groundName = String(src.groundName || m?.venue || '').trim();
+    const organizedBy = String(src.organizedBy || m?.scorer || '').trim();
+    return { detailMode, groundName, organizedBy };
+}
+
+function overlayBallHistoryText(curInn) {
+    const balls = (curInn?.currentOver || []).slice(-6);
+    if (!balls.length) return 'BALLS: -';
+    const text = balls
+        .map((b) => {
+            if (b?.wicket) return 'W';
+            if (b?.isWide) return `Wd${b.runs || ''}`;
+            if (b?.isNoBall) return `Nb${b.runs || ''}`;
+            if (b?.isBye) return `B${b.runs || ''}`;
+            if (b?.isLegBye) return `Lb${b.runs || ''}`;
+            return String(b?.runs ?? 0);
+        })
+        .join('  ');
+    return `BALLS: ${text}`;
+}
+
+function overlayBottomInsightText(m, curInn, bpo) {
+  if (!m || !curInn) return '';
+  if (m.currentInnings === 1 && m.innings?.[0]) {
+    const target = (m.innings[0].runs || 0) + 1;
+    const need = Math.max(0, target - (curInn.runs || 0));
+    return `TO WIN: ${need} RUNS`;
+  }
+  return `PROJECTED: ${overlayProjectedScore(curInn, m)}`;
+}
+
+/** Prefer freshest match for overlay (LAN poll vs stale browser DB). */
+function resolveOverlayMatch() {
+    const fromDb = matchId && typeof DB !== 'undefined' && DB.getMatch ? DB.getMatch(matchId) : null;
+    const fromLive = latestSocketScore?.fullMatch || null;
+    if (!fromLive?.id) return fromDb;
+    if (matchId && fromLive.id !== matchId) return fromDb || null;
+    if (!fromDb) return fromLive;
+    const dbTs = Number(fromDb.lastUpdated || fromDb.cloudUpdatedAt || 0);
+    const liveTs = Number(fromLive.lastUpdated || fromLive.cloudUpdatedAt || 0);
+    if (liveTs > dbTs) return fromLive;
+    if (dbTs > liveTs) return fromDb;
+    const dbProg = overlayInningsProgress(fromDb);
+    const liveProg = overlayInningsProgress(fromLive);
+    return liveProg >= dbProg ? fromLive : fromDb;
 }
 
 function overlayNeedsRender(m, container) {
@@ -355,21 +481,23 @@ function overlayMatchFingerprint(m) {
     ].join('|');
 }
 
-function applyCloudScorePayload(data) {
+function applyCloudScorePayload(data, options = {}) {
     if (!data) return;
     const m = data.fullMatch || (data.id ? data : null);
     if (!m || !m.id) return;
-    const incomingTs = Number(m.lastUpdated || m.cloudUpdatedAt || 0);
     const existing =
         latestSocketScore?.fullMatch?.id === m.id
             ? latestSocketScore.fullMatch
             : (typeof DB !== 'undefined' && DB.getMatch ? DB.getMatch(m.id) : null);
-    const existingTs = Number(existing?.lastUpdated || existing?.cloudUpdatedAt || 0);
-    if (existing) {
-        if (incomingTs && existingTs > incomingTs + 1200) return;
-        if (!incomingTs && existingTs > 0) return;
+    if (existing?.teamPhotos && typeof existing.teamPhotos === 'object') {
+        m.teamPhotos = { ...existing.teamPhotos, ...(m.teamPhotos || {}) };
     }
+    if (existing?.broadcastLivePhotos && !m.broadcastLivePhotos) {
+        m.broadcastLivePhotos = { ...existing.broadcastLivePhotos };
+    }
+    if (existing && !overlayAcceptIncomingMatch(m, existing, options)) return;
     if (tournId && m.tournamentId && m.tournamentId !== tournId) return;
+    if (matchId && !isMasterOverlay && m.id !== matchId) return;
     if (isMasterOverlay && matchId && matchId !== m.id) {
         matchId = m.id;
         window.SLCRICK_LIVE?.joinMatch?.(matchId);
@@ -389,20 +517,11 @@ function applyCloudScorePayload(data) {
         } catch (_) {}
         window._desktopApplyingRemoteMatch = false;
     }
-    const fp = overlayMatchFingerprint(m);
     const ts = m.lastUpdated || Date.now();
-    const scoreKey = overlayScoreKey(m);
-    const changed =
-        fp !== _lastOverlayFingerprint ||
-        ts > _lastCloudMatchUpdated ||
-        scoreKey !== _lastRenderedScoreKey;
-    if (changed) {
-        /* Do NOT set _lastOverlayFingerprint/_lastRenderedScoreKey here —
-         renderOverlay → overlayNeedsRender uses those to decide whether to repaint.
-         Updating them early caused “poisoned” cache (e.g. publishMatch before SYNC_SCORE). */
-        _lastCloudMatchUpdated = ts;
-        renderOverlay();
-    }
+    _lastOverlayFingerprint = '';
+    _lastRenderedScoreKey = '';
+    _lastCloudMatchUpdated = Math.max(_lastCloudMatchUpdated, ts);
+    renderOverlay();
 }
 
 async function fetchCloudMatchSnapshot() {
@@ -434,7 +553,7 @@ async function pollMatchApi() {
     if (!matchId && !isMasterOverlay) return;
     if (overlayLayer === 'hotkeys') return;
     const now = Date.now();
-    const minGap = shouldUseCloudLive() ? 120 : 500;
+    const minGap = shouldUseCloudLive() ? 120 : useLocalMatchFeed() ? 50 : 500;
     if (_pollMatchInFlight || now - _lastPollMatchTs < minGap) return;
     if (shouldUseCloudLive() && matchId && now < _cloudMatchMissUntil) return;
     _pollMatchInFlight = true;
@@ -452,13 +571,16 @@ async function pollMatchApi() {
             } else if (matchId) {
                 url = `${base}/tv/matches/${encodeURIComponent(matchId)}/light?${qs.join('&')}`;
             } else return;
+        } else if (matchId && !isMasterOverlay) {
+            url =
+                base +
+                '/api/match/' +
+                encodeURIComponent(matchId) +
+                '?' +
+                qs.join('&');
         } else {
             url = base + '/api/live-match';
-            if (tournId && (isMasterOverlay || !matchId)) {
-                qs.push('tournament=' + encodeURIComponent(tournId));
-            } else if (matchId && !isMasterOverlay) {
-                url = base + '/api/match/' + encodeURIComponent(matchId);
-            }
+            if (tournId) qs.push('tournament=' + encodeURIComponent(tournId));
             url = url + '?' + qs.join('&');
         }
 
@@ -471,6 +593,7 @@ async function pollMatchApi() {
         }
         _cloudMatchMissUntil = 0;
         const data = await res.json();
+        _lastOverlayPollOkAt = Date.now();
         if (useCloud) {
             if (data?.error) return;
             applyCloudScorePayload(data);
@@ -480,22 +603,13 @@ async function pollMatchApi() {
         if (!m || !m.id) return;
         if (tournId && m.tournamentId && m.tournamentId !== tournId) return;
         if (!matchId || isMasterOverlay) matchId = m.id;
-        latestSocketScore = {
-            fullMatch: m,
-            score: m.innings?.[m.currentInnings || 0],
-        };
-        if (typeof DB !== 'undefined' && DB.saveMatch) {
-            window._desktopApplyingRemoteMatch = true;
-            DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
-            window._desktopApplyingRemoteMatch = false;
-        }
-        const scoreKey = overlayScoreKey(m);
-        if (scoreKey !== _lastRenderedScoreKey) {
-            applyCloudScorePayload({
+        applyCloudScorePayload(
+            {
                 fullMatch: m,
                 score: m.innings?.[m.currentInnings || 0],
-            });
-        }
+            },
+            { allowLocalPoll: true }
+        );
     } catch (_) {
     } finally {
         _pollMatchInFlight = false;
@@ -503,7 +617,8 @@ async function pollMatchApi() {
 }
 
 function pollServerScore() {
-    if (window.desktopAPI) return;
+    /* OBS Browser Source has its own IndexedDB — never read it (stale vs scorer). */
+    if (!window.desktopAPI) return;
     if (!matchId && !isMasterOverlay) return;
     if (typeof DB === 'undefined') return;
 
@@ -520,11 +635,66 @@ function pollServerScore() {
     }
     const localMatch = matchId ? DB.getMatch(matchId) : null;
     if (localMatch) {
-        applyCloudScorePayload({
-            fullMatch: localMatch,
-            score: localMatch.innings?.[localMatch.currentInnings],
-        });
+        _lastOverlayPollOkAt = Date.now();
+        _lastOverlayFingerprint = '';
+        _lastRenderedScoreKey = '';
+        applyCloudScorePayload(
+            {
+                fullMatch: localMatch,
+                score: localMatch.innings?.[localMatch.currentInnings],
+            },
+            { allowLocalPoll: true }
+        );
     }
+}
+
+function installLocalOverlayStream() {
+    if (!useLocalMatchFeed()) return;
+    if (typeof EventSource === 'undefined') return;
+    if (_localOverlayEventSource) return;
+    const base = window.location.origin || '';
+    if (!base) return;
+    const qs = [];
+    if (matchId) qs.push(`matchId=${encodeURIComponent(matchId)}`);
+    if (tournId) qs.push(`tournamentId=${encodeURIComponent(tournId)}`);
+    qs.push(`_=${Date.now()}`);
+    const url = `${base}/api/stream?${qs.join('&')}`;
+    try {
+        const es = new EventSource(url);
+        _localOverlayEventSource = es;
+        es.addEventListener('match', (ev) => {
+            _lastOverlayPollOkAt = Date.now();
+            let body = null;
+            try {
+                body = JSON.parse(ev.data || '{}');
+            } catch (_) {}
+            const m = body?.match;
+            if (m?.id) {
+                applyCloudScorePayload(
+                    {
+                        fullMatch: m,
+                        score: m.innings?.[m.currentInnings || 0],
+                    },
+                    { trustIncoming: true }
+                );
+            }
+        });
+        es.addEventListener('broadcast', (ev) => {
+            let body = null;
+            try {
+                body = JSON.parse(ev.data || '{}');
+            } catch (_) {}
+            const payload = body?.payload || body;
+            if (payload?.cmd) applyBroadcastPayload(payload);
+        });
+        es.onerror = () => {
+            try {
+                es.close();
+            } catch (_) {}
+            _localOverlayEventSource = null;
+            setTimeout(() => installLocalOverlayStream(), 600);
+        };
+    } catch (_) {}
 }
 
 async function installCloudOverlayLive() {
@@ -574,7 +744,7 @@ async function installCloudOverlayLive() {
         sock.on('scoreUpdate', (data) => onScore(data));
     }
 
-    if (window.SLCRICK_SYNC?.syncCloudData) {
+    if (window.SLCRICK_SYNC?.isEnabled?.() && window.SLCRICK_SYNC?.syncCloudData) {
         window.SLCRICK_SYNC.syncCloudData({ silent: true, forceRefresh: true }).catch(() => {});
     }
 
@@ -773,9 +943,44 @@ function overlayTeamLogoUrl(teamName, tournamentId) {
     if (!teamName) return overlayDefaultTeamPhoto();
     if (typeof DB !== 'undefined' && DB.getTeamPhoto) {
         const fromDb = DB.getTeamPhoto(teamName, tournamentId);
-        if (fromDb && !String(fromDb).includes('default-team')) return fromDb;
+        if (fromDb && !String(fromDb).includes('default-team')) {
+            return typeof DB.resolveAssetUrl === 'function'
+                ? DB.resolveAssetUrl(fromDb) || fromDb
+                : fromDb;
+        }
     }
     return overlayTeamInitialAvatar(teamName);
+}
+
+/** Team logo for scorebar — match.teamPhotos first (LAN/OBS), then local DB. */
+function overlayTeamLogoForMatch(teamName, m) {
+    if (!teamName) return overlayDefaultTeamPhoto();
+    const tid = m?.tournamentId;
+    const photos = m?.teamPhotos;
+    if (photos && typeof photos === 'object') {
+        const direct = overlayResolveTeamLogo(photos[teamName]);
+        if (direct) return direct;
+        const want = String(teamName).trim().toLowerCase();
+        for (const [key, raw] of Object.entries(photos)) {
+            if (String(key).trim().toLowerCase() === want) {
+                const hit = overlayResolveTeamLogo(raw);
+                if (hit) return hit;
+            }
+        }
+    }
+    if (m?.team1 && teamName === m.team1 && m.team1Photo) {
+        const t1 = overlayResolveTeamLogo(m.team1Photo);
+        if (t1) return t1;
+    }
+    if (m?.team2 && teamName === m.team2 && m.team2Photo) {
+        const t2 = overlayResolveTeamLogo(m.team2Photo);
+        if (t2) return t2;
+    }
+    return overlayTeamLogoUrl(teamName, tid);
+}
+
+function overlayBrandLogoOnError() {
+    return "this.onerror=null;this.style.display='none';var f=this.parentElement&&this.parentElement.querySelector('.m2-logo-fallback');if(f)f.style.display='flex';";
 }
 
 function overlayTeamInitialAvatar(teamName) {
@@ -855,6 +1060,11 @@ function formatCRR(runs, balls, bpo = 6) {
     return ((runs / balls) * bpo).toFixed(2);
 }
 
+function formatEconomy(runs, balls, bpo = 6) {
+    if (!balls) return '0.00';
+    return (runs / (balls / bpo)).toFixed(2);
+}
+
 function formatRequiredRR(inn, m) {
     if (!m || m.currentInnings !== 1 || !m.innings?.[0] || !inn) return null;
     const bpo = m.ballsPerOver || 6;
@@ -873,6 +1083,7 @@ function overlayMatchInTournament(m) {
 document.addEventListener('DOMContentLoaded', () => {
     const urlParamsInit = new URLSearchParams(window.location.search || '');
     const isObsMode = urlParamsInit.get('obs') === '1';
+    const pollFast = urlParamsInit.get('poll') === 'fast';
     const isObsStrip = urlParamsInit.get('strip') === '1';
     const layerParam = urlParamsInit.get('layer');
     const isPreviewLayout = urlParamsInit.get('preview') === '1' || urlParamsInit.get('preview') === 'true';
@@ -933,6 +1144,13 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         hideObsUi();
         setTimeout(hideObsUi, 500);
+        const scorebarEl = document.getElementById('overlay-container');
+        if (scorebarEl && typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver(() => overlaySyncScorebarInset());
+            ro.observe(scorebarEl);
+            window._overlayScorebarRo = ro;
+        }
+        requestAnimationFrame(overlaySyncScorebarInset);
     }
 
     // ── Previews & Scale ──────────────────────────────────
@@ -970,7 +1188,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tournId && match.tournamentId !== tournId) return;
         if (!isMasterOverlay && matchId && matchId !== match.id) return;
         if (isMasterOverlay && matchId !== match.id) matchId = match.id;
-        applyCloudScorePayload({ fullMatch: match, score: match.innings?.[match.currentInnings] });
+        applyCloudScorePayload(
+            { fullMatch: match, score: match.innings?.[match.currentInnings] },
+            { trustIncoming: true }
+        );
     }
 
     if (window.desktopAPI) {
@@ -984,6 +1205,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     } else {
         installCloudOverlayLive();
+        installLocalOverlayStream();
     }
 
     if (typeof BroadcastChannel !== 'undefined') {
@@ -1007,15 +1229,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const onDesktop = !!window.desktopAPI;
     const pollTick = () => {
         pollBroadcastCommands();
-        if (!inPreviewIframe && !onDesktop) pollBroadcastApi();
+        if (!inPreviewIframe && (!onDesktop || useLocalMatchFeed())) pollBroadcastApi();
         if (currentPopupView) return;
-        if (!inPreviewIframe && !onDesktop) pollMatchApi();
-        if (!inPreviewIframe && !onDesktop) pollServerScore();
+        if (!inPreviewIframe && shouldPollLocalMatchApi()) pollMatchApi();
+        if (!inPreviewIframe && onDesktop) pollServerScore();
     };
     if (!inPreviewIframe) {
         pollTick();
-        const pollMs = onDesktop ? 5000 : shouldUseCloudLive() ? (isObsMode ? 200 : 400) : isObsMode ? 600 : 400;
+        const pollMs = useLocalMatchFeed()
+            ? pollFast
+                ? 50
+                : isObsMode
+                  ? 80
+                  : 120
+            : shouldUseCloudLive()
+              ? isObsMode
+                ? 200
+                : 400
+              : isObsMode
+                ? 100
+                : 220;
         setInterval(pollTick, pollMs);
+        setInterval(() => {
+            if (inPreviewIframe || currentPopupView) return;
+            if (onDesktop && !useLocalMatchFeed()) return;
+            if (document.hidden) return;
+            const staleFor = Date.now() - (_lastOverlayPollOkAt || 0);
+            if (staleFor < 15000) return;
+            _cloudMatchMissUntil = 0;
+            _pollMatchInFlight = false;
+            pollMatchApi();
+        }, 5000);
     }
 
     let _storagePollTimer = null;
@@ -1121,16 +1365,17 @@ function handleBroadcastCommand(cmd, data = {}) {
             }
             if (data.match) {
                 matchId = data.match.id;
-                latestSocketScore = { fullMatch: data.match };
+                let syncMatch = data.match;
                 if (data.match.obsOverlaySettings) {
                     applyObsOverlaySettings(data.match.obsOverlaySettings);
                 }
                 if (data.match.isManual && data.match.manualData) {
                     const manual = data.match.manualData;
-                    latestSocketScore.fullMatch.currentInnings = 0;
-                    latestSocketScore.fullMatch.overs = parseInt(manual.overs, 10) || latestSocketScore.fullMatch.overs || 0;
-                    latestSocketScore.fullMatch.ballsPerOver = 6;
-                    latestSocketScore.fullMatch.innings = latestSocketScore.fullMatch.innings || [{
+                    syncMatch = JSON.parse(JSON.stringify(data.match));
+                    syncMatch.currentInnings = 0;
+                    syncMatch.overs = parseInt(manual.overs, 10) || syncMatch.overs || 0;
+                    syncMatch.ballsPerOver = 6;
+                    syncMatch.innings = syncMatch.innings || [{
                         battingTeam: manual.team1 || 'TEAM A',
                         bowlingTeam: manual.team2 || 'TEAM B',
                         runs: parseInt(manual.runs, 10) || 0,
@@ -1141,13 +1386,14 @@ function handleBroadcastCommand(cmd, data = {}) {
                             { name: manual.nonStriker || 'Batter', runs: 0, balls: 0 }
                         ],
                         bowlers: [{ name: manual.bowler || 'Bowler', wickets: 0, runs: 0, balls: 0 }],
-                        currentBatsmenIdx: [0,1],
+                        currentBatsmenIdx: [0, 1],
                         strikerIdx: 0,
                         currentBowlerIdx: 0
                     }];
                 }
-                if (typeof DB !== 'undefined' && DB.saveMatch) DB.saveMatch(latestSocketScore.fullMatch);
-                if (overlayLayer !== 'hotkeys') renderOverlay();
+                _lastOverlayFingerprint = '';
+                _lastRenderedScoreKey = '';
+                applyCloudScorePayload({ fullMatch: syncMatch }, { trustIncoming: true });
             }
             break;
         case 'SET_OBS_SETTINGS':
@@ -1175,7 +1421,14 @@ function handleBroadcastCommand(cmd, data = {}) {
         case 'SHOW_BOWLER_PROFILE': showBowlerProfileGraphic(data); break;
         case 'SHOW_PARTNERSHIP': showPartnershipGraphicCinema(data); break;
         case 'SHOW_BATTER_PROFILES': showBatterProfilesGraphic(data); break;
-        case 'SHOW_GUEST': showGuestGraphic(data); break;
+        case 'SHOW_GUEST':
+            if (String(data.title || '').toUpperCase() === 'NEXT BATSMAN') {
+                showNextBatsmanGraphic(data);
+            } else {
+                showGuestGraphic(data);
+            }
+            break;
+        case 'SHOW_NEXT_BATSMAN': showNextBatsmanGraphic(data); break;
         case 'SHOW_MATCH_DRAW': showMatchDrawOverlay(data); break;
         case 'STOP_MATCH_DRAW': hideMatchDrawOverlay(); break;
     }
@@ -1296,12 +1549,12 @@ function hideAllBroadcastOverlays(skipMatchDraw) {
 function renderOverlay() {
     if (overlayLayer === 'hotkeys') return;
 
-    let m = matchId && typeof DB !== 'undefined' ? DB.getMatch(matchId) : null;
-    if (!m && latestSocketScore && latestSocketScore.fullMatch) {
+    let m = resolveOverlayMatch();
+    if (!m && latestSocketScore?.fullMatch) {
         m = latestSocketScore.fullMatch;
-        if (!matchId && latestSocketScore.fullMatch.id) {
-            matchId = latestSocketScore.fullMatch.id;
-        }
+    }
+    if (m?.id && (!matchId || isMasterOverlay)) {
+        matchId = m.id;
     }
     const container = document.getElementById('overlay-container');
     if (!m) {
@@ -1331,6 +1584,12 @@ function renderOverlay() {
             _renderOverlayMode4(m);
         }
     }
+    if (document.body.classList.contains('obs-capture-mode')) {
+        requestAnimationFrame(() => {
+            overlaySyncScorebarInset();
+            requestAnimationFrame(overlaySyncScorebarInset);
+        });
+    }
 }
 
 let _m4PrevWickets = -1;
@@ -1349,8 +1608,8 @@ function _renderOverlayMode2(m) {
     const bowlTeam = curInn.bowlingTeam || m.team2 || 'TEAM B';
     const batShort = getShortName(batTeam);
     const bowlShort = getShortName(bowlTeam);
-    const batLogo = overlayTeamLogoUrl(batTeam, m.tournamentId);
-    const bowlLogo = overlayTeamLogoUrl(bowlTeam, m.tournamentId);
+    const batLogo = overlayTeamLogoForMatch(batTeam, m);
+    const bowlLogo = overlayTeamLogoForMatch(bowlTeam, m);
 
     const siIdx =
         curInn.currentBatsmenIdx && typeof curInn.strikerIdx !== 'undefined'
@@ -1380,11 +1639,19 @@ function _renderOverlayMode2(m) {
     const scoreMain = `${curInn.runs} - ${curInn.wickets}`;
     const crrVal = formatCRR(curInn.runs, curInn.balls, bpo);
     const projected = overlayProjectedScore(curInn, m);
+    const bottomInsight = overlayBottomInsightText(m, curInn, bpo);
+    const detailCfg = getOverlayDetailSettings(m);
+    const detailText = `${detailCfg.groundName ? `GROUND: ${detailCfg.groundName}` : 'GROUND: -'}${
+        detailCfg.organizedBy ? ` · ORGANIZED: ${detailCfg.organizedBy}` : ''
+    }`;
 
     const sPhoto = overlayResolvePlayerPhoto(striker, 'striker', m);
     const nsPhoto = overlayResolvePlayerPhoto(nonStriker, 'nonstriker', m);
     const bowlPhoto = overlayResolvePlayerPhoto(bowler, 'bowler', m);
     const defPhoto = overlayEscapeHtml(OVERLAY_DEFAULT_PLAYER_PHOTO);
+
+    const bowlOv = formatOvers(bowler.balls || 0, bpo);
+    const bowlerFig = `${bowler.wickets ?? 0}-${bowler.runs ?? 0}`;
 
     const batterCell = (pl, photo, isStriker) => `
         <div class="m2-batter-cell ${isStriker ? 'm2-batter-cell--on' : ''}">
@@ -1394,18 +1661,44 @@ function _renderOverlayMode2(m) {
                     <span class="m2-batter-score">${pl.runs ?? 0}<span class="m2-batter-balls">(${pl.balls ?? 0})</span></span>
                 </div>
             </div>
-            <div class="m2-photo-ring">
+            <div class="m2-photo-ring m2-photo-ring--batter">
                 <img class="m2-photo" src="${overlayEscapeHtml(photo)}" alt="" loading="eager" decoding="async" onerror="this.onerror=null;this.src='${defPhoto}'">
             </div>
         </div>`;
+
+    const bowlerRightBlock = `
+        <div class="m2-bowler-block m2-bowler-block--right">
+            <div class="m2-player-text m2-player-text--bowl">
+                <span class="m2-bowler-label">BOWLER</span>
+                <div class="m2-bowler-line">
+                    <span class="m2-bowler-name" title="${overlayEscapeHtml(bowler.name || '')}">${overlayEscapeHtml(overlayDisplayName(bowler.name))}</span>
+                </div>
+                <div class="m2-bowler-line m2-bowler-line--stats">
+                    <span class="m2-bowler-fig">${overlayEscapeHtml(bowlerFig)}</span>
+                    <span class="m2-bowler-ov">${overlayEscapeHtml(bowlOv)}</span>
+                    <span class="m2-bowler-econ">ECO ${overlayEscapeHtml(formatEconomy(bowler.runs, bowler.balls, bpo))}</span>
+                </div>
+            </div>
+            <div class="m2-photo-ring m2-photo-ring--bowl-lg">
+                <img class="m2-photo" src="${overlayEscapeHtml(bowlPhoto)}" alt="" loading="eager" decoding="async" onerror="this.onerror=null;this.src='${defPhoto}'">
+            </div>
+        </div>`;
+
+    const bowlPanelHtml =
+        detailCfg.detailMode === 'balls'
+            ? `<div class="m2-bowl-right-col m2-bowl-right-col--balls">
+                    ${bowlerRightBlock}
+                    <div class="m2-ball-track">${overlayRenderBallTrackerHtml(curInn, bpo)}</div>
+               </div>`
+            : `<div class="m2-bowl-right-col m2-bowl-right-col--solo">${bowlerRightBlock}</div>`;
 
     container.innerHTML = `
         <div class="m2-shell">
             <div class="m2-pro-bar">
                 <div class="m2-brand m2-brand--bat">
                     <div class="m2-brand-logo">
-                        <img src="${overlayEscapeHtml(batLogo)}" alt="" onerror="this.style.display='none'">
-                        <span class="m2-logo-fallback">${overlayEscapeHtml(batShort)}</span>
+                        <img src="${overlayEscapeHtml(batLogo)}" alt="" loading="eager" decoding="async" onerror="${overlayBrandLogoOnError()}">
+                        <span class="m2-logo-fallback" style="display:none">${overlayEscapeHtml(batShort)}</span>
                     </div>
                 </div>
                 <div class="m2-panel m2-panel--bat">
@@ -1423,31 +1716,23 @@ function _renderOverlayMode2(m) {
                         <span class="m2-live-overs">${overlayEscapeHtml(ovCur)} <span class="m2-ov-max">(${ovMax} ov)</span></span>
                     </div>
                     <div class="m2-stats-strip">
-                        <span>Projected Score : <strong>${projected}</strong></span>
-                        <span class="m2-stats-sep">·</span>
-                        <span>CRR : <strong>${crrVal}</strong></span>
+                        ${
+                            detailCfg.detailMode === 'match'
+                                ? `<span class="m2-center-meta-main">${overlayEscapeHtml(detailText)}</span>
+                                   <span class="m2-center-meta-sub">${overlayEscapeHtml(bottomInsight)}</span>`
+                                : `<span>Projected Score : <strong>${projected}</strong></span>
+                                   <span class="m2-stats-sep">·</span>
+                                   <span>CRR : <strong>${crrVal}</strong></span>`
+                        }
                     </div>
                 </div>
                 <div class="m2-panel m2-panel--bowl">
-                    <div class="m2-bowler-row">
-                        <div class="m2-bowler-block">
-                            <div class="m2-player-text">
-                                <div class="m2-bowler-line">
-                                    <span class="m2-bowler-name" title="${overlayEscapeHtml(bowler.name || '')}">${overlayEscapeHtml(overlayDisplayName(bowler.name))}</span>
-                                    <span class="m2-bowler-fig">${bowler.wickets ?? 0} - ${bowler.runs ?? 0} <span class="m2-bowler-ov">${formatOvers(bowler.balls ?? 0, bpo)}</span></span>
-                                </div>
-                            </div>
-                            <div class="m2-photo-ring m2-photo-ring--bowl">
-                                <img class="m2-photo" src="${overlayEscapeHtml(bowlPhoto)}" alt="" loading="eager" decoding="async" onerror="this.onerror=null;this.src='${defPhoto}'">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="m2-ball-track">${overlayRenderBallTrackerHtml(curInn, bpo)}</div>
+                    ${bowlPanelHtml}
                 </div>
                 <div class="m2-brand m2-brand--bowl">
                     <div class="m2-brand-logo">
-                        <img src="${overlayEscapeHtml(bowlLogo)}" alt="" onerror="this.style.display='none'">
-                        <span class="m2-logo-fallback">${overlayEscapeHtml(bowlShort)}</span>
+                        <img src="${overlayEscapeHtml(bowlLogo)}" alt="" loading="eager" decoding="async" onerror="${overlayBrandLogoOnError()}">
+                        <span class="m2-logo-fallback" style="display:none">${overlayEscapeHtml(bowlShort)}</span>
                     </div>
                 </div>
             </div>
@@ -1594,12 +1879,8 @@ function _renderOverlayMode4(m) {
 
     const t1Name = curInn.battingTeam || m.team1 || 'TEAM A';
     const t2Name = curInn.bowlingTeam || m.team2 || 'TEAM B';
-    const t1Logo =
-        overlayResolveTeamLogo(m.teamPhotos && m.teamPhotos[t1Name]) ||
-        overlayTeamLogoUrl(t1Name, m.tournamentId);
-    const t2Logo =
-        overlayResolveTeamLogo(m.teamPhotos && m.teamPhotos[t2Name]) ||
-        overlayTeamLogoUrl(t2Name, m.tournamentId);
+    const t1Logo = overlayTeamLogoForMatch(t1Name, m);
+    const t2Logo = overlayTeamLogoForMatch(t2Name, m);
 
     const strikerIdx = curInn.currentBatsmenIdx ? curInn.currentBatsmenIdx[curInn.strikerIdx] : null;
     const striker = (strikerIdx != null && curInn.batsmen[strikerIdx]) ? curInn.batsmen[strikerIdx] : { name: 'Batter', runs: 0, balls: 0 };
@@ -1608,14 +1889,30 @@ function _renderOverlayMode4(m) {
     const nonStriker = (nonStrikerIdx != null && curInn.batsmen[nonStrikerIdx]) ? curInn.batsmen[nonStrikerIdx] : { name: 'Batter', runs: 0, balls: 0 };
     
     const bowler = (curInn.bowlers && curInn.currentBowlerIdx != null) ? curInn.bowlers[curInn.currentBowlerIdx] : { name: 'Bowler', wickets: 0, runs: 0, balls: 0 };
+    const detailCfg = getOverlayDetailSettings(m);
+    const venueLabel = detailCfg.groundName ? `GROUND: ${detailCfg.groundName}` : 'GROUND: -';
+    const orgLabel = detailCfg.organizedBy ? `ORGANIZED: ${detailCfg.organizedBy}` : 'ORGANIZED: -';
+    const bowlerName = String(bowler?.name || '').trim();
+    const hasRealBowler = !!bowlerName && bowlerName.toLowerCase() !== 'bowler';
+    const showRightMeta = true;
+    const rightMetaPhoto = overlayResolvePlayerPhoto(bowler, 'bowler', m) || OVERLAY_DEFAULT_PLAYER_PHOTO;
+    const rightMetaFallback = getShortName(hasRealBowler ? bowlerName : t2Name || 'TEAM');
+    const bpo = m.ballsPerOver || 6;
+    const crrVal = formatCRR(curInn.runs, curInn.balls, bpo);
+    const rrrVal = formatRequiredRR(curInn, m);
 
     let effectiveSubMode = currentSubMode;
     if (m.currentInnings === 1 && effectiveSubMode === 1) effectiveSubMode = 3;
 
-    let topText = `${curInn.wickets + 1}WKT PARTNERSHIP`;
-    let botText = `TOSS: ${m.tossResult ? m.tossResult.toUpperCase() : 'N/A'}`;
+    let topText =
+        detailCfg.detailMode === 'match'
+            ? `${detailCfg.groundName ? `GROUND: ${detailCfg.groundName}` : 'GROUND: -'}${
+                  detailCfg.organizedBy ? ` · ORGANIZED: ${detailCfg.organizedBy}` : ''
+              }`
+            : overlayBallHistoryText(curInn);
+    let botText = overlayBottomInsightText(m, curInn, bpo);
 
-    if (effectiveSubMode === 3) {
+    if (detailCfg.detailMode !== 'match' && effectiveSubMode === 3) {
         if (m.currentInnings === 1 && m.innings[0]) {
             const target = m.innings[0].runs + 1;
             const needed = target - curInn.runs;
@@ -1623,9 +1920,17 @@ function _renderOverlayMode4(m) {
             topText = `TARGET: ${target}`;
             botText = `NEED ${needed} RUNS FROM ${ballsLeft} BALLS`;
         }
-    } else if (effectiveSubMode === 2) {
+    } else if (detailCfg.detailMode !== 'match' && effectiveSubMode === 2) {
         topText = `CURRENT RUN RATE`;
         botText = `CRR: ${crrVal}${rrrVal ? ` · REQ ${rrrVal}` : ''}`;
+    }
+    const projectedTotal = overlayProjectedScore(curInn, m);
+    if ((m.currentInnings || 0) === 0) {
+        botText = `PROJECTED: ${projectedTotal}`;
+    } else if (m.innings && m.innings[0]) {
+        const target = (m.innings[0].runs || 0) + 1;
+        const needed = target - (curInn.runs || 0);
+        botText = needed > 0 ? `TO WIN: ${needed} RUNS` : 'TARGET ACHIEVED';
     }
 
     const recentBalls = (curInn.currentOver || []).slice(-6).map(b => {
@@ -1639,10 +1944,6 @@ function _renderOverlayMode4(m) {
         flashClass = 'm4-wicket-flash';
     }
     _m4PrevWickets = curInn.wickets;
-
-    const bpo = m.ballsPerOver || 6;
-    const crrVal = formatCRR(curInn.runs, curInn.balls, bpo);
-    const rrrVal = formatRequiredRR(curInn, m);
 
     let wrapper = container.querySelector('.m4-bar-wrapper');
     if (!wrapper) {
@@ -1671,22 +1972,31 @@ function _renderOverlayMode4(m) {
                     </div>
                 </aside>
                 <div class="m4-center-pill" id="m4-center-pill">
+                    <span class="m4-live-corner">LIVE</span>
                     <div class="m4-pill-top" id="m4-pill-top"></div>
                     <div class="m4-pill-mid">
-                        <span class="m4-teams" id="m4-teams-text"></span>
-                        <span class="m4-score-box" id="m4-score-text"></span>
-                        <span class="m4-phase-box">LIVE</span>
-                        <span class="m4-overs" id="m4-overs-text"></span>
+                        <div class="m4-teams-row">
+                            <span class="m4-teams" id="m4-teams-text"></span>
+                        </div>
+                        <div class="m4-score-row">
+                            <span class="m4-score-box" id="m4-score-text"></span>
+                        </div>
+                        <div class="m4-overs-row">
+                            <span class="m4-overs" id="m4-overs-text"></span>
+                        </div>
                     </div>
                     <div class="m4-pill-bot" id="m4-pill-bot"></div>
                 </div>
                 <aside class="m4-wing m4-wing--bowl">
-                    <div class="m4-bowler-section">
-                        <div class="m4-player m4-player--bowler">
-                            <span class="striker-mark">▶</span>
-                            <span class="m4-bname" id="m4-b-name"></span>
-                            <span class="m4-bwickets" id="m4-b-wkts"></span>
-                            <span class="m4-bovers" id="m4-b-overs"></span>
+                    <div class="m4-bowler-section m4-bowler-section--meta" id="m4-right-meta">
+                        <div class="m4-meta-wrap">
+                            <div class="m4-meta-photo-ring">
+                                <span class="m4-meta-photo-fallback" id="m4-meta-photo-fallback"></span>
+                                <img id="m4-meta-photo" src="" alt="" onerror="this.style.display='none'">
+                            </div>
+                            <div class="m4-meta-line" id="m4-meta-venue"></div>
+                            <div class="m4-meta-line" id="m4-meta-org"></div>
+                            <div class="m4-meta-line m4-meta-line--accent" id="m4-meta-extra"></div>
                         </div>
                     </div>
                     <div class="m4-recent-balls" id="m4-recent-balls" aria-hidden="true"></div>
@@ -1736,19 +2046,50 @@ function _renderOverlayMode4(m) {
     const sText = document.getElementById('m4-score-text');
     if (sText) sText.textContent = `${curInn.runs}-${curInn.wickets}`;
     const oText = document.getElementById('m4-overs-text');
-    if (oText) oText.textContent = formatOvers(curInn.balls, m.ballsPerOver);
+    if (oText) oText.textContent = `OVERS: ${formatOvers(curInn.balls, m.ballsPerOver)}`;
     const pBot = document.getElementById('m4-pill-bot');
     if (pBot) pBot.textContent = botText;
 
-    const bName = document.getElementById('m4-b-name');
-    if (bName) bName.textContent = (bowler.name || 'Bowler').toUpperCase();
-    const bWkts = document.getElementById('m4-b-wkts');
-    if (bWkts) bWkts.textContent = `${bowler.wickets || 0}-${bowler.runs || 0}`;
-    const bOvers = document.getElementById('m4-b-overs');
-    if (bOvers) bOvers.textContent = formatOvers(bowler.balls, m.ballsPerOver);
+    const m4Meta = document.getElementById('m4-right-meta');
+    if (m4Meta) {
+        m4Meta.classList.toggle('is-active', showRightMeta);
+    }
+    const m4Venue = document.getElementById('m4-meta-venue');
+    if (m4Venue) {
+        m4Venue.textContent = showRightMeta
+            ? `BOWLER: ${overlayDisplayName(bowlerName || 'Bowler')}`
+            : '';
+    }
+    const m4Org = document.getElementById('m4-meta-org');
+    if (m4Org) {
+        m4Org.textContent = showRightMeta
+            ? `OVERS: ${formatOvers(bowler.balls || 0, bpo)}`
+            : '';
+    }
+    const m4Extra = document.getElementById('m4-meta-extra');
+    if (m4Extra) {
+        m4Extra.textContent = showRightMeta
+            ? `FIG: ${bowler.wickets || 0}-${bowler.runs || 0}`
+            : '';
+    }
+    const m4MetaFallback = document.getElementById('m4-meta-photo-fallback');
+    if (m4MetaFallback) m4MetaFallback.textContent = rightMetaFallback || 'TM';
+    const m4MetaPhoto = document.getElementById('m4-meta-photo');
+    if (m4MetaPhoto) {
+        m4MetaPhoto.src = rightMetaPhoto;
+        m4MetaPhoto.style.display = rightMetaPhoto ? 'block' : 'none';
+    }
 
     const rBalls = document.getElementById('m4-recent-balls');
-    if (rBalls) rBalls.innerHTML = recentBalls;
+    if (rBalls) {
+        if (detailCfg.detailMode === 'balls') {
+            rBalls.innerHTML = recentBalls;
+            rBalls.style.visibility = 'visible';
+        } else {
+            rBalls.innerHTML = '';
+            rBalls.style.visibility = 'hidden';
+        }
+    }
 
     const t2Short = document.getElementById('m4-t2-short');
     if (t2Short) t2Short.textContent = getShortName(t2Name);
@@ -1911,6 +2252,12 @@ function showTeamCardGraphic(data) {
     `;
 
     document.body.appendChild(stampBroadcastOverlay(el));
+    if (document.body.classList.contains('obs-capture-mode')) {
+        requestAnimationFrame(() => {
+            overlaySyncScorebarInset();
+            requestAnimationFrame(overlaySyncScorebarInset);
+        });
+    }
 
     const panel = el.querySelector('.ts-panel');
     const header = el.querySelector('.ts-header');
@@ -1982,16 +2329,110 @@ function showTeamCardGraphic(data) {
     }
 }
 
+function showNextBatsmanGraphic(data) {
+    if (!data) return;
+    const photo = data.playerPhoto || data.photo || OVERLAY_DEFAULT_PLAYER_PHOTO;
+    const hasPhoto = overlaySquadHasCustomPhoto(photo);
+    const name = overlayDisplayName(data.playerName || data.name || 'BATTER');
+    const team = String(data.teamName || data.battingTeam || 'TEAM').toUpperCase();
+    const initials = overlayPlayerInitials(data.playerName || data.name || 'NB');
+    const defPhoto = overlayEscapeHtml(OVERLAY_DEFAULT_PLAYER_PHOTO);
+
+    const el = document.createElement('div');
+    el.className =
+        'broadcast-overlay nb-overlay overlay-visible bo-graphic-bl pp-overlay';
+    el.style.display = 'block';
+    el.style.left = '40px';
+    overlayPositionAboveScorebar(el);
+
+    el.innerHTML = `
+        <div class="nb-card">
+            <div class="nb-accent" aria-hidden="true"></div>
+            <div class="nb-photo-wrap${hasPhoto ? '' : ' nb-photo-wrap--default'}">
+                ${hasPhoto ? '' : `<span class="nb-initials" aria-hidden="true">${overlayEscapeHtml(initials)}</span>`}
+                <img class="nb-photo" src="${overlayEscapeHtml(photo)}" alt="" loading="eager" decoding="async"
+                    onerror="this.onerror=null;this.src='${defPhoto}';this.closest('.nb-photo-wrap')?.classList.add('nb-photo-wrap--default');">
+            </div>
+            <div class="nb-body">
+                <div class="nb-label">NEXT <em>Batsman</em></div>
+                <div class="nb-name">${overlayEscapeHtml(name)}</div>
+                <div class="nb-team">${overlayEscapeHtml(team)}</div>
+            </div>
+            <span class="nb-pulse-ring" aria-hidden="true"></span>
+            <span class="nb-badge" aria-hidden="true">🏏</span>
+        </div>`;
+
+    document.body.appendChild(stampBroadcastOverlay(el));
+
+    const card = el.querySelector('.nb-card');
+    const img = el.querySelector('.nb-photo');
+    const label = el.querySelector('.nb-label');
+    const nm = el.querySelector('.nb-name');
+    const badge = el.querySelector('.nb-badge');
+
+    const hideMs = 6500;
+    if (typeof gsap !== 'undefined' && gsap.timeline) {
+        const tl = gsap.timeline();
+        tl.fromTo(el, { x: -120, opacity: 0 }, { x: 0, opacity: 1, duration: 0.45, ease: 'power3.out' });
+        if (card) {
+            tl.fromTo(
+                card,
+                { scale: 0.88, opacity: 0, filter: 'blur(8px)' },
+                { scale: 1, opacity: 1, filter: 'blur(0px)', duration: 0.65, ease: 'power3.out' },
+                '-=0.25'
+            );
+        }
+        if (img) {
+            tl.fromTo(
+                img,
+                { x: 40, opacity: 0, scale: 0.85 },
+                { x: 0, opacity: 1, scale: 1, duration: 0.55, ease: 'power2.out' },
+                '-=0.45'
+            );
+        }
+        if (label) {
+            tl.fromTo(label, { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: 'power2.out' }, '-=0.4');
+        }
+        if (nm) {
+            tl.fromTo(nm, { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: 'power2.out' }, '-=0.32');
+        }
+        if (badge) {
+            tl.fromTo(
+                badge,
+                { scale: 0, rotation: -30 },
+                { scale: 1, rotation: 0, duration: 0.5, ease: 'back.out(2.2)' },
+                '-=0.35'
+            );
+        }
+        setTimeout(() => {
+            gsap.to(el, {
+                x: -100,
+                opacity: 0,
+                duration: 0.5,
+                ease: 'power2.in',
+                onComplete: () => el.remove(),
+            });
+        }, hideMs);
+    } else {
+        setTimeout(() => el.remove(), hideMs);
+    }
+}
+
 function showGuestGraphic(data) {
     const photo = data.playerPhoto || data.photo || OVERLAY_DEFAULT_PLAYER_PHOTO;
     const name = (data.playerName || data.name || 'GUEST').toUpperCase();
     const role = (data.title || 'SPECIAL GUEST').toUpperCase();
+    if (role === 'NEXT BATSMAN') {
+        showNextBatsmanGraphic(data);
+        return;
+    }
 
     const el = document.createElement('div');
     el.className = 'broadcast-overlay overlay-visible';
     el.style.display = 'block';
-    el.style.left = '40px'; el.style.bottom = '130px';
-    el.style.top = 'auto'; el.style.transform = 'none';
+    el.style.left = '40px';
+    el.style.top = 'auto';
+    overlayPositionAboveScorebar(el);
 
     el.innerHTML = `
         <div style="display:flex;align-items:flex-end;gap:0;overflow:hidden;border-radius:15px 15px 15px 0;box-shadow:0 20px 50px rgba(0,0,0,0.5);">
@@ -2007,6 +2448,74 @@ function showGuestGraphic(data) {
     setTimeout(() => gsap.to(el, { x: -500, opacity: 0, duration: 0.6, onComplete: () => el.remove() }), 12000);
 }
 
+function getOverlayCurrentMatchForSummary() {
+    if (matchId && typeof DB !== 'undefined' && DB.getMatch) {
+        const byId = DB.getMatch(matchId);
+        if (byId) return byId;
+    }
+    if (latestSocketScore?.fullMatch) return latestSocketScore.fullMatch;
+    return null;
+}
+
+function renderBroadcastSummarySheet() {
+    const host = document.getElementById('sm-content');
+    if (!host) return;
+    const m = getOverlayCurrentMatchForSummary();
+    if (!m) {
+        host.innerHTML = '<div class="sm-empty">NO LIVE MATCH DATA</div>';
+        return;
+    }
+    const inn0 = Array.isArray(m.innings) ? m.innings[0] : null;
+    const inn1 = Array.isArray(m.innings) ? m.innings[1] : null;
+    const bpo = m.ballsPerOver || 6;
+    const scoreLine = (inn) =>
+        inn ? `${inn.runs || 0}/${inn.wickets || 0} (${formatOvers(inn.balls || 0, bpo)})` : '—';
+    const target = inn0 ? (inn0.runs || 0) + 1 : 0;
+    const toWin = inn1 ? Math.max(0, target - (inn1.runs || 0)) : target;
+    const t1Runs =
+        (inn0?.battingTeam === m.team1 ? inn0?.runs : inn1?.battingTeam === m.team1 ? inn1?.runs : 0) || 0;
+    const t2Runs =
+        (inn0?.battingTeam === m.team2 ? inn0?.runs : inn1?.battingTeam === m.team2 ? inn1?.runs : 0) || 0;
+    let resultLine = 'LIVE MATCH';
+    if (m.status === 'completed') {
+        if (t1Runs > t2Runs) resultLine = `${overlayEscapeHtml((m.team1 || 'TEAM A').toUpperCase())} WON BY ${t1Runs - t2Runs} RUNS`;
+        else if (t2Runs > t1Runs) resultLine = `${overlayEscapeHtml((m.team2 || 'TEAM B').toUpperCase())} WON BY ${t2Runs - t1Runs} RUNS`;
+        else resultLine = 'MATCH TIED';
+    } else if (target) {
+        resultLine = toWin > 0 ? `${toWin} RUNS NEEDED TO WIN` : 'TARGET ACHIEVED';
+    }
+    const title = overlayEscapeHtml((m.tournamentName || m.team1 || 'MATCH SUMMARY').toUpperCase());
+    const t1 = overlayEscapeHtml((m.team1 || 'TEAM A').toUpperCase());
+    const t2 = overlayEscapeHtml((m.team2 || 'TEAM B').toUpperCase());
+
+    host.innerHTML = `
+      <div class="sm-card">
+        <div class="sm-header">
+          <h2 class="sm-title">MATCH SUMMARY</h2>
+          <div class="sm-subtitle">${title}</div>
+        </div>
+        <div class="sm-result-line">${resultLine}</div>
+        <div class="sm-innings-grid">
+          <div class="sm-inn-card">
+            <div class="sm-inn-title">${t1}</div>
+            <div class="sm-inn-score">${scoreLine(inn0?.battingTeam === m.team1 ? inn0 : inn1)}</div>
+          </div>
+          <div class="sm-inn-card">
+            <div class="sm-inn-title">${t2}</div>
+            <div class="sm-inn-score">${scoreLine(inn0?.battingTeam === m.team2 ? inn0 : inn1)}</div>
+          </div>
+        </div>
+        <div class="sm-grid">
+          <div class="sm-row"><span class="k">STATUS</span><span class="v">${overlayEscapeHtml((m.status || 'LIVE').toUpperCase())}</span></div>
+          <div class="sm-row"><span class="k">TARGET</span><span class="v">${target || '—'}</span></div>
+          <div class="sm-row"><span class="k">TO WIN</span><span class="v">${target ? `${toWin} RUNS` : '—'}</span></div>
+          <div class="sm-row"><span class="k">OVERS LIMIT</span><span class="v">${m.overs || '—'} OV</span></div>
+          <div class="sm-row"><span class="k">LAST UPDATE</span><span class="v">${new Date(m.lastUpdated || Date.now()).toLocaleTimeString()}</span></div>
+        </div>
+      </div>
+    `;
+}
+
 function toggleBroadcastSummary(tId) {
     const el = document.getElementById('broadcast-summary');
     if (!el) return;
@@ -2014,7 +2523,7 @@ function toggleBroadcastSummary(tId) {
         el.classList.remove('overlay-visible');
         gsap.to(el, { opacity: 0, y: 100, duration: 0.5, onComplete: () => { el.style.display = 'none'; } });
     } else {
-        if (typeof renderBroadcastSummarySheet === 'function') renderBroadcastSummarySheet();
+        renderBroadcastSummarySheet();
         el.classList.add('overlay-visible');
         el.style.display = 'block';
         gsap.fromTo(el, { opacity: 0, y: 100 }, { opacity: 1, y: 0, duration: 0.6 });
@@ -2126,6 +2635,15 @@ function showLastWicketGraphic(data) {
     stampBroadcastOverlay(el);
     el.style.display = 'flex';
     el.style.zIndex = '28600';
+    el.style.top = 'auto';
+    el.style.bottom = '';
+    el.style.transform = 'translateX(-50%)';
+    if (document.body.classList.contains('obs-capture-mode')) {
+        requestAnimationFrame(() => {
+            overlaySyncScorebarInset();
+            requestAnimationFrame(overlaySyncScorebarInset);
+        });
+    }
 
     const wrap = panel.querySelector('.wf-card-wrap');
     const card = panel.querySelector('.wf-card');
@@ -2527,9 +3045,7 @@ function mountPlayerProfileOverlay(cardHtml, options = {}) {
     el.style.display = 'block';
     el.style.left = '40px';
     if (obsGraphic) {
-        el.style.top = 'auto';
-        el.style.bottom = '118px';
-        el.style.transform = 'none';
+        overlayPositionAboveScorebar(el);
     } else {
         el.style.top = '50%';
         el.style.bottom = 'auto';
@@ -2624,8 +3140,8 @@ function showPartnershipGraphicCinema(data) {
 
     el.style.position = 'fixed';
     el.style.left = '50%';
-    el.style.bottom = '138px';
     el.style.transform = 'translateX(-50%)';
+    overlaySyncScorebarInset();
     el.style.display = 'flex';
     el.style.alignItems = 'flex-end';
     el.style.justifyContent = 'center';
@@ -2671,6 +3187,7 @@ function showPartnershipGraphicCinema(data) {
     `;
     
     document.body.appendChild(stampBroadcastOverlay(el));
+    requestAnimationFrame(overlaySyncScorebarInset);
 
     const centerCard = el.querySelector('.partnership-center-card');
     const playerCards = el.querySelectorAll('.partnership-player-card');

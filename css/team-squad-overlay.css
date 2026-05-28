@@ -404,3 +404,116 @@
     display: flex;
     justify-content: center;
 }
+
+/* OBS / live — sit above scorebar; compact so toss footer stays visible */
+body.obs-capture-mode .broadcast-team-squad {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 12px 28px calc(var(--obs-scorebar-h, 48px) + 10px);
+}
+
+body.obs-capture-mode .ts-wrap-outer {
+    transform: scale(0.9);
+    transform-origin: center bottom;
+    max-width: 100%;
+}
+
+body.obs-capture-mode .ts-panel {
+    width: min(1280px, 94vw);
+    max-height: min(68vh, calc(100vh - var(--obs-scorebar-h, 48px) - 72px));
+    border-radius: 20px;
+}
+
+body.obs-capture-mode .ts-format-badge {
+    top: -22px;
+}
+
+body.obs-capture-mode .ts-format-disc {
+    width: 58px;
+    height: 58px;
+    font-size: 14px;
+}
+
+body.obs-capture-mode .ts-header {
+    min-height: 68px;
+}
+
+body.obs-capture-mode .ts-header-logo {
+    width: 76px;
+    min-width: 76px;
+    padding: 8px;
+}
+
+body.obs-capture-mode .ts-header-logo img {
+    max-width: 56px;
+    max-height: 56px;
+}
+
+body.obs-capture-mode .ts-header-text {
+    padding: 10px 18px;
+}
+
+body.obs-capture-mode .ts-match-title {
+    font-size: clamp(22px, 2.4vw, 34px);
+}
+
+body.obs-capture-mode .ts-match-sub {
+    font-size: clamp(11px, 1.1vw, 14px);
+    margin-top: 4px;
+}
+
+body.obs-capture-mode .ts-header-site {
+    padding: 0 16px;
+    font-size: 11px;
+}
+
+body.obs-capture-mode .ts-body {
+    padding: 18px 24px 14px;
+    gap: 14px;
+}
+
+body.obs-capture-mode .ts-row {
+    gap: 14px 18px;
+}
+
+body.obs-capture-mode .ts-player-card {
+    width: 118px;
+}
+
+body.obs-capture-mode .ts-photo-wrap {
+    height: 148px;
+    margin-bottom: 6px;
+    border-radius: 12px 12px 6px 6px;
+}
+
+body.obs-capture-mode .ts-photo-img {
+    max-height: 136px;
+    max-width: 104px;
+}
+
+body.obs-capture-mode .ts-photo-wrap--default .ts-photo-img {
+    max-height: 96px;
+    max-width: 84px;
+}
+
+body.obs-capture-mode .ts-initials {
+    font-size: 34px;
+}
+
+body.obs-capture-mode .ts-player-name {
+    font-size: 13px;
+    padding: 5px 4px 3px;
+    min-height: 2.2em;
+}
+
+body.obs-capture-mode .ts-captain {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+}
+
+body.obs-capture-mode .ts-footer {
+    padding: 11px 20px;
+    font-size: clamp(11px, 1.15vw, 15px);
+    letter-spacing: 1px;
+}
