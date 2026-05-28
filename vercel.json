@@ -8,26 +8,6 @@
     {
       "source": "/overlay/:matchId",
       "destination": "/pages/overlay.html?match=:matchId&obs=1"
-    },
-    {
-      "source": "/api/admin/desktop-users/:path*",
-      "destination": "https://slcrickpro.onrender.com/api/admin/desktop-users/:path*"
-    },
-    {
-      "source": "/api/admin/desktop-users",
-      "destination": "https://slcrickpro.onrender.com/api/admin/desktop-users"
-    },
-    {
-      "source": "/api/admin/login",
-      "destination": "https://slcrickpro.onrender.com/api/admin/login"
-    },
-    {
-      "source": "/api/version",
-      "destination": "https://slcrickpro.onrender.com/api/version"
-    },
-    {
-      "source": "/api/ping",
-      "destination": "https://slcrickpro.onrender.com/api/ping"
     }
   ],
   "headers": [

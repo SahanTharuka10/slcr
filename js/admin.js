@@ -64,9 +64,9 @@ async function loginAdmin() {
     if (!window.SLCRICK_DESKTOP) {
         const bases = onLiveSite
             ? [
-                  getAdminBackendUrl(),
-                  'https://slcrickpro.onrender.com',
                   location.origin.replace(/\/$/, ''),
+                  'https://slcrickpro.onrender.com',
+                  getAdminBackendUrl(),
               ]
             : [getAdminBackendUrl()];
         const tried = [...new Set(bases.filter(Boolean))];
@@ -96,7 +96,7 @@ async function loginAdmin() {
             }
         }
         if (!cloudOk && onLiveSite) {
-            showToast('Cannot reach cloud API — check Render deploy or Vercel DATABASE_URL', 'error');
+            showToast('Cannot reach cloud API — redeploy Render (node server.js) and Vercel', 'error');
         }
     }
 

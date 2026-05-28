@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * Render / production API entry — always use server/app.js (never stale server/index.js).
+ * Production API entry for Render — loads server/app.js and ensures critical routes exist.
  */
 const path = require('path');
 const fs = require('fs');
+
+require('dotenv').config({ path: path.join(__dirname, 'server', '.env') });
+require('dotenv').config();
 
 const appPath = path.join(__dirname, 'server', 'app.js');
 
@@ -12,10 +15,14 @@ if (!fs.existsSync(appPath)) {
   process.exit(1);
 }
 
-console.log('[SLCRICKPRO] Starting API from server/app.js (build 1.0.6)');
+console.log('[SLCRICKPRO] Boot build 1.0.7 — entry server.js');
+console.log('[SLCRICKPRO] DATABASE_URL:', process.env.DATABASE_URL ? 'set' : 'missing');
+
 const api = require(appPath);
+
 if (typeof api.startServer !== 'function') {
   console.error('[SLCRICKPRO] server/app.js must export startServer');
   process.exit(1);
 }
+
 api.startServer();

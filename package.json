@@ -1,11 +1,10 @@
 {
   "name": "slcrickpro",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "engines": {
     "node": "20.x"
   },
   "scripts": {
-    "postinstall": "node scripts/sync-server-index.js",
     "start": "node server.js",
     "build": "node scripts/verify-static-build.js",
     "build:server": "node scripts/sync-server-index.js --force && node scripts/verify-server-build.js",

@@ -1,5 +1,5 @@
 /**
- * Admin — desktop app user accounts (cloud API on Render → Supabase).
+ * Admin — desktop app users (Render API → Supabase). Live site proxies /api via Vercel to Render.
  */
 (function () {
   const ADMIN_TOKEN_KEY = 'slcrick_admin_token';
@@ -11,20 +11,21 @@
     return h.includes('slcrickpro.live') || h.includes('www.slcrickpro');
   }
 
+  /** Live site: same-origin /api proxies to Render on Vercel (no DATABASE_URL on Vercel needed). */
   function getBackendCandidates() {
     if (!isLiveSite()) return [getBackendUrl()];
     const origin = location.origin.replace(/\/$/, '');
     const saved = (sessionStorage.getItem(API_BASE_KEY) || '').trim();
     const list = [];
     if (saved) list.push(saved);
-    list.push(RENDER_API, origin);
+    list.push(origin, RENDER_API);
     return [...new Set(list.filter(Boolean))];
   }
 
   function getBackendUrl() {
     const saved = (sessionStorage.getItem(API_BASE_KEY) || '').trim();
-    if (isLiveSite() && saved) return saved;
-    if (isLiveSite()) return RENDER_API;
+    if (saved) return saved;
+    if (isLiveSite()) return location.origin.replace(/\/$/, '');
     if (window.SLCRICK_DESKTOP) return RENDER_API;
     const fromSync =
       typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'
@@ -45,6 +46,7 @@
   function clearStaleCloudSession() {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY);
     sessionStorage.removeItem('isAdmin');
+    sessionStorage.removeItem(API_BASE_KEY);
   }
 
   function adminHeaders() {
@@ -55,61 +57,37 @@
     };
   }
 
-  async function wakeBackend(base) {
-    try {
-      await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
-    } catch (_) {}
-  }
-
   async function checkDesktopUsersApi(base) {
     try {
+      const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
+      if (ver.ok) {
+        const data = await ver.json().catch(() => ({}));
+        if (data.features?.desktopUsers === true || data.version >= '1.0.4') return true;
+      }
       const probe = await fetch(base + '/api/admin/desktop-users', {
         cache: 'no-store',
         mode: 'cors',
         headers: adminHeaders(),
       });
-      if (probe.status === 401 || probe.ok) return true;
-
-      const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
-      if (ver.ok) {
-        const data = await ver.json().catch(() => ({}));
-        if (data.features?.desktopUsers === true) return true;
-      }
-      const st = await fetch(base + '/api/status', { cache: 'no-store', mode: 'cors' });
-      if (!st.ok) return false;
-      const text = await st.text();
-      try {
-        const data = JSON.parse(text);
-        return data.features?.desktopUsers === true || (data.build && data.build >= '1.0.4');
-      } catch (_) {
-        return false;
-      }
+      return probe.status === 401 || probe.ok;
     } catch (_) {
       return false;
     }
   }
 
   function apiErrorMessage(res, data, context, apiBase) {
-    const base = apiBase || _apiBase || getBackendUrl();
     if (res.status === 401) {
-      return 'Admin session expired — logout and login again with site PIN (slcrickpro@2026).';
+      return 'Admin session expired — logout and login again with PIN slcrickpro@2026.';
     }
-    if (res.status === 503) {
+    if (res.status === 404 || res.status === 502) {
       return (
-        data.error ||
-        'Vercel: add DATABASE_URL (Supabase Postgres URL) in project env vars, then redeploy.'
-      );
-    }
-    if (res.status === 404) {
-      return (
-        'Desktop users API unavailable. On Vercel: set DATABASE_URL env var and redeploy. ' +
-        'On Render: Manual Deploy (slcr main) then check ' +
-        base +
+        'Cloud API not ready. Render → Manual Deploy (slcr main), Start Command: node server.js. ' +
+        'Then open ' +
+        apiBase +
         '/api/version'
       );
     }
-    const hint = data.hint ? ' ' + data.hint : '';
-    return (data.error || data.message || context + ' failed (HTTP ' + res.status + ')') + hint;
+    return data.error || data.message || context + ' failed (HTTP ' + res.status + ')';
   }
 
   let _apiBase = '';
@@ -118,27 +96,26 @@
     const el = document.getElementById('desktop-users-cloud-hint');
     if (!el) return;
     const token = getAdminToken();
-    const base = getBackendUrl();
     if (!token) {
       el.style.display = 'block';
       el.style.color = 'var(--c-amber)';
       el.innerHTML =
-        '<strong>Cloud admin login required.</strong> Logout → login with site admin PIN <code>slcrickpro@2026</code> (not offline 1234).';
+        '<strong>Cloud admin login required.</strong> Logout → login with PIN <code>slcrickpro@2026</code>.';
       return;
     }
     el.style.display = 'block';
     el.style.color = 'var(--c-muted)';
-    el.innerHTML = 'API: <code>' + base + '</code> · Checking server…';
+    el.innerHTML = 'Checking cloud API…';
     Promise.all(getBackendCandidates().map((b) => checkDesktopUsersApi(b).then((ok) => ({ b, ok })))).then(
       (results) => {
         const hit = results.find((r) => r.ok);
         el.innerHTML =
           'API: <code>' +
-          (hit ? hit.b : base) +
-          '</code> · Desktop users API: <strong style="color:' +
+          (hit ? hit.b : RENDER_API) +
+          '</code> · Desktop users: <strong style="color:' +
           (hit ? '#22c55e' : '#ff6b6b') +
           '">' +
-          (hit ? 'READY' : 'Need Render deploy OR Vercel DATABASE_URL') +
+          (hit ? 'READY' : 'Deploy Render (see RENDER-START.md)') +
           '</strong>';
       }
     );
@@ -150,7 +127,6 @@
 
     for (const base of candidates) {
       _apiBase = base;
-      await wakeBackend(base);
       const url = base + path;
       let res;
       try {
@@ -172,11 +148,11 @@
       }
 
       if (res.status === 401) {
-        if (isLiveSite()) clearStaleCloudSession();
+        clearStaleCloudSession();
         throw new Error(apiErrorMessage(res, data, options.context || 'Request', base));
       }
 
-      if (res.status === 404 || res.status === 503) {
+      if (res.status === 404 || res.status === 502 || res.status === 503) {
         lastErr = new Error(apiErrorMessage(res, data, options.context || 'Request', base));
         continue;
       }
@@ -215,7 +191,7 @@
       const users = await fetchDesktopUsers();
       if (!users.length) {
         list.innerHTML =
-          '<div class="empty-state"><div class="empty-state-title">No desktop users yet</div><p style="color:var(--c-muted);margin-top:8px">Create one below — stored in Supabase via Render API.</p></div>';
+          '<div class="empty-state"><div class="empty-state-title">No desktop users yet</div><p style="color:var(--c-muted);margin-top:8px">Create one below — saved in Supabase (Render database).</p></div>';
         return;
       }
       list.innerHTML = users
@@ -227,16 +203,26 @@
             <p>@${escapeHtml(u.username)} · ${u.active ? 'Active' : 'Disabled'}
               ${u.lastLoginAt ? ' · Last login: ' + new Date(u.lastLoginAt).toLocaleString() : ''}</p>
           </div>
-          <div class="req-actions" style="flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" type="button" onclick="downloadDesktopUserHistoryPdf('${u.id}')">📄 History PDF</button>
-            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDesktopUserActive('${u.id}',${u.active ? 'false' : 'true'})">${u.active ? 'Disable' : 'Enable'}</button>
-            <button class="btn btn-red btn-sm" type="button" onclick="deleteDesktopUserAdmin('${u.id}')">Delete</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn btn-ghost btn-sm" data-history="${escapeAttr(u.id)}">History PDF</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-toggle="${escapeAttr(u.id)}" data-active="${u.active ? '1' : '0'}">${u.active ? 'Disable' : 'Enable'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" style="color:#ff6b6b" data-delete="${escapeAttr(u.id)}">Delete</button>
           </div>
         </div>`
         )
         .join('');
+
+      list.querySelectorAll('[data-history]').forEach((btn) => {
+        btn.addEventListener('click', () => downloadHistoryPdf(btn.getAttribute('data-history')));
+      });
+      list.querySelectorAll('[data-toggle]').forEach((btn) => {
+        btn.addEventListener('click', () => toggleUser(btn.getAttribute('data-toggle'), btn.getAttribute('data-active') === '1'));
+      });
+      list.querySelectorAll('[data-delete]').forEach((btn) => {
+        btn.addEventListener('click', () => deleteUser(btn.getAttribute('data-delete')));
+      });
     } catch (e) {
-      list.innerHTML = '<p style="color:#ff6b6b;line-height:1.5">' + escapeHtml(e.message || 'Load failed') + '</p>';
+      list.innerHTML = '<p style="color:#ff6b6b">' + escapeHtml(e.message || 'Failed to load') + '</p>';
     }
   }
 
@@ -248,131 +234,100 @@
       .replace(/"/g, '&quot;');
   }
 
-  async function createDesktopUserAdmin() {
-    const username = document.getElementById('du-username')?.value?.trim().toLowerCase();
-    const displayName = document.getElementById('du-display')?.value?.trim();
-    const password = document.getElementById('du-password')?.value?.trim();
-    if (!getAdminToken()) {
-      showToast('Cloud admin login required (PIN slcrickpro@2026)', 'error');
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/'/g, '&#39;');
+  }
+
+  async function createDesktopUser(ev) {
+    ev.preventDefault();
+    const username = (document.getElementById('du-username')?.value || '').trim();
+    const displayName = (document.getElementById('du-display')?.value || '').trim();
+    const password = (document.getElementById('du-password')?.value || '').trim();
+    if (!username || !password) {
+      alert('Username and password required');
       return;
-    }
-    if (!username || username.length < 2) {
-      showToast('Username min 2 characters', 'error');
-      return;
-    }
-    if (!password || password.length < 4) {
-      showToast('Password min 4 characters', 'error');
-      return;
-    }
-    const btn = document.querySelector('#tab-desktop-users .btn-green');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Creating…';
     }
     try {
       await adminFetch('/api/admin/desktop-users', {
         method: 'POST',
         context: 'Create user',
-        body: JSON.stringify({ username, password, displayName }),
+        body: JSON.stringify({ username, displayName, password }),
       });
-      showToast('Desktop user created: ' + username, 'success');
       document.getElementById('du-username').value = '';
       document.getElementById('du-display').value = '';
       document.getElementById('du-password').value = '';
-      renderDesktopUsersAdmin();
+      await renderDesktopUsersAdmin();
+      if (typeof showToast === 'function') showToast('Desktop user created', 'success');
     } catch (e) {
-      showToast(e.message || 'Create failed', 'error');
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '➕ Create user';
-      }
+      alert(e.message || 'Create failed');
     }
   }
 
-  async function toggleDesktopUserActive(id, active) {
+  async function toggleUser(id, currentlyActive) {
     try {
       await adminFetch('/api/admin/desktop-users/' + encodeURIComponent(id), {
         method: 'PATCH',
         context: 'Update user',
-        body: JSON.stringify({ active: active === true || active === 'true' }),
+        body: JSON.stringify({ active: !currentlyActive }),
       });
-      showToast('User updated', 'success');
-      renderDesktopUsersAdmin();
+      await renderDesktopUsersAdmin();
     } catch (e) {
-      showToast(e.message || 'Update failed', 'error');
+      alert(e.message || 'Update failed');
     }
   }
 
-  async function deleteDesktopUserAdmin(id) {
-    if (!confirm('Delete this desktop user and all their tournament history?')) return;
+  async function deleteUser(id) {
+    if (!confirm('Delete this desktop user and all activity history?')) return;
     try {
       await adminFetch('/api/admin/desktop-users/' + encodeURIComponent(id), {
         method: 'DELETE',
         context: 'Delete user',
       });
-      showToast('User deleted', 'success');
-      renderDesktopUsersAdmin();
+      await renderDesktopUsersAdmin();
     } catch (e) {
-      showToast(e.message || 'Delete failed', 'error');
+      alert(e.message || 'Delete failed');
     }
   }
 
-  async function downloadDesktopUserHistoryPdf(userId) {
-    if (!getAdminToken()) {
-      showToast('Cloud admin login required', 'error');
-      return;
-    }
+  async function downloadHistoryPdf(userId) {
     try {
       const data = await adminFetch(
         '/api/admin/desktop-users/' + encodeURIComponent(userId) + '/activity',
         { context: 'Load history' }
       );
       const user = data.user || {};
-      const rows = data.activity || [];
-      const html = buildHistoryHtml(user, rows);
-      openPrintPdf(html, (user.username || 'user') + '-history.pdf');
+      const activity = data.activity || [];
+      const w = window.open('', '_blank');
+      if (!w) {
+        alert('Allow popups to print PDF');
+        return;
+      }
+      const rows = activity
+        .map(
+          (a) =>
+            `<tr><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.playedAt || '')}</td><td>${escapeHtml(a.format || '')}</td><td>${a.matchCount ?? ''}</td><td>${escapeHtml(a.status || '')}</td></tr>`
+        )
+        .join('');
+      w.document.write(`
+        <html><head><title>History — ${escapeHtml(user.username)}</title>
+        <style>body{font-family:sans-serif;padding:24px} table{border-collapse:collapse;width:100%} th,td{border:1px solid #ccc;padding:8px}</style>
+        </head><body>
+        <h1>${escapeHtml(user.displayName || user.username)}</h1>
+        <p>@${escapeHtml(user.username)}</p>
+        <table><thead><tr><th>Tournament</th><th>Date</th><th>Format</th><th>Matches</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5">No activity</td></tr>'}</tbody></table>
+        <script>window.onload=function(){window.print()}</script>
+        </body></html>`);
+      w.document.close();
     } catch (e) {
-      showToast(e.message || 'PDF failed', 'error');
+      alert(e.message || 'PDF failed');
     }
   }
 
-  function buildHistoryHtml(user, rows) {
-    const trs = rows.length
-      ? rows
-          .map(
-            (r) =>
-              `<tr><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.playedAt || '—')}</td><td>${escapeHtml(r.format || '—')}</td><td>${r.matchCount ?? '—'}</td><td>${escapeHtml(r.status || '')}</td></tr>`
-          )
-          .join('')
-      : '<tr><td colspan="5">No tournaments recorded yet</td></tr>';
-
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Desktop User History</title>
-<style>body{font-family:Segoe UI,sans-serif;padding:32px;color:#111}h1{font-size:20px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:8px;text-align:left;font-size:13px}th{background:#f0f0f0}</style></head>
-<body><h1>SLCRICKPRO — Desktop User History</h1>
-<p><strong>${escapeHtml(user.displayName || user.username)}</strong> (@${escapeHtml(user.username)})</p>
-<p>Generated: ${new Date().toLocaleString()}</p>
-<table><thead><tr><th>Tournament</th><th>Date</th><th>Format</th><th>Matches</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table></body></html>`;
-  }
-
-  function openPrintPdf(html, filename) {
-    const w = window.open('', '_blank');
-    if (!w) {
-      showToast('Allow popups to download PDF', 'error');
-      return;
-    }
-    w.document.write(html);
-    w.document.close();
-    w.onload = () => {
-      w.focus();
-      w.print();
-    };
-    showToast('Print dialog — save as PDF: ' + filename, 'success');
-  }
+  document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('desktop-user-form');
+    if (form) form.addEventListener('submit', createDesktopUser);
+  });
 
   window.renderDesktopUsersAdmin = renderDesktopUsersAdmin;
-  window.createDesktopUserAdmin = createDesktopUserAdmin;
-  window.toggleDesktopUserActive = toggleDesktopUserActive;
-  window.deleteDesktopUserAdmin = deleteDesktopUserAdmin;
-  window.downloadDesktopUserHistoryPdf = downloadDesktopUserHistoryPdf;
 })();

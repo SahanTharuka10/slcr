@@ -5,6 +5,7 @@ services:
     plan: free
     buildCommand: npm install && npm run build:server
     startCommand: node server.js
+    healthCheckPath: /api/ping
     branch: main
     envVars:
       - key: NODE_VERSION

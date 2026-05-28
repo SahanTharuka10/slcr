@@ -1,6 +1,3 @@
-/**
- * Vercel / static site build — server/ is excluded via .vercelignore.
- */
 const fs = require('fs');
 const path = require('path');
 
@@ -10,11 +7,8 @@ const required = [
   'pages/admin.html',
   'js/admin-desktop-users.js',
   'js/cloud-config.js',
-  'api/version.js',
-  'api/version',
-  'api/ping.js',
+  'api/[[...path]].js',
   'server.js',
-  'api/admin/desktop-users.js',
 ];
 
 for (const rel of required) {
@@ -25,4 +19,4 @@ for (const rel of required) {
   }
 }
 
-console.log('OK: static site files present (server/ not required on Vercel)');
+console.log('OK: static site + Vercel API proxy present');
