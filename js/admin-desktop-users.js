@@ -13,10 +13,12 @@
 
   function getBackendCandidates() {
     const saved = (sessionStorage.getItem(API_BASE_KEY) || '').trim();
-    const origin = isLiveSite() ? location.origin.replace(/\/$/, '') : '';
+    if (isLiveSite()) {
+      const origin = location.origin.replace(/\/$/, '');
+      return [...new Set([saved, origin].filter(Boolean))];
+    }
     const list = [];
     if (saved) list.push(saved);
-    if (origin) list.push(origin);
     list.push(RENDER_API);
     return [...new Set(list.filter(Boolean))];
   }
@@ -121,7 +123,7 @@
           '</code> · Desktop users: <strong style="color:' +
           (hit ? '#22c55e' : '#ff6b6b') +
           '">' +
-          (hit ? 'READY' : 'Set DATABASE_URL on Vercel or deploy Render') +
+          (hit ? 'READY' : 'Vercel: add DATABASE_URL → redeploy') +
           '</strong>';
       }
     );
@@ -147,6 +149,12 @@
 
       let data = {};
       const text = await res.text().catch(() => '');
+      if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+        lastErr = new Error(
+          'API returned HTML instead of JSON. On Vercel add DATABASE_URL and redeploy. On Render use Start Command: node render-api.js'
+        );
+        continue;
+      }
       try {
         data = text ? JSON.parse(text) : {};
       } catch (_) {

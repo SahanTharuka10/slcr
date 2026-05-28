@@ -1,6 +1,5 @@
 const { requireAdmin } = require('../../lib/admin-auth');
 const db = require('../../lib/desktop-db');
-const { proxyToRender } = require('../../lib/render-proxy');
 
 function parseBody(req) {
   return new Promise((resolve) => {
@@ -16,40 +15,36 @@ function parseBody(req) {
   });
 }
 
-async function handleLocal(req, res, id) {
-  if (!requireAdmin(req, res)) return;
-  try {
-    if (req.method === 'PATCH') {
-      const body = await parseBody(req);
-      await db.updateUser(id, body);
-      res.json({ ok: true });
-      return;
-    }
-    if (req.method === 'DELETE') {
-      await db.deleteUser(id);
-      res.json({ ok: true });
-      return;
-    }
-    res.status(405).json({ error: 'Method not allowed' });
-  } catch (e) {
-    res.status(e.status || 500).json({ error: e.message || 'Failed' });
-  }
-}
-
 module.exports = async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   const id = req.query.id;
   if (!id) {
     res.status(400).json({ error: 'Missing user id' });
     return;
   }
 
-  if (process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgres')) {
-    return handleLocal(req, res, id);
+  if (!process.env.DATABASE_URL || !String(process.env.DATABASE_URL).startsWith('postgres')) {
+    if (!requireAdmin(req, res)) return;
+    res.status(503).json({ error: 'DATABASE_URL not set on Vercel' });
+    return;
   }
 
+  if (!requireAdmin(req, res)) return;
+
   try {
-    await proxyToRender(req, res, `/api/admin/desktop-users/${encodeURIComponent(id)}`);
+    if (req.method === 'PATCH') {
+      const body = await parseBody(req);
+      await db.updateUser(id, body);
+      res.status(200).json({ ok: true });
+      return;
+    }
+    if (req.method === 'DELETE') {
+      await db.deleteUser(id);
+      res.status(200).json({ ok: true });
+      return;
+    }
+    res.status(405).json({ error: 'Method not allowed' });
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message || 'Failed' });
   }
 };

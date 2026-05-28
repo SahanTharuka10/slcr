@@ -13,8 +13,11 @@ if (!src.includes('/api/admin/desktop-users')) {
   process.exit(1);
 }
 const bootSrc = fs.existsSync(bootPath) ? fs.readFileSync(bootPath, 'utf8') : '';
-if (!bootSrc.includes("require('../server.js')") && !bootSrc.includes('require("../server.js")')) {
-  console.error('BUILD FAIL: server/index.js must forward to ../server.js');
+if (
+  !bootSrc.includes("require('../render-api.js')") &&
+  !bootSrc.includes('require("../render-api.js")')
+) {
+  console.error('BUILD FAIL: server/index.js must forward to ../render-api.js');
   process.exit(1);
 }
 if (!src.includes('module.exports.startServer')) {
