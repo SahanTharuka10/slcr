@@ -88,7 +88,7 @@ app.get('/api/ping', (req, res) => res.json({ status: 'alive', time: new Date().
 app.get('/api/version', (req, res) => {
   res.json({
     app: 'SLCRICKPRO',
-    version: '1.0.2',
+    version: '1.0.3',
     features: { desktopUsers: true, desktopLogin: true },
     db: dbType || 'initializing',
   });

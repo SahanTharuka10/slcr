@@ -53,16 +53,17 @@
     }
   }
 
-  function apiErrorMessage(res, data, context) {
+  function apiErrorMessage(res, data, context, apiBase) {
+    const base = apiBase || _apiBase || getBackendUrl();
     if (res.status === 401) {
       return 'Admin session expired — logout and login again with site PIN (slcrickpro@2026).';
     }
     if (res.status === 404) {
       return (
-        'Server API not updated yet. Render dashboard → slcrickpro service → Manual Deploy (latest GitHub main). ' +
-        'Then open ' +
+        'Server API not deployed yet. Render → Manual Deploy (GitHub slcr main). ' +
+        'Then check ' +
         base +
-        '/api/version — must show desktopUsers: true.'
+        '/api/version shows desktopUsers:true'
       );
     }
     return data.error || data.message || context + ' failed (HTTP ' + res.status + ')';
@@ -107,7 +108,7 @@
       headers: { ...adminHeaders(), ...(options.headers || {}) },
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(apiErrorMessage(res, data, options.context || 'Request'));
+    if (!res.ok) throw new Error(apiErrorMessage(res, data, options.context || 'Request', base));
     return data;
   }
 
