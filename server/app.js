@@ -84,7 +84,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Health & ping — register BEFORE express.static so /api/version is not shadowed
 app.get('/api/ping', (req, res) =>
-  res.json({ status: 'alive', build: '1.0.7', time: new Date().toISOString() })
+  res.json({ status: 'alive', build: '1.0.8', time: new Date().toISOString() })
 );
 app.get('/api/version', (req, res) => {
   res.json({
