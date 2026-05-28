@@ -21,7 +21,8 @@ Auto deploy “success” වුණත් **අලුත් build fail** වු�
 2. **Repository:** `SahanTharuka10/slcr` — **Branch:** `main`
 3. **Root Directory:** *(empty)* — repo root
 4. **Build Command:** `npm install && npm run build:server` (not plain `build` — that is for Vercel static only)
-5. **Start Command:** `npm start` *(not* `node server/index.js` alone)
+5. **Start Command:** `node scripts/start-server.js` or `npm start` *(syncs API then boots — not plain `node server/index.js` without a fresh build)*
+6. **Build** runs `npm run build:server` which downloads latest `server/index.js` from GitHub `main`
 6. **Environment:** `DATABASE_URL` = Supabase Postgres connection string
 7. **Events** → latest deploy → **Succeeded**? Commit `1.0.5` / `render-start`?
 8. **Manual Deploy** → tick **Clear build cache** → Deploy
