@@ -6,6 +6,10 @@ const DEFAULT_BACKEND = 'https://slcrickpro.onrender.com';
 let currentTab = 'requests';
 
 function getAdminBackendUrl() {
+    const host = (location.hostname || '').toLowerCase();
+    if (host.includes('slcrickpro.live') || host.includes('www.slcrickpro')) {
+        return DEFAULT_BACKEND;
+    }
     const fromSync =
         typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'
             ? window.SLCRICK_SYNC.getBackendUrl()
@@ -14,9 +18,6 @@ function getAdminBackendUrl() {
     const fromCfg = (window.CRICPRO_CLOUD_CONFIG?.backendUrl || '').trim();
     const base = (fromSync || fromLs || fromCfg || DEFAULT_BACKEND).replace(/\/$/, '');
     if (/^https?:\/\//i.test(base)) return base;
-    if (location.protocol.startsWith('http') && !window.SLCRICK_DESKTOP) {
-        return location.origin.replace(/\/$/, '');
-    }
     return DEFAULT_BACKEND;
 }
 
@@ -59,6 +60,7 @@ async function loginAdmin() {
     }
 
     let cloudOk = false;
+    const onLiveSite = (location.hostname || '').toLowerCase().includes('slcrickpro.live');
     if (!window.SLCRICK_DESKTOP) {
         try {
             const base = getAdminBackendUrl();
@@ -73,13 +75,18 @@ async function loginAdmin() {
                 sessionStorage.setItem('isAdmin', 'true');
                 cloudOk = true;
                 showToast('🔓 Admin panel unlocked (cloud)', 'success');
+            } else if (onLiveSite) {
+                showToast(data.message || 'Wrong PIN — use slcrickpro@2026 for cloud admin', 'error');
             }
         } catch (e) {
             console.warn('[Admin] cloud login failed', e);
+            if (onLiveSite) {
+                showToast('Cannot reach API — wait 30s and try again (Render waking up)', 'error');
+            }
         }
     }
 
-    if (!cloudOk) {
+    if (!cloudOk && !onLiveSite) {
         const customPin = localStorage.getItem('cricpro_admin_pin') || OFFLINE_ADMIN_PIN;
         if (pass === customPin || pass === OFFLINE_ADMIN_PIN) {
             loginAttempts = 0;
@@ -94,9 +101,16 @@ async function loginAdmin() {
                     hint.style.display = 'block';
                     hint.textContent = window.SLCRICK_DESKTOP
                         ? 'Offline PIN: 1234'
-                        : 'Site PIN: slcrickpro@2026 (or offline 1234 on desktop)';
+                        : 'Site PIN: slcrickpro@2026';
                 }
             }
+        }
+    } else if (!cloudOk && onLiveSite) {
+        loginAttempts++;
+        const hint = document.getElementById('login-hint');
+        if (hint) {
+            hint.style.display = 'block';
+            hint.textContent = 'Live site: use PIN slcrickpro@2026 (cloud). Offline 1234 cannot manage desktop users.';
         }
     }
 

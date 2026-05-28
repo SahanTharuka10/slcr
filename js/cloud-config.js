@@ -19,6 +19,6 @@ window.CRICPRO_CLOUD_CONFIG = {
         anonKey: ""
     },
 
-    // Optional Express backend fallback. Set to "" for Vercel + Firebase/Supabase only.
+    // API server (Render → Supabase). Desktop login + admin desktop users use this.
     backendUrl: "https://slcrickpro.onrender.com"
 };
