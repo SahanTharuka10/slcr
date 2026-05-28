@@ -4,6 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install && npm run build:server
+    # Dashboard must match: Start = node server.js | Branch = main | Root = (empty)
     startCommand: node server.js
     healthCheckPath: /api/ping
     branch: main

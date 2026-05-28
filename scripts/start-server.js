@@ -2,4 +2,4 @@
 /**
  * Render start — run bootstrap entry (single process, no child spawn).
  */
-require('../server/index.js');
+require('../server.js');
