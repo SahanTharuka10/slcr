@@ -1,5 +1,5 @@
 /**
- * Render entry: bootstrap loads server/app.js (synced from GitHub on Render).
+ * Render entry: sync server/app.js from GitHub, then start HTTP server.
  */
 const path = require('path');
 const fs = require('fs');
@@ -21,7 +21,12 @@ async function boot() {
     process.exit(1);
   }
 
-  require(appPath);
+  const api = require(appPath);
+  if (typeof api.startServer !== 'function') {
+    console.error('[SLCRICKPRO boot] server/app.js missing startServer export');
+    process.exit(1);
+  }
+  api.startServer();
 }
 
 boot().catch((err) => {

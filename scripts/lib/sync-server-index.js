@@ -68,7 +68,7 @@ async function syncServerIndex({ force = false } = {}) {
   }
 
   if (!force && onRender && bundledLooksCurrent()) {
-    console.log('[sync-server] bundled server/index.js OK on Render');
+    console.log('[sync-server] bundled server/app.js OK on Render');
     return false;
   }
 

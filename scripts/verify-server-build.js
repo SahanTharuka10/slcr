@@ -13,8 +13,12 @@ if (!src.includes('/api/admin/desktop-users')) {
   process.exit(1);
 }
 const bootSrc = fs.existsSync(bootPath) ? fs.readFileSync(bootPath, 'utf8') : '';
-if (!bootSrc.includes('app.js') || !bootSrc.includes('syncServerIndex')) {
-  console.error('BUILD FAIL: server/index.js must bootstrap server/app.js');
+if (!bootSrc.includes('startServer') || !bootSrc.includes('app.js')) {
+  console.error('BUILD FAIL: server/index.js must bootstrap and call startServer()');
+  process.exit(1);
+}
+if (!src.includes('module.exports.startServer')) {
+  console.error('BUILD FAIL: server/app.js must export startServer');
   process.exit(1);
 }
 console.log('OK: desktop-users API present in server/app.js');
