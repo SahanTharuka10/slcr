@@ -1,18 +1,20 @@
 const fs = require('fs');
 const path = require('path');
 
-const indexPath = path.join(__dirname, '..', 'server', 'index.js');
-if (!fs.existsSync(indexPath)) {
-  console.error(
-    'BUILD FAIL: server/index.js not found. Use "npm run build:server" on Render (full repo). ' +
-      'Vercel static deploys must use "npm run build" only — server/ is in .vercelignore.'
-  );
+const appPath = path.join(__dirname, '..', 'server', 'app.js');
+const bootPath = path.join(__dirname, '..', 'server', 'index.js');
+if (!fs.existsSync(appPath)) {
+  console.error('BUILD FAIL: server/app.js not found.');
   process.exit(1);
 }
-
-const src = fs.readFileSync(indexPath, 'utf8');
+const src = fs.readFileSync(appPath, 'utf8');
 if (!src.includes('/api/admin/desktop-users')) {
-  console.error('BUILD FAIL: server/index.js missing desktop-users API');
+  console.error('BUILD FAIL: server/app.js missing desktop-users API');
   process.exit(1);
 }
-console.log('OK: desktop-users API present in server/index.js');
+const bootSrc = fs.existsSync(bootPath) ? fs.readFileSync(bootPath, 'utf8') : '';
+if (!bootSrc.includes('app.js') || !bootSrc.includes('syncServerIndex')) {
+  console.error('BUILD FAIL: server/index.js must bootstrap server/app.js');
+  process.exit(1);
+}
+console.log('OK: desktop-users API present in server/app.js');

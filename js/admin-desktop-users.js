@@ -11,7 +11,7 @@
   }
 
   function getBackendUrl() {
-    if (isLiveSite()) return location.origin.replace(/\/$/, '');
+    if (isLiveSite()) return RENDER_API;
     if (window.SLCRICK_DESKTOP) return RENDER_API;
     const fromSync =
       typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'
@@ -29,24 +29,9 @@
     return sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
   }
 
-  /** Vercel admin API uses JWT (has a dot). Old Render tokens are hex-only. */
-  function isCloudJwtToken(token) {
-    return typeof token === 'string' && token.includes('.');
-  }
-
   function clearStaleCloudSession() {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY);
     sessionStorage.removeItem('isAdmin');
-  }
-
-  function ensureCloudAdminSession() {
-    if (!isLiveSite()) return;
-    const token = getAdminToken();
-    if (!token) return;
-    if (!isCloudJwtToken(token)) {
-      clearStaleCloudSession();
-      throw new Error('Please log out and sign in again with PIN slcrickpro@2026 (cloud session updated).');
-    }
   }
 
   function adminHeaders() {
@@ -131,13 +116,12 @@
         '</code> · Desktop users API: <strong style="color:' +
         (ok ? '#22c55e' : '#ff6b6b') +
         '">' +
-        (ok ? 'READY' : 'NOT AVAILABLE — check Vercel DATABASE_URL') +
+        (ok ? 'READY' : 'NOT DEPLOYED — redeploy Render (slcr main)') +
         '</strong>';
     });
   }
 
   async function adminFetch(path, options = {}) {
-    ensureCloudAdminSession();
     const base = getBackendUrl();
     _apiBase = base;
     await wakeBackend(base);
@@ -168,11 +152,6 @@
   async function renderDesktopUsersAdmin() {
     const list = document.getElementById('desktop-users-list');
     if (!list) return;
-
-    if (isLiveSite()) {
-      const t = getAdminToken();
-      if (t && !isCloudJwtToken(t)) clearStaleCloudSession();
-    }
 
     updateCloudHint();
 

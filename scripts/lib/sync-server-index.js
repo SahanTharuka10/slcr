@@ -6,10 +6,11 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
-const INDEX_PATH = path.join(ROOT, 'server', 'index.js');
+const INDEX_PATH = path.join(ROOT, 'server', 'app.js');
 const INDEX_URL =
   process.env.SERVER_INDEX_URL ||
-  'https://raw.githubusercontent.com/SahanTharuka10/slcr/main/server/index.js';
+  process.env.SERVER_APP_URL ||
+  'https://raw.githubusercontent.com/SahanTharuka10/slcr/main/server/app.js';
 
 function download(url) {
   return new Promise((resolve, reject) => {
@@ -76,7 +77,7 @@ async function syncServerIndex({ force = false } = {}) {
   verifyServerSource(body);
   fs.mkdirSync(path.dirname(INDEX_PATH), { recursive: true });
   fs.writeFileSync(INDEX_PATH, body, 'utf8');
-  console.log('[sync-server] wrote server/index.js (desktop API included)');
+  console.log('[sync-server] wrote server/app.js (desktop API included)');
   return true;
 }
 

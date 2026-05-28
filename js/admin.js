@@ -7,9 +7,8 @@ let currentTab = 'requests';
 
 function getAdminBackendUrl() {
     const host = (location.hostname || '').toLowerCase();
-    // Live site: Vercel serverless API (same DB). Render may lag behind on deploy.
     if (host.includes('slcrickpro.live') || host.includes('www.slcrickpro')) {
-        return location.origin.replace(/\/$/, '');
+        return DEFAULT_BACKEND;
     }
     const fromSync =
         typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'
@@ -75,8 +74,7 @@ async function loginAdmin() {
                 sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
                 sessionStorage.setItem('isAdmin', 'true');
                 cloudOk = true;
-                const via = onLiveSite ? 'Vercel' : 'Render';
-                showToast('🔓 Admin panel unlocked (' + via + ')', 'success');
+                showToast('🔓 Admin panel unlocked (cloud)', 'success');
             } else if (onLiveSite) {
                 showToast(data.message || 'Wrong PIN — use slcrickpro@2026 for cloud admin', 'error');
             }

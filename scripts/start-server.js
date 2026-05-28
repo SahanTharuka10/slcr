@@ -5,7 +5,8 @@
  */
 const path = require('path');
 const { spawn } = require('child_process');
-const { syncServerIndex, INDEX_PATH } = require('./lib/sync-server-index');
+const { syncServerIndex } = require('./lib/sync-server-index');
+const INDEX_PATH = require('path').join(__dirname, '..', 'server', 'index.js');
 
 (async () => {
   const onRender = !!(process.env.RENDER || process.env.RENDER_SERVICE_ID);
