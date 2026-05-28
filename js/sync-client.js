@@ -21,6 +21,17 @@
   const SYNC_FAIL_BACKOFF_MS = 12000;
   const _tokenPushFailUntil = new Map();
   const _tokenPushWarned = new Set();
+  function getDefaultHandshakePathHint() {
+    try {
+      const backend = String(localStorage.getItem('cricpro_backend_url') || '').toLowerCase();
+      if (backend.includes('slcrickpro.onrender.com') || backend.includes('slcrickpro.live')) {
+        return '/sync/handshake';
+      }
+    } catch (_) {}
+    return '/api/handshake';
+  }
+  let _handshakePathHint = getDefaultHandshakePathHint();
+  let _handshakeRetryAfter = 0;
 
   function formatSyncError(err) {
     if (!err) return 'unknown';
@@ -328,22 +339,18 @@
     const url = getBackendUrl();
     const pw = String(password || '').trim();
     if (!url || !tournamentId || !pw || pw === 'offline') return null;
+    if (_handshakeRetryAfter > Date.now()) return null;
     if (_handshakeFailedPw.get(tournamentId) === pw) return null;
 
     const fromSync = await pushTournamentForScoringToken(tournamentId, pw);
     if (fromSync) return fromSync;
 
     try {
-      await wakeUpServer(1);
-      const r = await fetchCloud(
-        `${url}/api/handshake`,
-        {
-          method: 'POST',
-          headers: buildAuthHeaders(null),
-          body: JSON.stringify({ id: tournamentId, type: 'tournament', password: pw }),
-        },
-        1
-      );
+      const r = await postHandshake(url, {
+        id: tournamentId,
+        type: 'tournament',
+        password: pw,
+      });
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.ok && d.token) {
         _handshakeFailedPw.delete(tournamentId);
@@ -367,6 +374,10 @@
         }
       }
     } catch (e) {
+      if (e?.code === 'HANDSHAKE_ENDPOINT_MISSING') {
+        _handshakeRetryAfter = Date.now() + 10 * 60 * 1000;
+        return null;
+      }
       if (!_tokenPushWarned.has('hs:' + tournamentId)) {
         _tokenPushWarned.add('hs:' + tournamentId);
         console.warn('[Sync] handshake failed', formatSyncError(e));
@@ -963,15 +974,14 @@
     if (!isEnabled()) {
       return { ok: false, error: local.error || 'Wrong password' };
     }
+    if (_handshakeRetryAfter > Date.now()) {
+      return { ok: false, error: local.error || 'Cloud handshake temporarily unavailable' };
+    }
 
     const url = getBackendUrl();
     const type = String(id).startsWith('MATCH') ? 'match' : 'tournament';
     try {
-      const r = await fetch(`${url}/api/handshake`, {
-        method: 'POST',
-        headers: buildAuthHeaders(null),
-        body: JSON.stringify({ id, type, password: pwd }),
-      });
+      const r = await postHandshake(url, { id, type, password: pwd });
       let d = {};
       try {
         d = await r.json();
@@ -999,11 +1009,78 @@
         httpStatus: r.status,
       };
     } catch (e) {
+      if (e?.code === 'HANDSHAKE_ENDPOINT_MISSING') {
+        _handshakeRetryAfter = Date.now() + 10 * 60 * 1000;
+        return { ok: false, error: local.error || 'Cloud handshake temporarily unavailable' };
+      }
       if (local.error === 'Wrong password') {
         return { ok: false, error: 'Connection failed — check internet or use the password from when you created this tournament' };
       }
       return { ok: false, error: 'Connection failed' };
     }
+  }
+
+  /**
+   * Backward-compatible handshake: some deployments expose /handshake (legacy),
+   * others expose /api/handshake or /sync/handshake. Try all and remember which works.
+   */
+  async function postHandshake(baseUrl, payload) {
+    if (_handshakeRetryAfter > Date.now()) {
+      const cooldownErr = new Error('Handshake endpoint cooldown active');
+      cooldownErr.code = 'HANDSHAKE_ENDPOINT_MISSING';
+      throw cooldownErr;
+    }
+
+    const pathOrder =
+      _handshakePathHint === '/handshake'
+        ? ['/handshake', '/api/handshake', '/sync/handshake']
+        : _handshakePathHint === '/sync/handshake'
+          ? ['/sync/handshake', '/api/handshake', '/handshake']
+          : ['/api/handshake', '/sync/handshake', '/handshake'];
+    const paths = [...new Set(pathOrder)];
+    const headers = buildAuthHeaders(null);
+    let lastError = null;
+    let sawOnly404 = true;
+
+    await wakeUpServer(1);
+
+    for (const path of paths) {
+      try {
+        const r = await fetchWithTimeout(
+          `${baseUrl}${path}`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+          },
+          22000
+        );
+
+        if (r.status === 404) {
+          lastError = new Error(`HTTP 404 on ${path}`);
+          continue;
+        }
+        sawOnly404 = false;
+        if (r.ok || r.status === 401 || r.status === 403) {
+          _handshakePathHint = path;
+          _serverAwake = true;
+          return r;
+        }
+        lastError = new Error(`HTTP ${r.status} on ${path}`);
+      } catch (e) {
+        lastError = e;
+        sawOnly404 = false;
+      }
+    }
+
+    if (sawOnly404) {
+      _handshakeRetryAfter = Date.now() + 10 * 60 * 1000;
+      const err = new Error('Handshake endpoint not found on server');
+      err.code = 'HANDSHAKE_ENDPOINT_MISSING';
+      throw err;
+    }
+
+    throw lastError || new Error('Handshake failed');
   }
 
   function install() {
