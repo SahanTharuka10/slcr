@@ -44,6 +44,13 @@
 
   async function checkDesktopUsersApi(base) {
     try {
+      const probe = await fetch(base + '/api/admin/desktop-users', {
+        cache: 'no-store',
+        mode: 'cors',
+      });
+      if (probe.status === 401 || probe.status === 403) return true;
+      if (probe.ok) return true;
+
       const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
       if (ver.ok) {
         const data = await ver.json().catch(() => ({}));
@@ -54,7 +61,7 @@
       const text = await st.text();
       try {
         const data = JSON.parse(text);
-        return data.features?.desktopUsers === true || data.build >= '1.0.4';
+        return data.features?.desktopUsers === true || (data.build && data.build >= '1.0.4');
       } catch (_) {
         return false;
       }

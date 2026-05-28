@@ -84,11 +84,13 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '..')));
 
 // Health & ping — AFTER cors middleware so headers are set properly
-app.get('/api/ping', (req, res) => res.json({ status: 'alive', time: new Date().toISOString() }));
+app.get('/api/ping', (req, res) =>
+  res.json({ status: 'alive', build: '1.0.5', time: new Date().toISOString() })
+);
 app.get('/api/version', (req, res) => {
   res.json({
     app: 'SLCRICKPRO',
-    version: '1.0.4',
+    version: '1.0.5',
     features: { desktopUsers: true, desktopLogin: true },
     db: dbType || 'initializing',
   });
@@ -97,7 +99,7 @@ app.get('/api/status', (req, res) => {
   res.json({
     ok: true,
     service: 'SLCRICKPRO_SERVER_UP',
-    build: '1.0.4',
+    build: '1.0.5',
     features: { desktopUsers: true, desktopLogin: true },
     db: dbType || 'initializing',
   });
