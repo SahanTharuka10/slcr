@@ -82,11 +82,21 @@ let _lastBroadcastCmdTs = 0;
 let _lastBroadcastCmdSig = '';
 let _lastPollMatchTs = 0;
 let _pollMatchInFlight = false;
+/** Back off cloud GET when match is not on server (stops 404 spam). */
+let _cloudMatchMissUntil = 0;
 let _lastRenderedScoreKey = '';
 let _lastOverlayFingerprint = '';
 let _lastCloudMatchUpdated = 0;
 /** Match draw full-screen — cleared by STOP ALL / STOP_MATCH_DRAW / other hotkeys */
 let _matchDrawOnAir = false;
+let _obsOverlaySettings = {
+    autoBigEvents: false,
+    timerDurationSec: 0,
+    timerRunning: false,
+    timerEndAt: 0,
+    timerRemainingSec: 0,
+};
+let _obsTimerTick = null;
 
 /** OBS hides .broadcast-overlay unless .overlay-visible — stamp every popup */
 function stampBroadcastOverlay(el) {
@@ -168,6 +178,88 @@ function pollBroadcastCommands() {
         const raw = localStorage.getItem('cricpro_broadcast_cmd');
         if (raw) applyBroadcastPayload(JSON.parse(raw));
     } catch (_) {}
+}
+
+function normalizeObsOverlaySettings(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const duration = Math.max(0, parseInt(src.timerDurationSec ?? src.timerSeconds ?? 0, 10) || 0);
+    const running = !!src.timerRunning;
+    let remaining = Math.max(
+        0,
+        parseInt(src.timerRemainingSec ?? src.remainingSec ?? duration, 10) || 0
+    );
+    let endAt = parseInt(src.timerEndAt || 0, 10) || 0;
+    if (running && endAt > Date.now()) {
+        remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+    } else if (running && remaining > 0) {
+        endAt = Date.now() + remaining * 1000;
+    } else if (running && remaining <= 0) {
+        endAt = 0;
+    }
+    return {
+        autoBigEvents: !!src.autoBigEvents,
+        timerDurationSec: duration,
+        timerRunning: running && remaining > 0,
+        timerEndAt: running && remaining > 0 ? endAt : 0,
+        timerRemainingSec: running && remaining > 0 ? remaining : Math.max(0, remaining || duration),
+    };
+}
+
+function formatObsTimer(sec) {
+    const s = Math.max(0, parseInt(sec, 10) || 0);
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+function currentObsTimerRemaining(settings = _obsOverlaySettings) {
+    if (!settings?.timerRunning) return Math.max(0, settings?.timerRemainingSec || settings?.timerDurationSec || 0);
+    return Math.max(0, Math.ceil(((settings.timerEndAt || 0) - Date.now()) / 1000));
+}
+
+function ensureObsTimerBadge() {
+    let el = document.getElementById('obs-match-timer');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'obs-match-timer';
+        el.className = 'obs-match-timer';
+        el.innerHTML = '<span class="obs-match-timer-label">TIMER</span><span class="obs-match-timer-value">00:00</span>';
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function updateObsTimerBadge() {
+    const el = ensureObsTimerBadge();
+    const val = el.querySelector('.obs-match-timer-value');
+    const rem = currentObsTimerRemaining(_obsOverlaySettings);
+    if (val) val.textContent = formatObsTimer(rem);
+    if (!_obsOverlaySettings.timerRunning && rem <= 0) {
+        el.classList.remove('visible', 'running');
+        return;
+    }
+    el.classList.add('visible');
+    if (_obsOverlaySettings.timerRunning) el.classList.add('running');
+    else el.classList.remove('running');
+}
+
+function startObsTimerTicker() {
+    if (_obsTimerTick) return;
+    _obsTimerTick = setInterval(() => {
+        const rem = currentObsTimerRemaining(_obsOverlaySettings);
+        if (_obsOverlaySettings.timerRunning && rem <= 0) {
+            _obsOverlaySettings.timerRunning = false;
+            _obsOverlaySettings.timerRemainingSec = 0;
+            _obsOverlaySettings.timerEndAt = 0;
+        }
+        updateObsTimerBadge();
+    }, 500);
+}
+
+function applyObsOverlaySettings(settings) {
+    _obsOverlaySettings = normalizeObsOverlaySettings(settings);
+    startObsTimerTicker();
+    updateObsTimerBadge();
 }
 
 async function pollBroadcastApi() {
@@ -305,18 +397,123 @@ function applyCloudScorePayload(data) {
 
 async function fetchCloudMatchSnapshot() {
     if (!matchId || !shouldUseCloudLive()) return;
+    if (Date.now() < _cloudMatchMissUntil) return;
     const api = cloudBackendUrl();
     if (!api) return;
     try {
-        const r = await fetch(`${api}/match/${encodeURIComponent(matchId)}`, {
-            cache: 'no-store',
-        });
-        if (!r.ok) return;
+        const qs = `_=${Date.now()}`;
+        const r = await fetch(
+            `${api}/tv/matches/${encodeURIComponent(matchId)}/light?${qs}`,
+            { cache: 'no-store' }
+        );
+        if (!r.ok) {
+            if (r.status === 404) _cloudMatchMissUntil = Date.now() + 60000;
+            return;
+        }
+        _cloudMatchMissUntil = 0;
         const body = await r.json();
+        if (body?.error) return;
         const m = body.fullMatch || body.match;
         if (m?.id) applyCloudScorePayload({ fullMatch: m, score: body.score });
     } catch (e) {
-        console.warn('[overlay] GET /match failed', e);
+        console.warn('[overlay] cloud match fetch failed', e);
+    }
+}
+
+async function pollMatchApi() {
+    if (!matchId && !isMasterOverlay) return;
+    if (overlayLayer === 'hotkeys') return;
+    const now = Date.now();
+    const minGap = shouldUseCloudLive() ? 120 : 500;
+    if (_pollMatchInFlight || now - _lastPollMatchTs < minGap) return;
+    if (shouldUseCloudLive() && matchId && now < _cloudMatchMissUntil) return;
+    _pollMatchInFlight = true;
+    _lastPollMatchTs = now;
+    try {
+        const useCloud = shouldUseCloudLive();
+        const base = useCloud ? cloudBackendUrl() : window.location.origin || '';
+        if (!base) return;
+
+        let url;
+        const qs = ['_=' + now];
+        if (useCloud) {
+            if (isMasterOverlay && tournId && !matchId) {
+                url = `${base}/api/active-match?tournamentId=${encodeURIComponent(tournId)}&${qs.join('&')}`;
+            } else if (matchId) {
+                url = `${base}/tv/matches/${encodeURIComponent(matchId)}/light?${qs.join('&')}`;
+            } else return;
+        } else {
+            url = base + '/api/live-match';
+            if (tournId && (isMasterOverlay || !matchId)) {
+                qs.push('tournament=' + encodeURIComponent(tournId));
+            } else if (matchId && !isMasterOverlay) {
+                url = base + '/api/match/' + encodeURIComponent(matchId);
+            }
+            url = url + '?' + qs.join('&');
+        }
+
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) {
+            if (useCloud && res.status === 404 && matchId) {
+                _cloudMatchMissUntil = Date.now() + 60000;
+            }
+            return;
+        }
+        _cloudMatchMissUntil = 0;
+        const data = await res.json();
+        if (useCloud) {
+            if (data?.error) return;
+            applyCloudScorePayload(data);
+            return;
+        }
+        const m = data;
+        if (!m || !m.id) return;
+        if (tournId && m.tournamentId && m.tournamentId !== tournId) return;
+        if (!matchId || isMasterOverlay) matchId = m.id;
+        latestSocketScore = {
+            fullMatch: m,
+            score: m.innings?.[m.currentInnings || 0],
+        };
+        if (typeof DB !== 'undefined' && DB.saveMatch) {
+            window._desktopApplyingRemoteMatch = true;
+            DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
+            window._desktopApplyingRemoteMatch = false;
+        }
+        const scoreKey = overlayScoreKey(m);
+        if (scoreKey !== _lastRenderedScoreKey) {
+            applyCloudScorePayload({
+                fullMatch: m,
+                score: m.innings?.[m.currentInnings || 0],
+            });
+        }
+    } catch (_) {
+    } finally {
+        _pollMatchInFlight = false;
+    }
+}
+
+function pollServerScore() {
+    if (window.desktopAPI) return;
+    if (!matchId && !isMasterOverlay) return;
+    if (typeof DB === 'undefined') return;
+
+    if (!matchId && isMasterOverlay) {
+        const live = DB.getMatches().find(
+            (m) =>
+                (m.status === 'live' || m.status === 'paused') &&
+                overlayMatchInTournament(m)
+        );
+        if (live) {
+            applyCloudScorePayload({ fullMatch: live, score: live.innings?.[live.currentInnings] });
+            return;
+        }
+    }
+    const localMatch = matchId ? DB.getMatch(matchId) : null;
+    if (localMatch) {
+        applyCloudScorePayload({
+            fullMatch: localMatch,
+            score: localMatch.innings?.[localMatch.currentInnings],
+        });
     }
 }
 
@@ -774,96 +971,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderOverlay();
     });
 
-    async function pollMatchApi() {
-        if (!matchId && !isMasterOverlay) return;
-        if (overlayLayer === 'hotkeys') return;
-        const now = Date.now();
-        const minGap = shouldUseCloudLive() ? 120 : 500;
-        if (_pollMatchInFlight || now - _lastPollMatchTs < minGap) return;
-        _pollMatchInFlight = true;
-        _lastPollMatchTs = now;
-        try {
-            const useCloud = shouldUseCloudLive();
-            const base = useCloud ? cloudBackendUrl() : window.location.origin || '';
-            if (!base) return;
-
-            let url;
-            const qs = ['_=' + now];
-            if (useCloud) {
-                if (isMasterOverlay && tournId && !matchId) {
-                    url = `${base}/api/active-match?tournamentId=${encodeURIComponent(tournId)}&${qs.join('&')}`;
-                } else if (matchId) {
-                    url = `${base}/tv/matches/${encodeURIComponent(matchId)}/light?${qs.join('&')}`;
-                } else return;
-            } else {
-                url = base + '/api/live-match';
-                if (tournId && (isMasterOverlay || !matchId)) {
-                    qs.push('tournament=' + encodeURIComponent(tournId));
-                } else if (matchId && !isMasterOverlay) {
-                    url = base + '/api/match/' + encodeURIComponent(matchId);
-                }
-                url = url + '?' + qs.join('&');
-            }
-
-            const res = await fetch(url, { cache: 'no-store' });
-            if (!res.ok) return;
-            const data = await res.json();
-            if (useCloud) {
-                if (data?.error) return;
-                applyCloudScorePayload(data);
-                return;
-            }
-            const m = data;
-            if (!m || !m.id) return;
-            if (tournId && m.tournamentId && m.tournamentId !== tournId) return;
-            if (!matchId || isMasterOverlay) matchId = m.id;
-            latestSocketScore = {
-                fullMatch: m,
-                score: m.innings?.[m.currentInnings || 0],
-            };
-            if (typeof DB !== 'undefined' && DB.saveMatch) {
-                window._desktopApplyingRemoteMatch = true;
-                DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
-                window._desktopApplyingRemoteMatch = false;
-            }
-            const scoreKey = overlayScoreKey(m);
-            if (scoreKey !== _lastRenderedScoreKey) {
-                applyCloudScorePayload({
-                    fullMatch: m,
-                    score: m.innings?.[m.currentInnings || 0],
-                });
-            }
-        } catch (_) {
-        } finally {
-            _pollMatchInFlight = false;
-        }
-    }
-
-    function pollServerScore() {
-        if (window.desktopAPI) return;
-        if (!matchId && !isMasterOverlay) return;
-        if (typeof DB === 'undefined') return;
-
-        if (!matchId && isMasterOverlay) {
-            const live = DB.getMatches().find(
-                (m) =>
-                    (m.status === 'live' || m.status === 'paused') &&
-                    overlayMatchInTournament(m)
-            );
-            if (live) {
-                applyCloudScorePayload({ fullMatch: live, score: live.innings?.[live.currentInnings] });
-                return;
-            }
-        }
-        const localMatch = matchId ? DB.getMatch(matchId) : null;
-        if (localMatch) {
-            applyCloudScorePayload({
-                fullMatch: localMatch,
-                score: localMatch.innings?.[localMatch.currentInnings],
-            });
-        }
-    }
-
     const inPreviewIframe = isPreview && window.parent !== window;
     const onDesktop = !!window.desktopAPI;
     const pollTick = () => {
@@ -927,7 +1034,7 @@ function handleBroadcastCommand(cmd, data = {}) {
     const scorebarOnlyCmds = new Set([
         'SYNC_SCORE', 'SYNC_MATCH', 'FORCE_UPDATE', 'SET_SCOREBAR_VISIBILITY',
         'TOGGLE_SCOREBAR', 'STOP_ALL', 'STOP_OVERLAY', 'CLEAR_STAY_OVERLAYS', 'STOP_BROADCAST',
-        'SHOW_LAST_WICKET', 'SHOW_BIG_EVENT', 'SHOW_CRR',
+        'SHOW_LAST_WICKET', 'SHOW_BIG_EVENT', 'SHOW_CRR', 'SET_OBS_SETTINGS',
     ]);
     if (overlayLayer === 'scorebar' && !scorebarOnlyCmds.has(cmd)) return;
     if (overlayLayer === 'hotkeys' && (cmd === 'SET_SCOREBAR_VISIBILITY' || cmd === 'TOGGLE_SCOREBAR' || cmd === 'SET_OVERLAY_MODE')) return;
@@ -983,6 +1090,9 @@ function handleBroadcastCommand(cmd, data = {}) {
             if (data.match) {
                 matchId = data.match.id;
                 latestSocketScore = { fullMatch: data.match };
+                if (data.match.obsOverlaySettings) {
+                    applyObsOverlaySettings(data.match.obsOverlaySettings);
+                }
                 if (data.match.isManual && data.match.manualData) {
                     const manual = data.match.manualData;
                     latestSocketScore.fullMatch.currentInnings = 0;
@@ -1007,6 +1117,9 @@ function handleBroadcastCommand(cmd, data = {}) {
                 if (typeof DB !== 'undefined' && DB.saveMatch) DB.saveMatch(latestSocketScore.fullMatch);
                 if (overlayLayer !== 'hotkeys') renderOverlay();
             }
+            break;
+        case 'SET_OBS_SETTINGS':
+            if (data.settings) applyObsOverlaySettings(data.settings);
             break;
         case 'SET_SCOREBAR_VISIBILITY':
             isScorebarVisible = !!data.visible;

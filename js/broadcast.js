@@ -173,6 +173,99 @@ function getBroadcastProfileSettings() {
     }
 }
 
+const OBS_OVERLAY_SETTINGS_KEY = 'cricpro_obs_overlay_settings';
+
+function defaultObsOverlaySettings() {
+    return {
+        autoBigEvents: false,
+        timerDurationSec: 0,
+        timerRunning: false,
+        timerEndAt: 0,
+        timerRemainingSec: 0,
+        updatedAt: Date.now(),
+    };
+}
+
+function normalizeObsOverlaySettings(raw) {
+    const base = defaultObsOverlaySettings();
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const duration = Math.max(
+        0,
+        parseInt(src.timerDurationSec ?? src.timerSeconds ?? base.timerDurationSec, 10) || 0
+    );
+    const running = !!src.timerRunning;
+    let remaining = Math.max(
+        0,
+        parseInt(src.timerRemainingSec ?? src.remainingSec ?? duration, 10) || 0
+    );
+    let endAt = parseInt(src.timerEndAt || 0, 10) || 0;
+    if (running && endAt > Date.now()) {
+        remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+    } else if (running && remaining > 0) {
+        endAt = Date.now() + remaining * 1000;
+    } else if (running && remaining <= 0) {
+        endAt = 0;
+    }
+    return {
+        autoBigEvents: !!src.autoBigEvents,
+        timerDurationSec: duration,
+        timerRunning: running && remaining > 0,
+        timerEndAt: running && remaining > 0 ? endAt : 0,
+        timerRemainingSec: running && remaining > 0 ? remaining : Math.max(0, remaining || duration),
+        updatedAt: parseInt(src.updatedAt || Date.now(), 10) || Date.now(),
+    };
+}
+
+function readObsOverlaySettingsFromStorage() {
+    try {
+        const raw = localStorage.getItem(OBS_OVERLAY_SETTINGS_KEY);
+        if (!raw) return defaultObsOverlaySettings();
+        return normalizeObsOverlaySettings(JSON.parse(raw));
+    } catch (_) {
+        return defaultObsOverlaySettings();
+    }
+}
+
+function writeObsOverlaySettingsToStorage(settings) {
+    try {
+        localStorage.setItem(OBS_OVERLAY_SETTINGS_KEY, JSON.stringify(settings));
+    } catch (_) {}
+}
+
+function hydrateObsSettingsUI(settings) {
+    const s = normalizeObsOverlaySettings(settings);
+    const autoEl = document.getElementById('obs-auto-bigevent-toggle');
+    if (autoEl) autoEl.checked = !!s.autoBigEvents;
+    const secEl = document.getElementById('obs-timer-seconds');
+    if (secEl && !secEl.matches(':focus')) {
+        secEl.value = String(Math.max(0, s.timerDurationSec || 0));
+    }
+    if (typeof window.updateObsTimerPreview === 'function') {
+        window.updateObsTimerPreview(s);
+    }
+}
+
+function persistObsOverlaySettings(nextSettings, opts = {}) {
+    const merged = normalizeObsOverlaySettings(nextSettings);
+    merged.updatedAt = Date.now();
+    writeObsOverlaySettingsToStorage(merged);
+    hydrateObsSettingsUI(merged);
+
+    const m = getBroadcastMatch();
+    if (m) {
+        m.obsOverlaySettings = { ...merged };
+        if (typeof DB !== 'undefined' && DB.saveMatch) DB.saveMatch(m);
+    }
+
+    if (!opts.skipBroadcast && typeof Broadcast !== 'undefined') {
+        Broadcast.send('SET_OBS_SETTINGS', { settings: merged });
+        if (m) {
+            Broadcast.send('SYNC_SCORE', { match: m, matchId: m.id });
+        }
+    }
+    return merged;
+}
+
 const BROADCAST_DEFAULT_PLAYER_PHOTO = '../assets/default-player.svg';
 
 function getBroadcastPhotoForRole(role, player) {
@@ -952,6 +1045,79 @@ const Broadcast = {
         if (!opts.silent) showToast('🎨 Theme Updated!', 'success');
     },
 
+    getObsOverlaySettings() {
+        const m = getBroadcastMatch();
+        if (m?.obsOverlaySettings) return normalizeObsOverlaySettings(m.obsOverlaySettings);
+        return readObsOverlaySettingsFromStorage();
+    },
+
+    setObsOverlaySettings(patch = {}, opts = {}) {
+        const current = this.getObsOverlaySettings();
+        return persistObsOverlaySettings({ ...current, ...patch }, opts);
+    },
+
+    setObsAutoBigEvents(enabled) {
+        this.setObsOverlaySettings({ autoBigEvents: !!enabled });
+        showToast(
+            enabled ? 'Auto 4/6/W enabled on overlay' : 'Auto 4/6/W disabled (manual only)',
+            'success'
+        );
+    },
+
+    setObsTimerDuration(seconds) {
+        const sec = Math.max(0, parseInt(seconds, 10) || 0);
+        this.setObsOverlaySettings({
+            timerDurationSec: sec,
+            timerRemainingSec: sec,
+            timerRunning: false,
+            timerEndAt: 0,
+        });
+    },
+
+    startObsTimer() {
+        const current = this.getObsOverlaySettings();
+        const remaining = Math.max(
+            0,
+            current.timerRunning
+                ? Math.ceil((current.timerEndAt - Date.now()) / 1000)
+                : current.timerRemainingSec || current.timerDurationSec || 0
+        );
+        if (remaining <= 0) {
+            showToast('Set timer seconds first', 'error');
+            return;
+        }
+        this.setObsOverlaySettings({
+            timerRunning: true,
+            timerRemainingSec: remaining,
+            timerEndAt: Date.now() + remaining * 1000,
+        });
+        showToast('OBS timer started', 'success');
+    },
+
+    pauseObsTimer() {
+        const current = this.getObsOverlaySettings();
+        const remaining = current.timerRunning
+            ? Math.max(0, Math.ceil((current.timerEndAt - Date.now()) / 1000))
+            : Math.max(0, current.timerRemainingSec || 0);
+        this.setObsOverlaySettings({
+            timerRunning: false,
+            timerRemainingSec: remaining,
+            timerEndAt: 0,
+        });
+        showToast('OBS timer paused', 'default');
+    },
+
+    resetObsTimer() {
+        const current = this.getObsOverlaySettings();
+        const duration = Math.max(0, current.timerDurationSec || 0);
+        this.setObsOverlaySettings({
+            timerRunning: false,
+            timerRemainingSec: duration,
+            timerEndAt: 0,
+        });
+        showToast('OBS timer reset', 'default');
+    },
+
     restoreOverlayThemeSelect() {
         try {
             const saved = localStorage.getItem('cricpro_scorebar_theme') || 'theme1';
@@ -976,6 +1142,61 @@ const Broadcast = {
     },
 };
 
+function fmtObsTimer(sec) {
+    const s = Math.max(0, parseInt(sec, 10) || 0);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+window.updateObsTimerPreview = function (settings) {
+    const s = normalizeObsOverlaySettings(settings || Broadcast.getObsOverlaySettings());
+    const remaining = s.timerRunning
+        ? Math.max(0, Math.ceil((s.timerEndAt - Date.now()) / 1000))
+        : Math.max(0, s.timerRemainingSec || s.timerDurationSec || 0);
+    const lbl = document.getElementById('obs-timer-preview');
+    if (lbl) lbl.textContent = fmtObsTimer(remaining);
+};
+
+window.saveObsOverlaySettings = function () {
+    const auto = document.getElementById('obs-auto-bigevent-toggle')?.checked === true;
+    const sec = parseInt(document.getElementById('obs-timer-seconds')?.value || '0', 10) || 0;
+    Broadcast.setObsOverlaySettings({
+        autoBigEvents: auto,
+        timerDurationSec: Math.max(0, sec),
+        timerRemainingSec: Math.max(0, sec),
+        timerRunning: false,
+        timerEndAt: 0,
+    });
+    showToast('OBS settings synced', 'success');
+};
+
+window.startObsTimer = function () {
+    const sec = parseInt(document.getElementById('obs-timer-seconds')?.value || '0', 10) || 0;
+    if (sec > 0) {
+        Broadcast.setObsOverlaySettings({
+            timerDurationSec: sec,
+            timerRemainingSec: sec,
+            timerRunning: false,
+            timerEndAt: 0,
+        }, { skipBroadcast: true });
+    }
+    Broadcast.startObsTimer();
+};
+
+window.pauseObsTimer = function () {
+    Broadcast.pauseObsTimer();
+};
+
+window.resetObsTimer = function () {
+    Broadcast.resetObsTimer();
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    hydrateObsSettingsUI(Broadcast.getObsOverlaySettings());
+    setInterval(() => window.updateObsTimerPreview(), 1000);
+});
+
 window.buildTeamSquadBroadcastPayload = buildTeamSquadBroadcastPayload;
 window.collectSquadPlayersForTeam = collectSquadPlayersForTeam;
 window.buildPlayerProfileBroadcastData = buildPlayerProfileBroadcastData;
@@ -984,3 +1205,4 @@ window.buildLastWicketBroadcastData = buildLastWicketBroadcastData;
 window.getBroadcastProfileSettings = getBroadcastProfileSettings;
 window.getBroadcastPhotoForRole = getBroadcastPhotoForRole;
 window.enrichMatchBroadcastMedia = enrichMatchBroadcastMedia;
+window.Broadcast = Broadcast;

@@ -109,6 +109,14 @@ const MatchReportEngine = {
      * Full match report PDF (live or completed) — header: SLCRICKPRO Scoring.
      */
     async generatePDF(matchId) {
+        if (typeof globalThis.ensurePdfLibs === 'function') {
+            try {
+                await globalThis.ensurePdfLibs();
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('PDF libraries failed to load', 'error');
+                return;
+            }
+        }
         if (typeof html2pdf === 'undefined') {
             if (typeof showToast === 'function') showToast('PDF library not loaded — refresh the page', 'error');
             else alert('PDF library not loaded');
@@ -144,9 +152,7 @@ const MatchReportEngine = {
             <div style="font-size:13px;opacity:0.75;margin-top:8px">Building match report for ${esc(m.team1)} vs ${esc(m.team2)}…</div>`;
         document.body.appendChild(overlay);
 
-        const container = document.createElement('div');
-        container.style.cssText =
-            'position:fixed;top:0;left:0;width:1000px;background:#fff;color:#111;font-family:Arial,Helvetica,sans-serif;z-index:-9999;';
+        const { root: pdfRoot, container } = this._createPdfCaptureRoot();
 
         const renderInningsTablePDF = (inn, teamName, innLabel) => {
             if (!inn) {
@@ -216,16 +222,16 @@ const MatchReportEngine = {
                     : '';
 
             return `
-                <div style="margin-bottom:44px;border:1px solid #e8e8e8;border-radius:16px;overflow:hidden;background:#fff">
-                    <div style="background:linear-gradient(to right,#f8f9fa,#fff);padding:24px 28px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee">
+                <div style="margin-bottom:28px;border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 6px 28px rgba(26,35,126,0.08);border:1px solid rgba(26,35,126,0.06)">
+                    <div style="background:linear-gradient(90deg,#1a237e 0%,#3949ab 100%);padding:22px 26px;display:flex;justify-content:space-between;align-items:center;color:#fff">
                         <div>
-                            <div style="font-size:10px;font-weight:900;color:#aaa;letter-spacing:2px;text-transform:uppercase">${esc(innLabel)}</div>
-                            <div style="font-size:26px;font-weight:900;color:#1a237e;margin-top:4px">${esc(teamName)}</div>
-                            ${inn.bowlingTeam ? `<div style="font-size:11px;color:#888;margin-top:4px">vs ${esc(inn.bowlingTeam)}</div>` : ''}
+                            <div style="font-size:10px;font-weight:900;opacity:0.75;letter-spacing:2px;text-transform:uppercase">${esc(innLabel)}</div>
+                            <div style="font-size:24px;font-weight:900;margin-top:4px">${esc(teamName)}</div>
+                            ${inn.bowlingTeam ? `<div style="font-size:11px;opacity:0.8;margin-top:4px">vs ${esc(inn.bowlingTeam)}</div>` : ''}
                         </div>
                         <div style="text-align:right">
-                            <div style="font-size:36px;font-weight:900;color:#1a237e">${inn.runs || 0}/${inn.wickets || 0}</div>
-                            <div style="font-size:14px;color:#666;font-weight:700">(${this._formatOvers(inn.balls, bpo)} overs)</div>
+                            <div style="font-size:34px;font-weight:900">${inn.runs || 0}/${inn.wickets || 0}</div>
+                            <div style="font-size:13px;opacity:0.85;font-weight:700">(${this._formatOvers(inn.balls, bpo)} ov)</div>
                         </div>
                     </div>
                     <div style="padding:28px">
@@ -251,6 +257,7 @@ const MatchReportEngine = {
 
         const totalInns = m.totalInnings || (m.matchFormat === 'test' ? 4 : 2);
         let inningsHtml = '';
+        let inningsPageCount = 0;
         for (let i = 0; i < totalInns; i++) {
             const inn = m.innings?.[i];
             if (!inn && i > (m.currentInnings ?? 0)) continue;
@@ -262,7 +269,9 @@ const MatchReportEngine = {
                 : i % 2 === 0
                   ? m.battingFirst || m.team1
                   : m.fieldingFirst || m.team2;
+            if (inningsPageCount > 0) inningsHtml += '<div class="html2pdf__page-break"></div>';
             inningsHtml += renderInningsTablePDF(inn, tName, label);
+            inningsPageCount++;
         }
 
         const inn0 = m.innings?.[0];
@@ -292,63 +301,87 @@ const MatchReportEngine = {
             )
             .join('');
 
+        const score1 = inn0 ? `${inn0.runs}/${inn0.wickets}` : '—';
+        const overs1 = inn0 ? this._formatOvers(inn0.balls, bpo) : '';
+        const score2 = inn1 ? `${inn1.runs}/${inn1.wickets}` : m.currentInnings >= 1 ? '—' : 'Yet to bat';
+        const overs2 = inn1 ? this._formatOvers(inn1.balls, bpo) : '';
+        const statusBg = m.status === 'live' ? '#ffebee' : m.status === 'completed' ? '#e8f5e9' : '#fff8e1';
+        const statusBorder = m.status === 'live' ? '#ef5350' : m.status === 'completed' ? '#43a047' : '#ffb300';
+        const statusColor = m.status === 'live' ? '#c62828' : m.status === 'completed' ? '#2e7d32' : '#f57f17';
+
         container.innerHTML = `
-            <div style="background:linear-gradient(135deg,#0a0e27 0%,#1a237e 100%);color:#fff;padding:56px 48px;text-align:center">
-                <div style="font-size:14px;letter-spacing:6px;font-weight:700;opacity:0.85;text-transform:uppercase;margin-bottom:12px">SLCRICKPRO Scoring</div>
-                <div style="font-size:40px;font-weight:900;letter-spacing:-1px;line-height:1.1">Match Report</div>
-                <div style="font-size:22px;font-weight:700;color:#ffc107;margin-top:20px">${esc(m.team1)} <span style="opacity:0.6;font-weight:400">vs</span> ${esc(m.team2)}</div>
-                <div style="font-size:13px;opacity:0.8;margin-top:14px">${esc(m.tournamentName || '')} ${m.tournamentName ? '·' : ''} ${esc(generatedAt)}</div>
+            <div style="background:linear-gradient(135deg,#0a0e27 0%,#1a237e 52%,#283593 100%);color:#fff;padding:40px 32px 56px;position:relative;overflow:hidden;box-sizing:border-box">
+                <div style="position:absolute;right:-30px;top:-30px;width:160px;height:160px;border-radius:50%;background:rgba(255,193,7,0.12)"></div>
+                <div style="position:absolute;left:0;bottom:0;width:100%;height:5px;background:linear-gradient(90deg,#ffc107 0%,#ff9800 45%,transparent 100%)"></div>
+                <div style="font-size:11px;letter-spacing:5px;font-weight:800;opacity:0.8;text-transform:uppercase;margin-bottom:10px">SLCRICKPRO · Official Scoring</div>
+                <div style="font-size:36px;font-weight:900;letter-spacing:-0.5px;line-height:1.15">Match Report</div>
+                <div style="font-size:12px;opacity:0.85;margin-top:12px">${esc(m.tournamentName || 'Cricket fixture')} · ${esc(generatedAt)}</div>
             </div>
 
-            <div style="padding:44px 40px">
-                <div style="background:${m.status === 'live' ? '#ffebee' : '#e8f5e9'};border:2px solid ${m.status === 'live' ? '#ef5350' : '#66bb6a'};padding:20px 24px;border-radius:14px;text-align:center;margin-bottom:32px">
-                    <div style="font-size:11px;font-weight:900;letter-spacing:2px;color:${m.status === 'live' ? '#c62828' : '#2e7d32'};margin-bottom:8px">${esc(statusLabel)}</div>
-                    <div style="font-size:20px;font-weight:900;color:#1a237e">${scoreSummary}</div>
-                    <div style="font-size:14px;font-weight:700;color:#555;margin-top:10px">${esc(m.result || (m.status === 'live' ? 'Scores update as balls are entered' : ''))}</div>
+            <div style="padding:0 28px 32px;margin-top:-36px;box-sizing:border-box">
+                <div style="display:flex;align-items:stretch;gap:12px;margin-bottom:24px">
+                    <div style="flex:1;background:#fff;border-radius:16px;padding:20px 16px;text-align:center;box-shadow:0 10px 36px rgba(26,35,126,0.1);border:1px solid rgba(26,35,126,0.06)">
+                        <div style="font-size:10px;font-weight:800;color:#888;letter-spacing:1px;text-transform:uppercase">Home</div>
+                        <div style="font-size:18px;font-weight:900;color:#1a237e;margin-top:6px;line-height:1.2">${esc(m.team1)}</div>
+                        <div style="font-size:30px;font-weight:900;color:#1a237e;margin-top:10px">${score1}</div>
+                        ${overs1 ? `<div style="font-size:12px;color:#666;font-weight:700;margin-top:4px">${overs1} overs</div>` : ''}
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:center;flex-shrink:0;width:52px">
+                        <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#ffc107,#ff9800);color:#1a237e;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(255,152,0,0.4)">VS</div>
+                    </div>
+                    <div style="flex:1;background:#fff;border-radius:16px;padding:20px 16px;text-align:center;box-shadow:0 10px 36px rgba(26,35,126,0.1);border:1px solid rgba(26,35,126,0.06)">
+                        <div style="font-size:10px;font-weight:800;color:#888;letter-spacing:1px;text-transform:uppercase">Away</div>
+                        <div style="font-size:18px;font-weight:900;color:#1a237e;margin-top:6px;line-height:1.2">${esc(m.team2)}</div>
+                        <div style="font-size:30px;font-weight:900;color:#1a237e;margin-top:10px">${score2}</div>
+                        ${overs2 ? `<div style="font-size:12px;color:#666;font-weight:700;margin-top:4px">${overs2} overs</div>` : ''}
+                    </div>
                 </div>
 
-                <div style="font-size:16px;font-weight:900;color:#1a237e;border-left:5px solid #ffc107;padding-left:12px;margin-bottom:16px">MATCH DETAILS</div>
-                <table style="width:100%;border-collapse:collapse;margin-bottom:36px;border:1px solid #eee;border-radius:12px;overflow:hidden">
-                    <tbody>${metaRows}</tbody>
-                </table>
+                <div style="background:${statusBg};border:2px solid ${statusBorder};padding:18px 22px;border-radius:14px;text-align:center;margin-bottom:28px;box-shadow:0 4px 20px rgba(0,0,0,0.04)">
+                    <div style="font-size:11px;font-weight:900;letter-spacing:2px;color:${statusColor};margin-bottom:6px">${esc(statusLabel)}</div>
+                    <div style="font-size:15px;font-weight:800;color:#333;line-height:1.5">${scoreSummary}</div>
+                    <div style="font-size:14px;font-weight:700;color:#555;margin-top:8px">${esc(m.result || (m.status === 'live' ? 'Live — scores update as you score' : ''))}</div>
+                </div>
 
-                <div style="font-size:16px;font-weight:900;color:#1a237e;border-left:5px solid #ffc107;padding-left:12px;margin-bottom:20px">SCORECARDS</div>
-                ${inningsHtml || '<p style="color:#999">No innings data recorded yet.</p>'}
+                <div style="background:#fff;border-radius:16px;padding:22px 24px;margin-bottom:28px;box-shadow:0 6px 24px rgba(26,35,126,0.06);border:1px solid rgba(26,35,126,0.05)">
+                    <div style="font-size:13px;font-weight:900;color:#1a237e;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;padding-bottom:8px;border-bottom:3px solid #ffc107;display:inline-block">Match details</div>
+                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                        <tbody>${metaRows}</tbody>
+                    </table>
+                </div>
 
-                <div style="margin-top:48px;padding-top:20px;border-top:1px solid #eee;text-align:center">
-                    <div style="font-size:12px;font-weight:800;color:#ccc;letter-spacing:3px">SLCRICKPRO SCORING</div>
-                    <div style="font-size:11px;color:#ddd;margin-top:6px">${esc(m.id)}</div>
+                <div style="font-size:13px;font-weight:900;color:#1a237e;text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;padding-left:4px">📋 Full scorecards</div>
+                ${inningsHtml || '<p style="color:#888;text-align:center;padding:24px">No innings data recorded yet.</p>'}
+
+                <div style="margin-top:36px;padding:20px;background:linear-gradient(90deg,#1a237e,#283593);border-radius:12px;text-align:center;color:#fff">
+                    <div style="font-size:11px;font-weight:800;letter-spacing:3px;opacity:0.85">SLCRICKPRO SCORING</div>
+                    <div style="font-size:10px;opacity:0.65;margin-top:6px;font-family:monospace">${esc(m.id)}</div>
                 </div>
             </div>`;
 
-        document.body.appendChild(container);
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 1200));
 
-        const opt = {
-            margin: [8, 8, 8, 8],
-            filename: `SLCRICKPRO_Scoring_${(m.team1 || 'T1').replace(/[^\w\-]+/g, '_')}_vs_${(m.team2 || 'T2').replace(/[^\w\-]+/g, '_')}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                scrollY: 0,
-                windowWidth: 1000,
-                backgroundColor: '#ffffff',
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] },
-        };
+        const opt = this._pdfCaptureOptions(
+            container,
+            `SLCRICKPRO_Scoring_${(m.team1 || 'T1').replace(/[^\w\-]+/g, '_')}_vs_${(m.team2 || 'T2').replace(/[^\w\-]+/g, '_')}.pdf`
+        );
 
         try {
-            await html2pdf().set(opt).from(container).save();
-            if (typeof showToast === 'function') showToast('Match PDF downloaded', 'success');
+            const saved = await this._exportPdf(container, opt);
+            if (saved?.canceled) {
+                if (typeof showToast === 'function') showToast('PDF save canceled', 'default');
+            } else if (typeof showToast === 'function') {
+                showToast(
+                    saved?.path ? `Match PDF saved — ${saved.path}` : 'Match PDF downloaded',
+                    'success'
+                );
+            }
         } catch (err) {
             console.error('Match PDF error:', err);
             if (typeof showToast === 'function') showToast('PDF export failed', 'error');
             else alert('PDF export failed');
         } finally {
-            container.remove();
+            pdfRoot.remove();
             overlay.remove();
         }
     },
@@ -377,6 +410,92 @@ const MatchReportEngine = {
         const r = Number(runs) || 0;
         const b = Number(balls) || 0;
         return b > 0 ? ((r / b) * bpo).toFixed(2) : '0.00';
+    },
+
+    /** A4 content width at 96dpi — avoids html2canvas left-clipping on fixed/z-index hacks. */
+    _PDF_PAGE_W: 794,
+
+    _createPdfCaptureRoot() {
+        const w = this._PDF_PAGE_W;
+        const root = document.createElement('div');
+        root.id = 'slcrick-pdf-capture-root';
+        root.setAttribute('aria-hidden', 'true');
+        root.style.cssText = [
+            'position:fixed',
+            'left:0',
+            'top:0',
+            `width:${w}px`,
+            'margin:0',
+            'padding:0',
+            'z-index:2147483646',
+            'opacity:0.01',
+            'pointer-events:none',
+            'overflow:visible',
+            'background:#e8edf5',
+        ].join(';');
+
+        const container = document.createElement('div');
+        container.className = 'slcrick-pdf-document';
+        container.style.cssText = [
+            `width:${w}px`,
+            'max-width:100%',
+            'margin:0',
+            'padding:0',
+            'box-sizing:border-box',
+            'background:linear-gradient(180deg,#e8edf5 0%,#f0f4fa 35%,#f8fafc 100%)',
+            'font-family:Arial,Helvetica,sans-serif',
+            'color:#1a1a2e',
+            'overflow:visible',
+        ].join(';');
+
+        root.appendChild(container);
+        document.body.appendChild(root);
+        return { root, container, pageW: w };
+    },
+
+    _pdfCaptureOptions(container, filename) {
+        const pageW = this._PDF_PAGE_W;
+        const docHeight = Math.max(container.scrollHeight, container.offsetHeight, 1120);
+        return {
+            margin: [10, 10, 10, 10],
+            filename,
+            image: { type: 'jpeg', quality: 0.96 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                x: 0,
+                y: 0,
+                scrollX: 0,
+                scrollY: 0,
+                width: pageW,
+                windowWidth: pageW,
+                height: docHeight,
+                windowHeight: docHeight,
+                backgroundColor: '#e8edf5',
+            },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] },
+        };
+    },
+
+    /** Desktop: native save dialog; browser/mobile: html2pdf download. */
+    async _exportPdf(container, opt) {
+        const worker = html2pdf().set(opt).from(container);
+        if (globalThis.SLCRICK_DESKTOP && globalThis.desktopAPI?.savePdf) {
+            const blob = await worker.outputPdf('blob');
+            const buf = await blob.arrayBuffer();
+            const saved = await globalThis.desktopAPI.savePdf({
+                filename: opt.filename || 'SLCRICKPRO_Report.pdf',
+                data: Array.from(new Uint8Array(buf)),
+            });
+            if (!saved?.ok && !saved?.canceled) {
+                throw new Error(saved?.error || 'Could not save PDF');
+            }
+            return saved;
+        }
+        await worker.save();
+        return { ok: true };
     },
 
     /** Build standings + leader stats for PDF (all completed matches, no publishLive filter). */
@@ -539,18 +658,33 @@ const MatchReportEngine = {
                 });
             });
         };
-        [...completed, ...live].forEach((m) => {
+        completed.forEach((m) => {
             countBat(m);
             countBowl(m);
         });
 
         const batsmen = Object.values(batStats)
-            .map((s) => ({ ...s, sr: this._formatSr(s.runs, s.balls) }))
+            .map((s) => ({
+                ...s,
+                matches: s.innings || 0,
+                sr: this._formatSr(s.runs, s.balls),
+            }))
             .sort((a, b) => b.runs - a.runs)
             .slice(0, 15);
+        const bowlMatchCount = {};
+        completed.forEach((m) => {
+            (m.innings || []).forEach((inn) => {
+                if (!inn) return;
+                (inn.bowlers || []).forEach((b) => {
+                    if (!b?.name) return;
+                    bowlMatchCount[b.name] = (bowlMatchCount[b.name] || 0) + 1;
+                });
+            });
+        });
         const bowlers = Object.values(bowlStats)
             .map((s) => ({
                 ...s,
+                matches: bowlMatchCount[s.name] || 0,
                 econ: this._formatEcon(s.runs, s.balls, bpoDefault),
                 overs: this._formatOvers(s.balls, bpoDefault),
             }))
@@ -589,8 +723,18 @@ const MatchReportEngine = {
      * Full tournament summary PDF (standings, leaders, every match result + scores).
      */
     async generateTournamentPDF(tournId) {
+        if (typeof globalThis.ensurePdfLibs === 'function') {
+            try {
+                await globalThis.ensurePdfLibs();
+            } catch (e) {
+                if (typeof showToast === 'function') showToast('PDF libraries failed to load', 'error');
+                else alert('PDF libraries failed to load');
+                return;
+            }
+        }
         if (typeof html2pdf === 'undefined') {
-            alert('PDF library not loaded. Please refresh the page.');
+            if (typeof showToast === 'function') showToast('PDF library not loaded — refresh the page', 'error');
+            else alert('PDF library not loaded. Please refresh the page.');
             return;
         }
 
@@ -615,9 +759,7 @@ const MatchReportEngine = {
             <div style="font-size:13px;opacity:0.75;margin-top:8px">Building ${esc(t.name)} PDF…</div>`;
         document.body.appendChild(overlay);
 
-        const container = document.createElement('div');
-        container.style.cssText =
-            'position:fixed;top:0;left:0;width:1000px;background:#fff;color:#111;font-family:Arial,Helvetica,sans-serif;z-index:-9999;';
+        const { root: pdfRoot, container } = this._createPdfCaptureRoot();
 
         const metaRows = [
             ['Format', (t.format || 'league').toUpperCase()],
@@ -663,15 +805,14 @@ const MatchReportEngine = {
                       (b, i) => `
                 <tr style="border-bottom:1px solid #eef2f7">
                     <td style="padding:10px;font-weight:700">${i + 1}. ${esc(b.name)}</td>
-                    <td style="padding:10px;color:#888">${esc(b.team)}</td>
+                    <td style="padding:10px;text-align:center;color:#666">${b.matches || 0}</td>
                     <td style="padding:10px;text-align:center;font-weight:900">${b.runs}</td>
-                    <td style="padding:10px;text-align:center">${b.balls}</td>
                     <td style="padding:10px;text-align:center">${b.hs}</td>
                     <td style="padding:10px;text-align:right">${b.sr}</td>
                 </tr>`
                   )
                   .join('')
-            : '<tr><td colspan="6" style="padding:16px;text-align:center;color:#999">No batting stats</td></tr>';
+            : '<tr><td colspan="5" style="padding:16px;text-align:center;color:#999">No batting stats</td></tr>';
 
         const bowlRows = bowlers.length
             ? bowlers
@@ -679,14 +820,13 @@ const MatchReportEngine = {
                       (b, i) => `
                 <tr style="border-bottom:1px solid #f7eeee">
                     <td style="padding:10px;font-weight:700">${i + 1}. ${esc(b.name)}</td>
-                    <td style="padding:10px;color:#888">${esc(b.team)}</td>
+                    <td style="padding:10px;text-align:center;color:#666">${b.matches || 0}</td>
                     <td style="padding:10px;text-align:center;font-weight:900;color:#c62828">${b.wickets}</td>
-                    <td style="padding:10px;text-align:center">${b.overs}</td>
                     <td style="padding:10px;text-align:right">${b.econ}</td>
                 </tr>`
                   )
                   .join('')
-            : '<tr><td colspan="5" style="padding:16px;text-align:center;color:#999">No bowling stats</td></tr>';
+            : '<tr><td colspan="4" style="padding:16px;text-align:center;color:#999">No bowling stats</td></tr>';
 
         const matchRows = matches.length
             ? matches
@@ -724,24 +864,28 @@ const MatchReportEngine = {
             : '<span style="color:#999">—</span>';
 
         container.innerHTML = `
-            <div style="background:linear-gradient(135deg,#0a0e27 0%,#1a237e 100%);color:#fff;padding:70px 50px;text-align:center">
-                <div style="font-size:52px;font-weight:900;letter-spacing:-2px">SLCRICK<span style="color:#ffc107">PRO</span></div>
-                <div style="font-size:12px;letter-spacing:6px;opacity:0.65;margin:16px 0 36px;text-transform:uppercase">Official Tournament Summary Report</div>
-                <div style="font-size:36px;font-weight:900;color:#ffc107;line-height:1.15">${esc((t.name || 'Tournament').toUpperCase())}</div>
-                <div style="font-size:14px;opacity:0.85;margin-top:12px">Season analytics · ${esc(generatedAt)}</div>
+            <div style="background:linear-gradient(135deg,#0a0e27 0%,#1a237e 55%,#283593 100%);color:#fff;padding:44px 32px 52px;text-align:center;position:relative;overflow:hidden;box-sizing:border-box">
+                <div style="position:absolute;left:0;bottom:0;width:100%;height:5px;background:linear-gradient(90deg,#ffc107,transparent)"></div>
+                <div style="font-size:42px;font-weight:900;letter-spacing:-1px">SLCRICK<span style="color:#ffc107">PRO</span></div>
+                <div style="font-size:11px;letter-spacing:4px;opacity:0.75;margin:14px 0 24px;text-transform:uppercase">Tournament Summary Report</div>
+                <div style="font-size:28px;font-weight:900;color:#ffc107;line-height:1.2">${esc(t.name || 'Tournament')}</div>
+                <div style="font-size:12px;opacity:0.85;margin-top:10px">${esc(generatedAt)} · ${completed.length} matches completed</div>
             </div>
 
-            <div style="padding:50px">
-                <div style="font-size:18px;font-weight:900;color:#1a237e;border-left:5px solid #ffc107;padding-left:14px;margin-bottom:20px">TOURNAMENT DETAILS</div>
-                <table style="width:100%;border-collapse:collapse;margin-bottom:40px;border:1px solid #eee;border-radius:12px;overflow:hidden">
+            <div style="padding:28px 28px 36px;box-sizing:border-box">
+                <div style="background:#fff;border-radius:16px;padding:22px 24px;margin-bottom:28px;box-shadow:0 6px 24px rgba(26,35,126,0.07)">
+                <div style="font-size:13px;font-weight:900;color:#1a237e;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;border-bottom:3px solid #ffc107;display:inline-block;padding-bottom:6px">Tournament details</div>
+                <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:13px">
                     <tbody>${metaHtml}</tbody>
                 </table>
+                </div>
 
-                <div style="font-size:14px;font-weight:800;color:#666;margin-bottom:12px">PARTICIPATING TEAMS</div>
-                <div style="margin-bottom:45px">${teamsList}</div>
+                <div style="font-size:13px;font-weight:900;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px">Participating teams</div>
+                <div style="margin-bottom:28px;background:#fff;padding:16px 18px;border-radius:14px;box-shadow:0 4px 16px rgba(0,0,0,0.04)">${teamsList}</div>
 
-                <div style="font-size:18px;font-weight:900;color:#1a237e;border-left:5px solid #ffc107;padding-left:14px;margin-bottom:20px">POINTS TABLE</div>
-                <table style="width:100%;border-collapse:collapse;margin-bottom:50px;font-size:14px">
+                <div style="font-size:13px;font-weight:900;color:#1a237e;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">🏆 Points table</div>
+                <div style="background:#fff;border-radius:16px;overflow:hidden;margin-bottom:32px;box-shadow:0 6px 24px rgba(26,35,126,0.07)">
+                <table style="width:100%;border-collapse:collapse;font-size:13px">
                     <thead><tr style="background:#f1f3f8;color:#1a237e;text-align:left">
                         <th style="padding:14px">#</th><th style="padding:14px">Team</th><th style="padding:14px;text-align:center">P</th>
                         <th style="padding:14px;text-align:center">W</th><th style="padding:14px;text-align:center">L</th><th style="padding:14px;text-align:center">T</th>
@@ -749,70 +893,66 @@ const MatchReportEngine = {
                     </tr></thead>
                     <tbody>${standingsRows}</tbody>
                 </table>
+                </div>
 
                 <div class="html2pdf__page-break"></div>
 
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:50px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:32px">
                     <div>
                         <div style="font-size:16px;font-weight:900;color:#1a237e;margin-bottom:14px">TOP BATSMEN</div>
                         <table style="width:100%;border-collapse:collapse;font-size:12px">
-                            <thead><tr style="background:#1a237e;color:#fff"><th style="padding:10px">Player</th><th style="padding:10px">Team</th><th style="padding:10px;text-align:center">R</th><th style="padding:10px;text-align:center">B</th><th style="padding:10px;text-align:center">HS</th><th style="padding:10px;text-align:right">SR</th></tr></thead>
+                            <thead><tr style="background:#1a237e;color:#fff"><th style="padding:10px">Player</th><th style="padding:10px;text-align:center">M</th><th style="padding:10px;text-align:center">Runs</th><th style="padding:10px;text-align:center">HS</th><th style="padding:10px;text-align:right">SR</th></tr></thead>
                             <tbody>${batRows}</tbody>
                         </table>
                     </div>
                     <div>
                         <div style="font-size:16px;font-weight:900;color:#c62828;margin-bottom:14px">TOP BOWLERS</div>
                         <table style="width:100%;border-collapse:collapse;font-size:12px">
-                            <thead><tr style="background:#c62828;color:#fff"><th style="padding:10px">Player</th><th style="padding:10px">Team</th><th style="padding:10px;text-align:center">W</th><th style="padding:10px;text-align:center">O</th><th style="padding:10px;text-align:right">Econ</th></tr></thead>
+                            <thead><tr style="background:#c62828;color:#fff"><th style="padding:10px">Player</th><th style="padding:10px;text-align:center">M</th><th style="padding:10px;text-align:center">Wkts</th><th style="padding:10px;text-align:right">Econ</th></tr></thead>
                             <tbody>${bowlRows}</tbody>
                         </table>
                     </div>
                 </div>
 
-                <div style="font-size:18px;font-weight:900;color:#1a237e;border-left:5px solid #ffc107;padding-left:14px;margin-bottom:20px">ALL MATCHES — RESULTS &amp; SCORES</div>
-                <table style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid #eee">
+                <div style="font-size:13px;font-weight:900;color:#1a237e;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">📅 All matches</div>
+                <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 24px rgba(26,35,126,0.07)">
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
                     <thead><tr style="background:#f8f9fa;color:#1a237e;text-align:left">
                         <th style="padding:14px">Fixture</th><th style="padding:14px">Score / Result</th><th style="padding:14px;text-align:right">Status</th>
                     </tr></thead>
                     <tbody>${matchRows}</tbody>
                 </table>
+                </div>
 
-                <div style="margin-top:80px;text-align:center;padding-top:24px;border-top:1px solid #eee">
-                    <div style="font-size:12px;font-weight:800;color:#ccc;letter-spacing:3px">SLCRICKPRO TOURNAMENT MANAGEMENT</div>
-                    <div style="font-size:11px;color:#ddd;margin-top:8px">Report ID: ${esc(t.id)} · Generated ${esc(generatedAt)}</div>
+                <div style="margin-top:32px;padding:18px;background:linear-gradient(90deg,#1a237e,#283593);border-radius:12px;text-align:center;color:#fff">
+                    <div style="font-size:11px;font-weight:800;letter-spacing:3px;opacity:0.9">SLCRICKPRO TOURNAMENT</div>
+                    <div style="font-size:10px;opacity:0.7;margin-top:6px">${esc(t.id)} · ${esc(generatedAt)}</div>
                 </div>
             </div>`;
 
-        document.body.appendChild(container);
         await new Promise((r) => setTimeout(r, 1200));
 
-        const opt = {
-            margin: [8, 8, 8, 8],
-            filename: `SLCRICKPRO_Tournament_${(t.name || 'Season').replace(/[^\w\-]+/g, '_')}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                scrollY: 0,
-                windowWidth: 1000,
-                backgroundColor: '#ffffff',
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] },
-        };
+        const opt = this._pdfCaptureOptions(
+            container,
+            `SLCRICKPRO_Tournament_${(t.name || 'Season').replace(/[^\w\-]+/g, '_')}.pdf`
+        );
 
         try {
-            await html2pdf().set(opt).from(container).save();
-            if (typeof showToast === 'function') {
-                showToast('Tournament PDF downloaded', 'success');
+            const saved = await this._exportPdf(container, opt);
+            if (saved?.canceled) {
+                if (typeof showToast === 'function') showToast('PDF save canceled', 'default');
+            } else if (typeof showToast === 'function') {
+                showToast(
+                    saved?.path ? `Tournament PDF saved — ${saved.path}` : 'Tournament PDF downloaded',
+                    'success'
+                );
             }
         } catch (err) {
             console.error('Tournament PDF Export Error:', err);
             if (typeof showToast === 'function') showToast('PDF export failed', 'error');
             else alert('PDF export failed: ' + (err.message || err));
         } finally {
-            container.remove();
+            pdfRoot.remove();
             overlay.remove();
         }
     },

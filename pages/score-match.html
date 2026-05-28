@@ -694,6 +694,22 @@
                             <button class="btn btn-ghost" onclick="triggerVisualBigEvent('SIX')" style="border-color:#7c4dff; color:#b388ff; height:45px; font-size:18px; font-weight:900; border-radius:10px">6</button>
                             <button class="btn btn-ghost" onclick="triggerVisualBigEvent('WICKET')" style="border-color:#d50000; color:#ff8a80; height:45px; font-size:18px; font-weight:900; border-radius:10px">W</button>
                         </div>
+                        <div style="margin-top:10px; padding:10px; border:1px solid rgba(124,77,255,0.35); border-radius:10px; background:rgba(124,77,255,0.08)">
+                            <div style="font-size:10px; font-weight:900; letter-spacing:1px; color:#d1c4e9; margin-bottom:8px">OBS TIMER + EVENT MODE</div>
+                            <label style="display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; margin-bottom:8px; cursor:pointer">
+                                <input type="checkbox" id="obs-auto-bigevent-toggle" onchange="saveObsOverlaySettings()" style="width:16px;height:16px;accent-color:#7c4dff">
+                                <span>Auto 4/6/W (default manual)</span>
+                            </label>
+                            <div style="display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin-bottom:8px">
+                                <input type="number" id="obs-timer-seconds" class="form-input" min="0" placeholder="Timer seconds" onchange="saveObsOverlaySettings()" style="font-size:12px; font-weight:800" />
+                                <div id="obs-timer-preview" style="font-size:16px; font-weight:900; color:#fff; min-width:58px; text-align:right">00:00</div>
+                            </div>
+                            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px">
+                                <button type="button" class="btn btn-primary btn-sm" style="font-weight:800; border-radius:8px" onclick="startObsTimer()">▶ Start</button>
+                                <button type="button" class="btn btn-ghost btn-sm" style="font-weight:800; border-radius:8px" onclick="pauseObsTimer()">⏸ Pause</button>
+                                <button type="button" class="btn btn-red btn-sm" style="font-weight:800; border-radius:8px" onclick="resetObsTimer()">↺ Reset</button>
+                            </div>
+                        </div>
                         <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;height:44px;font-weight:900;border-radius:10px" onclick="shareMatchDrawOverlay()" title="Full screen on OBS overlay">📡 Share Draw</button>
                         <button type="button" class="btn btn-green btn-full btn-sm" style="margin-top:6px;font-weight:800" onclick="hideMatchDrawOverlay()" title="STOP layer — draw clears with STOP ALL too">✕ Hide Draw</button>
                         <button type="button" class="btn btn-ghost btn-full btn-sm" style="margin-top:6px;font-weight:700" onclick="openMatchDrawPreview()">👁 Preview in browser</button>
@@ -1698,9 +1714,11 @@
             <div style="font-size:64px;text-align:center;margin-bottom:12px">🏏</div>
             <div class="modal-title" id="innings-end-title">Innings Complete!</div>
             <div id="innings-end-summary" style="color:var(--c-muted);margin:12px 0;font-size:15px"></div>
-            <div class="modal-actions">
+            <div class="modal-actions" style="flex-direction:column;gap:10px">
                 <button class="btn btn-primary btn-full" id="innings-end-btn" onclick="proceedAfterInnings()">Start 2nd
                     Innings</button>
+                <button class="btn btn-ghost btn-full" id="innings-end-continue-btn" style="display:none;font-weight:800"
+                    onclick="continueScoringResume()">↩️ Continue scoring</button>
             </div>
         </div>
     </div>
@@ -1718,6 +1736,10 @@
 
             <button class="btn btn-green btn-full" onclick="printScorecard()" style="margin-bottom:10px">📄 Get Summary
                 PDF</button>
+
+            <button class="btn btn-amber btn-full" id="result-continue-scoring-btn"
+                style="margin-bottom:12px;font-weight:800;background:linear-gradient(135deg,#ffc107,#ff9800);color:#1a237e;border:none"
+                onclick="continueScoringResume()">↩️ Continue scoring (same match)</button>
 
             <div class="modal-actions" style="justify-content:center">
                 <button class="btn btn-ghost" onclick="closeModal('modal-result');showScreen('setup')">Back to
@@ -1945,8 +1967,10 @@
     <div class="toast" id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="../vendor/pdf/html2canvas.min.js"></script>
+    <script src="../vendor/pdf/html2pdf.bundle.min.js"></script>
     <script src="../js/match-report.js"></script>
+    <script src="../js/desktop-pdf.js"></script>
     <script src="../js/tournament-standings.js"></script>
     <script src="../js/broadcast.js"></script>
     <script src="../js/obs-setup.js"></script>

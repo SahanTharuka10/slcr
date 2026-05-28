@@ -251,27 +251,125 @@ function renderTournamentsAdmin() {
     }
 
     container.innerHTML = tourns
-        .map(
-            (t) => `
-        <div class="admin-card" style="margin-bottom:12px">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap">
+        .map((t) => {
+            const rows = getTournamentMatchRows(t.id);
+            const rowsHtml = rows.length
+                ? rows
+                      .map((m, i) => renderAdminTournamentMatchRow(t, m, i))
+                      .join('')
+                : `<tr><td colspan="6" style="padding:16px;opacity:0.65">No scheduled matches yet</td></tr>`;
+            const totals = rows.length;
+            const completed = rows.filter((m) => m.status === 'completed').length;
+            return `
+        <div class="admin-card" style="margin-bottom:16px;padding:16px">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:12px">
                 <div>
-                    <strong>${escapeHTML(t.name)}</strong>
-                    <div style="font-size:12px; opacity:0.65; margin-top:4px">${t.matches?.length || 0} matches · ${t.status || 'active'}</div>
+                    <strong style="font-size:16px">${escapeHTML(t.name)}</strong>
+                    <div style="font-size:12px; opacity:0.7; margin-top:4px">${totals} matches · ${completed} completed · ${escapeHTML(t.status || 'active')}</div>
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap">
-                    <input type="file" id="stat-upload-${t.id}" accept=".json,.slcrick-stat.json,application/json" style="display:none" onchange="handleTournamentStatUpload(event, '${t.id}')">
-                    <button class="btn btn-green btn-sm" type="button" onclick="document.getElementById('stat-upload-${t.id}').click()">📤 Upload stat report</button>
-                    <button class="btn btn-red btn-sm" type="button" onclick="deleteAdminTournament('${t.id}')">Delete</button>
+                    <input type="file" id="stat-upload-extra-${t.id}" accept=".json,.slcrick-stat.json,application/json" style="display:none" onchange="handleTournamentStatUpload(event, '${t.id}', '')">
+                    <button class="btn btn-amber btn-sm" type="button" onclick="document.getElementById('stat-upload-extra-${t.id}').click()">➕ Add Extra Stat Report</button>
+                    <button class="btn btn-red btn-sm" type="button" onclick="deleteAdminTournament('${t.id}')">Delete Tournament</button>
                 </div>
             </div>
-            <p style="font-size:11px; opacity:0.55; margin:10px 0 0">Desktop: completed match → 📥 SITE. Upload the .slcrick-stat.json here to update standings on the website.</p>
-        </div>`
-        )
+            <div class="data-table-container" style="overflow:auto">
+                <table class="data-table" style="min-width:880px">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Match</th>
+                            <th>Status</th>
+                            <th>Result</th>
+                            <th>Stat Upload</th>
+                            <th>Delete</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+            <p style="font-size:11px; opacity:0.55; margin:10px 0 0">Desktop completed match → 📥 SITE export, then upload here. Match-row upload updates the same match. Extra upload can add missing/unscheduled matches to this tournament.</p>
+        </div>`;
+        })
         .join('');
 }
 
-async function handleTournamentStatUpload(event, tournamentId) {
+function getTournamentMatchRows(tournamentId) {
+    const t = DB.getTournament(tournamentId);
+    if (!t) return [];
+    const map = new Map();
+    (t.matches || []).forEach((id) => {
+        const m = DB.getMatch(id);
+        if (m) map.set(m.id, m);
+    });
+    DB.getMatches()
+        .filter((m) => m && m.tournamentId === tournamentId)
+        .forEach((m) => map.set(m.id, m));
+    return [...map.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
+
+function getAdminStatUploadMap() {
+    try {
+        return JSON.parse(localStorage.getItem('cricpro_admin_stat_upload_map') || '{}');
+    } catch (_) {
+        return {};
+    }
+}
+
+function markAdminStatUpload(tournamentId, matchId, mode) {
+    if (!tournamentId || !matchId) return;
+    const map = getAdminStatUploadMap();
+    map[`${tournamentId}:${matchId}`] = {
+        mode: mode || 'updated',
+        at: Date.now(),
+    };
+    localStorage.setItem('cricpro_admin_stat_upload_map', JSON.stringify(map));
+}
+
+function renderAdminTournamentMatchRow(t, m, index) {
+    const uploadMap = getAdminStatUploadMap();
+    const tag = uploadMap[`${t.id}:${m.id}`];
+    const label =
+        m.status === 'completed'
+            ? 'Completed'
+            : m.status === 'live'
+              ? 'Live'
+              : m.status === 'paused'
+                ? 'Paused'
+                : 'Scheduled';
+    const tone =
+        m.status === 'completed'
+            ? 'color:#2e7d32'
+            : m.status === 'live'
+              ? 'color:#c62828'
+              : 'color:var(--c-muted)';
+    const result = m.result || '—';
+    const uploadBadge = tag
+        ? `<span style="display:inline-block;padding:3px 8px;border-radius:99px;font-size:11px;background:${tag.mode === 'extra' ? 'rgba(255,193,7,0.2)' : 'rgba(46,125,50,0.2)'};${tag.mode === 'extra' ? 'color:#ffb300' : 'color:#2e7d32'};font-weight:700">${tag.mode === 'extra' ? 'EXTRA ADDED' : 'UPDATED'}</span>`
+        : `<span style="opacity:0.55;font-size:11px">not uploaded</span>`;
+    return `
+        <tr>
+            <td>${index + 1}</td>
+            <td>
+                <div style="font-weight:700">${escapeHTML(m.team1 || 'T1')} vs ${escapeHTML(m.team2 || 'T2')}</div>
+                <div style="font-size:11px;opacity:0.6">${escapeHTML(m.id)}</div>
+            </td>
+            <td><span style="${tone};font-weight:700">${label}</span></td>
+            <td>${escapeHTML(result)}</td>
+            <td>
+                <input type="file" id="stat-upload-${t.id}-${m.id}" accept=".json,.slcrick-stat.json,application/json" style="display:none" onchange="handleTournamentStatUpload(event, '${t.id}', '${m.id}')">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <button class="btn btn-green btn-sm" type="button" onclick="document.getElementById('stat-upload-${t.id}-${m.id}').click()">📤 Upload / Update</button>
+                    ${uploadBadge}
+                </div>
+            </td>
+            <td>
+                <button class="btn btn-red btn-sm" type="button" onclick="deleteTournamentMatchAdmin('${t.id}','${m.id}')">Delete Match</button>
+            </td>
+        </tr>`;
+}
+
+async function handleTournamentStatUpload(event, tournamentId, expectedMatchId) {
     const input = event?.target;
     const file = input?.files?.[0];
     if (!file) return;
@@ -280,24 +378,42 @@ async function handleTournamentStatUpload(event, tournamentId) {
         return;
     }
 
-    const btn = input.closest('.admin-card')?.querySelector('.btn-green');
+    const btn = input.parentElement?.querySelector('.btn-green') || input.closest('.admin-card')?.querySelector('.btn-green');
     if (btn) {
         btn.disabled = true;
         btn.textContent = 'Uploading…';
     }
 
     try {
+        const text = await file.text();
+        let parsed = null;
+        try {
+            parsed = JSON.parse(text);
+        } catch (_) {}
+        const bundleMatchId = parsed?.match?.id || '';
+        if (expectedMatchId && bundleMatchId && bundleMatchId !== expectedMatchId) {
+            throw new Error('This file is for a different match. Use "Add Extra Stat Report" for new matches.');
+        }
+        // Rebuild file object text since we consumed it above
+        const replayFile = new File([text], file.name, { type: file.type || 'application/json' });
         const pushToCloud = typeof syncToDB === 'function' && !window.SLCRICK_DESKTOP;
-        const result = await MatchStatBundle.importFromFile(file, {
+        const existedBefore = !!(bundleMatchId && DB.getMatch(bundleMatchId));
+        const result = await MatchStatBundle.importFromFile(replayFile, {
             expectedTournamentId: tournamentId,
             pushToCloud,
         });
         const m = result.match;
-        if (pushToCloud && global.SLCRICK_SYNC?.syncCloudData) {
-            await global.SLCRICK_SYNC.syncCloudData({ silent: true, forceRefresh: true });
+        const mode = existedBefore ? 'updated' : 'extra';
+        markAdminStatUpload(tournamentId, m.id, mode);
+        if (pushToCloud && window.SLCRICK_SYNC?.syncCloudData) {
+            await window.SLCRICK_SYNC.syncCloudData({ silent: true, forceRefresh: true });
+        }
+        const t = DB.getTournament(tournamentId);
+        if (t && typeof computeTournamentStandings === 'function') {
+            computeTournamentStandings(t);
         }
         showToast(
-            `✅ ${m.team1} vs ${m.team2} — standings & stats updated${pushToCloud ? ' on site' : ''}`,
+            `✅ ${m.team1} vs ${m.team2} — ${mode === 'extra' ? 'extra match added' : 'updated'}${pushToCloud ? ' on site' : ''}`,
             'success'
         );
         renderTournamentsAdmin();
@@ -310,6 +426,55 @@ async function handleTournamentStatUpload(event, tournamentId) {
             btn.textContent = '📤 Upload stat report';
         }
     }
+}
+
+async function deleteTournamentMatchAdmin(tournamentId, matchId) {
+    const t = DB.getTournament(tournamentId);
+    const m = DB.getMatch(matchId);
+    if (!t || !m) return;
+    const ok = confirm(
+        `Delete match permanently?\n\n${m.team1} vs ${m.team2}\n\nThis removes the match from schedule, standings, NRR, batting/bowling stats and site sync.`
+    );
+    if (!ok) return;
+    if (!confirm('Final confirm: permanent delete this match?')) return;
+
+    // Remove match row and references
+    const leftMatches = DB.getMatches().filter((x) => x.id !== matchId);
+    DB.saveMatches(leftMatches);
+    t.matches = (t.matches || []).filter((id) => id !== matchId);
+    if (typeof computeTournamentStandings === 'function') computeTournamentStandings(t);
+    DB.saveTournament(t, true);
+
+    // Remove report snapshots related to this match
+    try {
+        const reports = DB._secureGet('cricpro_reports', []).filter((r) => r.matchId !== matchId);
+        DB._secureSet('cricpro_reports', reports);
+    } catch (_) {}
+
+    // Remove upload status marker
+    try {
+        const map = getAdminStatUploadMap();
+        delete map[`${tournamentId}:${matchId}`];
+        localStorage.setItem('cricpro_admin_stat_upload_map', JSON.stringify(map));
+    } catch (_) {}
+
+    // Delete cloud copy (best effort)
+    try {
+        const backend = window.SLCRICK_SYNC?.getBackendUrl?.();
+        if (backend) {
+            await fetch(`${backend}/sync/matches/${encodeURIComponent(matchId)}`, {
+                method: 'DELETE',
+                headers: {
+                    'x-api-key': 'slcrickpro-v1',
+                },
+            });
+        }
+    } catch (_) {}
+
+    localStorage.setItem('cricpro_force_update', String(Date.now()));
+    renderTournamentsAdmin();
+    if (typeof renderOngoing === 'function') renderOngoing();
+    showToast('🗑 Match deleted permanently', 'success');
 }
 
 function deleteAdminTournament(id) {

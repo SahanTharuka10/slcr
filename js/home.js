@@ -13,15 +13,11 @@ function runHomeAutoSync() {
     }
 }
 
-function isHomeLiveMatch(m) {
-    if (DB.isSiteLiveDisplayMatch) return DB.isSiteLiveDisplayMatch(m);
-    if (DB.isActivelyScoredMatch) return DB.isActivelyScoredMatch(m);
-    return m.status === 'live' || m.status === 'paused';
-}
-
 function hasActiveLiveOnSite() {
     if (typeof DB === 'undefined' || !DB?.getMatches) return false;
-    return DB.getMatches().some(isHomeLiveMatch);
+    return DB.getMatches().some((m) =>
+        DB.isActivelyScoredMatch ? DB.isActivelyScoredMatch(m) : m.status === 'live' || m.status === 'paused'
+    );
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -94,7 +90,7 @@ function updateTicker() {
     if (typeof DB === 'undefined' || !DB?.getMatches) return;
 
     const matches = DB.getMatches()
-        .filter(isHomeLiveMatch)
+        .filter((m) => (DB.isActivelyScoredMatch ? DB.isActivelyScoredMatch(m) : false))
         .sort(
             (a, b) =>
                 (b.lastUpdated || b.scoringStartedAt || 0) - (a.lastUpdated || a.scoringStartedAt || 0)

@@ -42,6 +42,7 @@ const DB_KEYS = {
 };
 
 const LOCAL_MATCH_STORE_MAX = () => (window.SLCRICK_DESKTOP ? 100 : 32);
+const LOCAL_REPORT_STORE_MAX = () => (window.SLCRICK_DESKTOP ? 36 : 12);
 
 /** Site-root asset URL — works from /pages/* and index (avoids /pages/assets/ 404). */
 function resolveAssetUrl(url) {
@@ -153,6 +154,35 @@ function shouldStoreRemoteMatchLocally(m) {
     const ts = m.lastUpdated || m.scoringStartedAt || 0;
     if (Date.now() - ts < 21 * 86400000) return true;
     return false;
+}
+
+/** Keep report snapshots lightweight so they do not exhaust localStorage. */
+function slimReportForStorage(report) {
+    if (!report || typeof report !== 'object') return report;
+    let copy;
+    try {
+        copy = JSON.parse(JSON.stringify(report));
+    } catch (_) {
+        return report;
+    }
+    if (copy.matchData && typeof copy.matchData === 'object') {
+        copy.matchData = slimMatchForLocalStorage(copy.matchData);
+    }
+    // Some historic reports may include rendered HTML/blobs; drop them.
+    delete copy.html;
+    delete copy.htmlString;
+    delete copy.pdfBase64;
+    delete copy.previewImage;
+    return copy;
+}
+
+function pruneReportsForStorage(arr) {
+    const MAX = LOCAL_REPORT_STORE_MAX();
+    const list = (arr || [])
+        .filter((r) => r && (r.id || r.matchId))
+        .map(slimReportForStorage)
+        .sort((a, b) => (b.generatedAt || 0) - (a.generatedAt || 0));
+    return list.slice(0, MAX);
 }
 
 // SLCRICKPRO – Theme Logic is now handled via inline scripts in HTML files to prevent FOUC
@@ -365,6 +395,16 @@ const DB = {
                 recovered = true;
             } catch (_) {}
         }
+        if (!recovered && key === DB_KEYS.REPORTS) {
+            try {
+                const trimmed = pruneReportsForStorage(
+                    (Array.isArray(val) ? val : this._secureGet(DB_KEYS.REPORTS, []))
+                );
+                const str = JSON.stringify(trimmed);
+                localStorage.setItem(key, 'SECURE_' + btoa(encodeURIComponent(str)));
+                recovered = true;
+            } catch (_) {}
+        }
         return recovered;
     },
     _secureSet(key, val) {
@@ -377,6 +417,8 @@ const DB = {
             let payload = val;
             if (key === DB_KEYS.MATCHES && Array.isArray(val)) {
                 payload = pruneMatchesForStorage(val.map(slimMatchForLocalStorage));
+            } else if (key === DB_KEYS.REPORTS && Array.isArray(val)) {
+                payload = pruneReportsForStorage(val);
             }
             write(payload);
             if (window.SLCRICK_DESKTOP && window.desktopAPI) {
@@ -391,7 +433,11 @@ const DB = {
                     /quota/i.test(String(e.message || e)));
             if (isQuota && this._recoverStorageQuota(key, val)) {
                 if (typeof showToast === 'function') {
-                    showToast('Storage was full — old match data trimmed. Live scores kept.', 'default');
+                    const msg =
+                        key === DB_KEYS.REPORTS
+                            ? 'Storage was full — old reports were trimmed.'
+                            : 'Storage was full — old match data trimmed. Live scores kept.';
+                    showToast(msg, 'default');
                 }
                 if (window.SLCRICK_DESKTOP && window.desktopAPI) {
                     window.desktopAPI.requestPersist();
@@ -802,8 +848,8 @@ const DB = {
 
     saveMatchReport(report) {
         const all = this._secureGet(DB_KEYS.REPORTS, []);
-        all.push(report);
-        this._secureSet(DB_KEYS.REPORTS, all);
+        all.push(slimReportForStorage(report));
+        this._secureSet(DB_KEYS.REPORTS, pruneReportsForStorage(all));
     },
 
     createInnings(battingTeam, bowlingTeam) {
