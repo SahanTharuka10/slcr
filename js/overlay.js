@@ -87,6 +87,7 @@ let _cloudMatchMissUntil = 0;
 let _lastRenderedScoreKey = '';
 let _lastOverlayFingerprint = '';
 let _lastCloudMatchUpdated = 0;
+let _lastOverlayPollOkAt = Date.now();
 /** Match draw full-screen — cleared by STOP ALL / STOP_MATCH_DRAW / other hotkeys */
 let _matchDrawOnAir = false;
 let _obsOverlaySettings = {
@@ -448,7 +449,7 @@ async function pollMatchApi() {
             } else return;
         } else {
             url = base + '/api/live-match';
-            if (tournId && (isMasterOverlay || !matchId)) {
+            if (tournId) {
                 qs.push('tournament=' + encodeURIComponent(tournId));
             } else if (matchId && !isMasterOverlay) {
                 url = base + '/api/match/' + encodeURIComponent(matchId);
@@ -465,6 +466,7 @@ async function pollMatchApi() {
         }
         _cloudMatchMissUntil = 0;
         const data = await res.json();
+        _lastOverlayPollOkAt = Date.now();
         if (useCloud) {
             if (data?.error) return;
             applyCloudScorePayload(data);
@@ -483,13 +485,10 @@ async function pollMatchApi() {
             DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
             window._desktopApplyingRemoteMatch = false;
         }
-        const scoreKey = overlayScoreKey(m);
-        if (scoreKey !== _lastRenderedScoreKey) {
-            applyCloudScorePayload({
-                fullMatch: m,
-                score: m.innings?.[m.currentInnings || 0],
-            });
-        }
+        applyCloudScorePayload({
+            fullMatch: m,
+            score: m.innings?.[m.currentInnings || 0],
+        });
     } catch (_) {
     } finally {
         _pollMatchInFlight = false;
@@ -514,6 +513,7 @@ function pollServerScore() {
     }
     const localMatch = matchId ? DB.getMatch(matchId) : null;
     if (localMatch) {
+        _lastOverlayPollOkAt = Date.now();
         applyCloudScorePayload({
             fullMatch: localMatch,
             score: localMatch.innings?.[localMatch.currentInnings],
@@ -988,6 +988,15 @@ document.addEventListener('DOMContentLoaded', () => {
         pollTick();
         const pollMs = onDesktop ? 5000 : shouldUseCloudLive() ? (isObsMode ? 200 : 400) : isObsMode ? 600 : 400;
         setInterval(pollTick, pollMs);
+        setInterval(() => {
+            if (onDesktop || inPreviewIframe || currentPopupView) return;
+            if (document.hidden) return;
+            const staleFor = Date.now() - (_lastOverlayPollOkAt || 0);
+            if (staleFor < 15000) return;
+            _cloudMatchMissUntil = 0;
+            _pollMatchInFlight = false;
+            pollMatchApi();
+        }, 5000);
     }
 
     let _storagePollTimer = null;
