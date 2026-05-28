@@ -485,6 +485,9 @@ async function pollMatchApi() {
             DB.saveMatch(m, true, { skipPublish: true, skipForceUpdate: true });
             window._desktopApplyingRemoteMatch = false;
         }
+        // Force repaint on fresh local API snapshot so scorebar/photos never stall.
+        _lastOverlayFingerprint = '';
+        _lastRenderedScoreKey = '';
         applyCloudScorePayload({
             fullMatch: m,
             score: m.innings?.[m.currentInnings || 0],
@@ -514,6 +517,8 @@ function pollServerScore() {
     const localMatch = matchId ? DB.getMatch(matchId) : null;
     if (localMatch) {
         _lastOverlayPollOkAt = Date.now();
+        _lastOverlayFingerprint = '';
+        _lastRenderedScoreKey = '';
         applyCloudScorePayload({
             fullMatch: localMatch,
             score: localMatch.innings?.[localMatch.currentInnings],
@@ -986,7 +991,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     if (!inPreviewIframe) {
         pollTick();
-        const pollMs = onDesktop ? 5000 : shouldUseCloudLive() ? (isObsMode ? 200 : 400) : isObsMode ? 600 : 400;
+        const pollMs = onDesktop ? 5000 : shouldUseCloudLive() ? (isObsMode ? 200 : 400) : isObsMode ? 180 : 280;
         setInterval(pollTick, pollMs);
         setInterval(() => {
             if (onDesktop || inPreviewIframe || currentPopupView) return;
@@ -2003,19 +2008,24 @@ function toggleBroadcastSummary(tId) {
 
 function showRunsBallsGraphic(data) {
     const el = document.createElement('div');
-    el.className = 'broadcast-overlay overlay-visible';
+    el.className = 'broadcast-overlay overlay-visible runs-balls-overlay';
     el.style.display = 'flex';
     el.style.alignItems = 'center';
     el.style.justifyContent = 'center';
-    el.style.inset = '0';
-    el.innerHTML = `<div style="background:linear-gradient(135deg, #2a1458, #110524); border:2px solid #00e676; padding:40px; border-radius:30px; color:white; text-align:center; min-width:400px; box-shadow:0 20px 50px rgba(0,0,0,0.5);">
-        <div style="font-size:14px; color:#00e676; letter-spacing:4px; margin-bottom:10px; font-weight:900;">RUNS NEEDED</div>
-        <div style="font-size:72px; font-weight:950;">${data.runs}</div>
-        <div style="font-size:24px; opacity:0.7; font-weight:700;">FROM ${data.balls} BALLS</div>
+    el.style.left = '50%';
+    el.style.bottom = '88px';
+    el.style.top = 'auto';
+    el.style.right = 'auto';
+    el.style.transform = 'translateX(-50%)';
+    el.style.inset = 'auto';
+    el.innerHTML = `<div style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#2a1458,#110524); border:2px solid #00e676; padding:14px 26px 12px; border-radius:18px; color:white; text-align:center; min-width:260px; max-width:86vw; box-shadow:0 12px 30px rgba(0,0,0,0.45);">
+        <div style="font-size:11px; color:#00e676; letter-spacing:3px; margin-bottom:4px; font-weight:900;">RUNS NEEDED</div>
+        <div style="font-size:46px; line-height:1; font-weight:950; margin-bottom:4px;">${data.runs}</div>
+        <div style="font-size:15px; opacity:0.9; font-weight:800; letter-spacing:0.12em;">FROM ${data.balls} BALLS</div>
     </div>`;
     document.body.appendChild(stampBroadcastOverlay(el));
-    gsap.fromTo(el, { y: 100, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, ease: 'back.out' });
-    setTimeout(() => gsap.to(el, { y: 100, opacity: 0, duration: 0.6, onComplete: () => el.remove() }), 8000);
+    gsap.fromTo(el, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'power2.out' });
+    setTimeout(() => gsap.to(el, { y: 30, opacity: 0, duration: 0.4, onComplete: () => el.remove() }), 8000);
 }
 
 function normalizeLastWicketPayload(data) {
