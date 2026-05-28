@@ -81,9 +81,8 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.text({ type: 'text/plain', limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(express.static(path.join(__dirname, '..')));
 
-// Health & ping — AFTER cors middleware so headers are set properly
+// Health & ping — register BEFORE express.static so /api/version is not shadowed
 app.get('/api/ping', (req, res) =>
   res.json({ status: 'alive', build: '1.0.6', time: new Date().toISOString() })
 );
@@ -107,6 +106,8 @@ app.get('/api/status', (req, res) => {
 app.get('/health', async (req, res) => {
   try { await ensureDB(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: e.message }); }
 });
+
+app.use(express.static(path.join(__dirname, '..')));
 
 app.get('/', (req,res) => res.sendFile(path.join(__dirname,'..','index.html')));
 app.get('/admin', (req,res) => res.sendFile(path.join(__dirname,'..','pages','admin.html')));
