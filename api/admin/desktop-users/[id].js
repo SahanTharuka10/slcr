@@ -1,6 +1,6 @@
-const bcrypt = require('bcrypt');
 const { applyCors, parseBody, requireAdmin } = require('../../lib/http');
-const { getDb } = require('../../lib/db');
+const { withDb } = require('../../lib/db');
+const store = require('../../lib/desktop-users-store');
 
 module.exports = async (req, res) => {
   applyCors(req, res);
@@ -10,42 +10,23 @@ module.exports = async (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'User id required' });
 
-  let db;
-  try {
-    db = await getDb();
-  } catch (e) {
-    const code = e.code === 'NO_DATABASE_URL' ? 503 : 500;
-    return res.status(code).json({ error: e.message || 'Database unavailable' });
-  }
-
   if (req.method === 'PATCH') {
     const body = parseBody(req);
     try {
-      const found = await db.query('SELECT id FROM desktop_users WHERE id = $1', [id]);
-      if (!found.rows.length) return res.status(404).json({ error: 'User not found' });
+      const user = await withDb((db) => store.findUserById(db, id));
+      if (!user) return res.status(404).json({ error: 'User not found' });
 
-      const sets = [];
-      const vals = [];
-      let i = 1;
-
-      if (typeof body.active === 'boolean') {
-        sets.push(`active = $${i++}`);
-        vals.push(body.active);
-      }
-      if (body.displayName != null) {
-        sets.push(`"displayName" = $${i++}`);
-        vals.push(String(body.displayName).trim());
-      }
+      const updates = {};
+      if (typeof body.active === 'boolean') updates.active = body.active;
+      if (body.displayName != null) updates.displayName = String(body.displayName).trim();
       if (body.password) {
         const pw = String(body.password).trim();
         if (pw.length < 4) return res.status(400).json({ error: 'Password min 4 characters' });
-        sets.push(`"passwordHash" = $${i++}`);
-        vals.push(await bcrypt.hash(pw, 10));
+        updates.passwordHash = await store.bcrypt.hash(pw, 10);
       }
+      if (!Object.keys(updates).length) return res.status(200).json({ ok: true });
 
-      if (!sets.length) return res.status(200).json({ ok: true });
-      vals.push(id);
-      await db.query(`UPDATE desktop_users SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+      await withDb((db) => store.updateUser(db, id, updates));
       return res.status(200).json({ ok: true });
     } catch (e) {
       console.error('desktop-users PATCH', e);
@@ -55,10 +36,9 @@ module.exports = async (req, res) => {
 
   if (req.method === 'DELETE') {
     try {
-      const found = await db.query('SELECT id FROM desktop_users WHERE id = $1', [id]);
-      if (!found.rows.length) return res.status(404).json({ error: 'User not found' });
-      await db.query('DELETE FROM desktop_user_activity WHERE "userId" = $1', [id]);
-      await db.query('DELETE FROM desktop_users WHERE id = $1', [id]);
+      const user = await withDb((db) => store.findUserById(db, id));
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      await withDb((db) => store.deleteUser(db, id));
       return res.status(200).json({ ok: true });
     } catch (e) {
       console.error('desktop-users DELETE', e);

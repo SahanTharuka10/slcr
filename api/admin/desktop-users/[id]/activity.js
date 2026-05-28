@@ -1,6 +1,20 @@
 const { applyCors, requireAdmin } = require('../../../lib/http');
-const { getDb } = require('../../../lib/db');
-const { mapUserRow } = require('../../../lib/schema');
+const { withDb } = require('../../../lib/db');
+const store = require('../../../lib/desktop-users-store');
+
+function mapActivity(a) {
+  return {
+    id: a.id,
+    tournamentId: a.tournamentId || a.tournament_id,
+    name: a.name,
+    venue: a.venue,
+    playedAt: a.playedAt || a.played_at,
+    format: a.format,
+    matchCount: a.matchCount ?? a.match_count,
+    status: a.status,
+    createdAt: a.createdAt || a.created_at,
+  };
+}
 
 module.exports = async (req, res) => {
   applyCors(req, res);
@@ -11,41 +25,17 @@ module.exports = async (req, res) => {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'User id required' });
 
-  let db;
   try {
-    db = await getDb();
-  } catch (e) {
-    const code = e.code === 'NO_DATABASE_URL' ? 503 : 500;
-    return res.status(code).json({ error: e.message || 'Database unavailable' });
-  }
-
-  try {
-    const userRes = await db.query('SELECT * FROM desktop_users WHERE id = $1', [id]);
-    if (!userRes.rows.length) return res.status(404).json({ error: 'User not found' });
-
-    const u = mapUserRow(userRes.rows[0]);
-    const actRes = await db.query(
-      `SELECT id, "tournamentId", name, venue, "playedAt", format, "matchCount", status, "createdAt"
-       FROM desktop_user_activity WHERE "userId" = $1 ORDER BY "createdAt" DESC`,
-      [id]
-    );
-
+    const user = await withDb((db) => store.findUserById(db, id));
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const rows = await withDb((db) => store.listActivity(db, id));
     return res.status(200).json({
-      user: u,
-      activity: actRes.rows.map((a) => ({
-        id: a.id,
-        tournamentId: a.tournamentId,
-        name: a.name,
-        venue: a.venue,
-        playedAt: a.playedAt,
-        format: a.format,
-        matchCount: a.matchCount,
-        status: a.status,
-        createdAt: a.createdAt,
-      })),
+      user,
+      activity: rows.map(mapActivity),
     });
   } catch (e) {
     console.error('desktop-users activity', e);
-    return res.status(500).json({ error: e.message || 'Failed to load activity' });
+    const code = e.code === 'NO_DATABASE' ? 503 : 500;
+    return res.status(code).json({ error: e.message || 'Failed to load activity' });
   }
 };

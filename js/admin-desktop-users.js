@@ -103,7 +103,8 @@
         '/api/version'
       );
     }
-    return data.error || data.message || context + ' failed (HTTP ' + res.status + ')';
+    const hint = data.hint ? ' ' + data.hint : '';
+    return (data.error || data.message || context + ' failed (HTTP ' + res.status + ')') + hint;
   }
 
   let _apiBase = '';
@@ -145,7 +146,13 @@
       ...options,
       headers: { ...adminHeaders(), ...(options.headers || {}) },
     });
-    const data = await res.json().catch(() => ({}));
+    let data = {};
+    const text = await res.text().catch(() => '');
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (_) {
+      data = { error: text || res.statusText };
+    }
     if (res.status === 401 && isLiveSite()) {
       clearStaleCloudSession();
     }

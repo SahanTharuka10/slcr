@@ -1,35 +1,93 @@
-const { Pool } = require('pg');
+const { Client } = require('pg');
 const { ensureDesktopSchema } = require('./schema');
 
-let pool;
-let schemaReady;
+function getDatabaseUrl() {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.SUPABASE_DB_URL ||
+    ''
+  ).trim();
+}
 
-function getPool() {
-  if (!process.env.DATABASE_URL) {
-    const err = new Error(
-      'DATABASE_URL is not set on Vercel. Add your Supabase Postgres URL in Project → Settings → Environment Variables, then redeploy.'
-    );
-    err.code = 'NO_DATABASE_URL';
-    throw err;
+function getSupabaseConfig() {
+  const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+  const key = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    ''
+  ).trim();
+  if (!url || !key) return null;
+  return { url, key };
+}
+
+function missingDbError() {
+  const err = new Error(
+    'Database not configured on Vercel. Add DATABASE_URL (Supabase postgres://… from Render) ' +
+      'or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, then redeploy.'
+  );
+  err.code = 'NO_DATABASE';
+  return err;
+}
+
+async function withPgClient(fn) {
+  const connectionString = getDatabaseUrl();
+  if (!connectionString) return null;
+
+  const client = new Client({
+    connectionString,
+    ssl: connectionString.includes('localhost')
+      ? false
+      : { rejectUnauthorized: false },
+  });
+
+  await client.connect();
+  try {
+    await ensureDesktopSchema(client);
+    return await fn(client);
+  } finally {
+    await client.end();
   }
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes('localhost')
-        ? false
-        : { rejectUnauthorized: false },
+}
+
+let supabaseClient;
+
+function getSupabase() {
+  const cfg = getSupabaseConfig();
+  if (!cfg) return null;
+  if (!supabaseClient) {
+    const { createClient } = require('@supabase/supabase-js');
+    supabaseClient = createClient(cfg.url, cfg.key, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
   }
-  return pool;
+  return supabaseClient;
 }
 
-async function getDb() {
-  const db = getPool();
-  if (!schemaReady) {
-    await ensureDesktopSchema(db);
-    schemaReady = true;
-  }
-  return db;
+async function withSupabase(fn) {
+  const sb = getSupabase();
+  if (!sb) return null;
+  return fn(sb);
 }
 
-module.exports = { getPool, getDb };
+/**
+ * Run DB work using Postgres (preferred) or Supabase JS fallback.
+ */
+async function withDb(fn) {
+  const pgResult = await withPgClient(fn);
+  if (pgResult !== null) return pgResult;
+
+  const sbResult = await withSupabase(fn);
+  if (sbResult !== null) return sbResult;
+
+  throw missingDbError();
+}
+
+module.exports = {
+  withDb,
+  withPgClient,
+  withSupabase,
+  getDatabaseUrl,
+  getSupabaseConfig,
+};

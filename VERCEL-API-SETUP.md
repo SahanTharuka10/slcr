@@ -1,22 +1,33 @@
-# Vercel — Desktop Users API (live admin)
+# Vercel — Desktop Users API
 
-The **slcrickpro.live** admin panel uses **Vercel serverless** (`/api/*`) for desktop users when Render is on an old build.
+Admin panel on **slcrickpro.live** uses `/api/*` on Vercel. You need **one** of these:
 
-## Required (one time)
+## Option A (recommended): DATABASE_URL
 
-Vercel project → **Settings → Environment Variables**:
+Vercel → Project → **Settings → Environment Variables**
 
 | Name | Value |
 |------|--------|
-| `DATABASE_URL` | Same Supabase Postgres URL as Render (postgresql://...) |
+| `DATABASE_URL` | Copy from **Render** → Environment → `DATABASE_URL` (starts with `postgresql://`) |
 
-Apply to **Production** (and Preview if you test there).
+Same Supabase database as Render.
 
-Redeploy after saving.
+## Option B: Supabase keys
 
-## Verify
+| Name | Value |
+|------|--------|
+| `SUPABASE_URL` | `https://xxxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role key (Secret, not anon) |
 
-- https://slcrickpro.live/api/version → `"desktopUsers":true`
-- Admin → Desktop Users → login with `slcrickpro@2026`
+## After saving
 
-Desktop **PC app** still uses `https://slcrickpro.onrender.com` until Render deploys the new server (see `RENDER-FIX-SI.md`).
+1. **Redeploy** Production
+2. Admin → **Logout** → login `slcrickpro@2026`
+3. Desktop Users tab → Ctrl+F5
+
+## Test
+
+- https://www.slcrickpro.live/api/version → `desktopUsers: true`
+- Login → load users (empty list is OK)
+
+If you see “Database not configured”, Option A or B is missing on Vercel.

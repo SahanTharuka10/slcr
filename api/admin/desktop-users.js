@@ -1,30 +1,30 @@
-const bcrypt = require('bcrypt');
 const { applyCors, parseBody, requireAdmin, newEntityId } = require('../lib/http');
-const { getDb } = require('../lib/db');
-const { mapUserRow } = require('../lib/schema');
+const { withDb } = require('../lib/db');
+const store = require('../lib/desktop-users-store');
+
+function dbErrorResponse(res, e) {
+  console.error('desktop-users API', e);
+  const code = e.code === 'NO_DATABASE' ? 503 : 500;
+  return res.status(code).json({
+    error: e.message || 'Database error',
+    hint:
+      code === 503
+        ? 'Vercel → Settings → Environment Variables → add DATABASE_URL (copy from Render)'
+        : undefined,
+  });
+}
 
 module.exports = async (req, res) => {
   applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (!requireAdmin(req, res)) return;
 
-  let db;
-  try {
-    db = await getDb();
-  } catch (e) {
-    const code = e.code === 'NO_DATABASE_URL' ? 503 : 500;
-    return res.status(code).json({ error: e.message || 'Database unavailable' });
-  }
-
   if (req.method === 'GET') {
     try {
-      const { rows } = await db.query('SELECT * FROM desktop_users');
-      const users = rows.map(mapUserRow).filter(Boolean);
-      users.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      const users = await withDb((db) => store.listUsers(db));
       return res.status(200).json({ users });
     } catch (e) {
-      console.error('desktop-users GET', e);
-      return res.status(500).json({ error: e.message || 'Failed to list users' });
+      return dbErrorResponse(res, e);
     }
   }
 
@@ -44,27 +44,19 @@ module.exports = async (req, res) => {
     }
 
     try {
-      const existing = await db.query('SELECT id FROM desktop_users WHERE username = $1', [username]);
-      if (existing.rows.length) {
+      const users = await withDb((db) => store.listUsers(db));
+      if (users.some((u) => u.username === username)) {
         return res.status(409).json({ error: 'Username already exists' });
       }
-
-      const passwordHash = await bcrypt.hash(password, 10);
-      const now = Date.now();
-      const id = newEntityId('DU');
-      await db.query(
-        `INSERT INTO desktop_users (id, username, "passwordHash", "displayName", active, "createdAt", "lastLoginAt")
-         VALUES ($1, $2, $3, $4, true, $5, NULL)`,
-        [id, username, passwordHash, displayName || username, now]
+      const user = await withDb((db) =>
+        store.createUser(db, { username, password, displayName, newEntityId })
       );
-
-      return res.status(200).json({
-        ok: true,
-        user: { id, username, displayName: displayName || username, active: true, createdAt: now },
-      });
+      return res.status(200).json({ ok: true, user });
     } catch (e) {
-      console.error('desktop-users POST', e);
-      return res.status(500).json({ error: e.message || 'Failed to create user' });
+      if (e.code === '23505') {
+        return res.status(409).json({ error: 'Username already exists' });
+      }
+      return dbErrorResponse(res, e);
     }
   }
 
