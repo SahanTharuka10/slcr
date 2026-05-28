@@ -7,8 +7,9 @@ let currentTab = 'requests';
 
 function getAdminBackendUrl() {
     const host = (location.hostname || '').toLowerCase();
+    // Live site: Vercel serverless API (same DB). Render may lag behind on deploy.
     if (host.includes('slcrickpro.live') || host.includes('www.slcrickpro')) {
-        return DEFAULT_BACKEND;
+        return location.origin.replace(/\/$/, '');
     }
     const fromSync =
         typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'

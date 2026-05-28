@@ -11,7 +11,8 @@
   }
 
   function getBackendUrl() {
-    if (isLiveSite() || window.SLCRICK_DESKTOP) return RENDER_API;
+    if (isLiveSite()) return location.origin.replace(/\/$/, '');
+    if (window.SLCRICK_DESKTOP) return RENDER_API;
     const fromSync =
       typeof window.SLCRICK_SYNC?.getBackendUrl === 'function'
         ? window.SLCRICK_SYNC.getBackendUrl()
@@ -77,10 +78,10 @@
     }
     if (res.status === 404) {
       return (
-        'Server API not deployed yet. Render → Manual Deploy (GitHub slcr main). ' +
-        'Then check ' +
+        'Desktop users API unavailable. On Vercel: set DATABASE_URL env var and redeploy. ' +
+        'On Render: Manual Deploy (slcr main) then check ' +
         base +
-        '/api/version shows desktopUsers:true'
+        '/api/version'
       );
     }
     return data.error || data.message || context + ' failed (HTTP ' + res.status + ')';

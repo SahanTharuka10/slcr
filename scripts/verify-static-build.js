@@ -10,6 +10,8 @@ const required = [
   'pages/admin.html',
   'js/admin-desktop-users.js',
   'js/cloud-config.js',
+  'api/version.js',
+  'api/admin/desktop-users.js',
 ];
 
 for (const rel of required) {
