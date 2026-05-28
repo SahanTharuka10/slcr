@@ -1,7 +1,7 @@
 /**
  * Guarantee desktop + version routes exist on the Express app (stale Render deploys).
  */
-const BUILD = '1.0.7';
+const BUILD = '1.0.8';
 
 function hasRoute(app, pathSuffix) {
   const stack = app._router?.stack || app.router?.stack || [];

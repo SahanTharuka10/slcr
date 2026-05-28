@@ -89,7 +89,7 @@ app.get('/api/ping', (req, res) =>
 app.get('/api/version', (req, res) => {
   res.json({
     app: 'SLCRICKPRO',
-    version: '1.0.7',
+    version: '1.0.8',
     features: { desktopUsers: true, desktopLogin: true },
     db: dbType || 'initializing',
   });
@@ -98,7 +98,7 @@ app.get('/api/status', (req, res) => {
   res.json({
     ok: true,
     service: 'SLCRICKPRO_SERVER_UP',
-    build: '1.0.7',
+    build: '1.0.8',
     features: { desktopUsers: true, desktopLogin: true },
     db: dbType || 'initializing',
   });
@@ -457,8 +457,8 @@ const LOCAL_SQLITE_PATH = process.env.LOCAL_DB_PATH || path.join(__dirname, '..'
 let DATABASE_URL = process.env.DATABASE_URL || '';
 const FORCE_SQLITE = process.env.FORCE_SQLITE === 'true';
 
-let dbType = 'sqlite';
-let sequelize = new Sequelize({ dialect: 'sqlite', storage: LOCAL_SQLITE_PATH, logging: false });
+let dbType = 'initializing';
+let sequelize = null;
 
 let Player, Team, Match, Tournament, Product, Order, Post, Feedback, MatchReport, DesktopUser, DesktopUserActivity;
 
@@ -621,23 +621,19 @@ async function initDatabase() {
 
   if (usePostgres) {
     console.log('ℹ️ Using PostgreSQL (Supabase) via DATABASE_URL');
-    const pgSeq = new Sequelize(DATABASE_URL, {
+    sequelize = new Sequelize(DATABASE_URL, {
       dialect: 'postgres',
       logging: false,
       dialectOptions: {
-        ssl: { require: true, rejectUnauthorized: false }
+        ssl: { require: true, rejectUnauthorized: false },
       },
-      pool: { max: 5, min: 0, acquire: 20000, idle: 10000 }
+      pool: { max: 5, min: 0, acquire: 20000, idle: 10000 },
     });
-    try {
-      await pgSeq.authenticate();
-      await sequelize.close().catch(() => {});
-      sequelize = pgSeq;
-      dbType = 'postgres';
-    } catch (pgErr) {
-      console.warn('⚠️ Postgres unavailable, falling back to SQLite:', pgErr.message);
-      dbType = 'sqlite';
-    }
+    dbType = 'postgres';
+  } else {
+    console.log('ℹ️ Using SQLite at', LOCAL_SQLITE_PATH);
+    sequelize = new Sequelize({ dialect: 'sqlite', storage: LOCAL_SQLITE_PATH, logging: false });
+    dbType = 'sqlite';
   }
 
   defineModels(sequelize);

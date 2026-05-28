@@ -15,7 +15,7 @@ if (!fs.existsSync(appPath)) {
   process.exit(1);
 }
 
-console.log('[SLCRICKPRO] Boot build 1.0.7 — entry server.js');
+console.log('[SLCRICKPRO] Boot build 1.0.8 — entry server.js');
 console.log('[SLCRICKPRO] DATABASE_URL:', process.env.DATABASE_URL ? 'set' : 'missing');
 
 const api = require(appPath);
