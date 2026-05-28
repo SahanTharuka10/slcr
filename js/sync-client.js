@@ -21,12 +21,24 @@
   const SYNC_FAIL_BACKOFF_MS = 12000;
   const _tokenPushFailUntil = new Map();
   const _tokenPushWarned = new Set();
+  const _pushWarnAt = new Map();
+  const _tokenReqInFlight = new Map();
+  const _tokenReqFailUntil = new Map();
+  let _cloudTimeoutBackoffUntil = 0;
+  let _cloudTimeoutBackoffWarnAt = 0;
+  let _pushPauseUntil = 0;
+  function isPrimaryRenderBackend(url) {
+    const s = String(url || '').toLowerCase();
+    return s.includes('slcrickpro.onrender.com') || s.includes('slcrickpro.live');
+  }
   function getDefaultHandshakePathHint() {
     try {
-      const backend = String(localStorage.getItem('cricpro_backend_url') || '').toLowerCase();
-      if (backend.includes('slcrickpro.onrender.com') || backend.includes('slcrickpro.live')) {
-        return '/sync/handshake';
-      }
+      const backend =
+        global.CRICPRO_CLOUD_CONFIG?.backendUrl ||
+        localStorage.getItem('cricpro_backend_url') ||
+        global.BACKEND_BASE_URL ||
+        DEFAULT_BACKEND;
+      if (isPrimaryRenderBackend(backend)) return '/api/handshake';
     } catch (_) {}
     return '/api/handshake';
   }
@@ -39,6 +51,55 @@
       return err.name + (err.message ? ': ' + err.message : '');
     }
     return err.message || String(err);
+  }
+
+  function isTimeoutLike(err) {
+    const msg = String(err?.message || err || '').toLowerCase();
+    return (
+      err?.name === 'AbortError' ||
+      msg.includes('timed out') ||
+      msg.includes('timeout') ||
+      msg.includes('signal timed out') ||
+      msg.includes('aborted')
+    );
+  }
+
+  function isTransientNetworkLike(err) {
+    const msg = String(err?.message || err || '').toLowerCase();
+    return (
+      msg.includes('err_connection_closed') ||
+      msg.includes('connection closed') ||
+      msg.includes('err_connection_reset') ||
+      msg.includes('networkerror') ||
+      msg.includes('failed to fetch') ||
+      msg.includes('fetch failed')
+    );
+  }
+
+  function warnPushThrottled(scope, err) {
+    const now = Date.now();
+    const last = _pushWarnAt.get(scope) || 0;
+    if (now - last < 30000) return;
+    _pushWarnAt.set(scope, now);
+    console.warn('[Sync] push failed', formatSyncError(err));
+  }
+
+  function shouldPausePushes() {
+    return _pushPauseUntil > Date.now();
+  }
+
+  function isCloudTimeoutBackoffActive() {
+    return _cloudTimeoutBackoffUntil > Date.now();
+  }
+
+  function markCloudTimeoutBackoff(err) {
+    if (!isTimeoutLike(err) && !isTransientNetworkLike(err)) return;
+    const now = Date.now();
+    _cloudTimeoutBackoffUntil = Math.max(_cloudTimeoutBackoffUntil, now + 2 * 60 * 1000);
+    if (now - _cloudTimeoutBackoffWarnAt > 120000) {
+      _cloudTimeoutBackoffWarnAt = now;
+      console.warn('[Sync] Cloud connection unstable — pausing sync retries briefly');
+    }
   }
 
   /** Safe timeout — AbortSignal.timeout is missing in some OBS/browser builds. */
@@ -74,6 +135,7 @@
         lastErr = e;
       }
     }
+    markCloudTimeoutBackoff(lastErr);
     _serverAwake = false;
     throw lastErr || new Error('fetch failed');
   }
@@ -1031,8 +1093,12 @@
       throw cooldownErr;
     }
 
-    const pathOrder =
-      _handshakePathHint === '/handshake'
+    const preferModernOnly = isPrimaryRenderBackend(baseUrl);
+    const pathOrder = preferModernOnly
+      ? _handshakePathHint === '/sync/handshake'
+        ? ['/sync/handshake', '/api/handshake']
+        : ['/api/handshake', '/sync/handshake']
+      : _handshakePathHint === '/handshake'
         ? ['/handshake', '/api/handshake', '/sync/handshake']
         : _handshakePathHint === '/sync/handshake'
           ? ['/sync/handshake', '/api/handshake', '/handshake']
