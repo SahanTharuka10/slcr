@@ -1,5 +1,5 @@
 /**
- * Admin — desktop app users (Render API → Supabase). Live site proxies /api via Vercel to Render.
+ * Admin — desktop app users (Vercel /api with DATABASE_URL, or Render API).
  */
 (function () {
   const ADMIN_TOKEN_KEY = 'slcrick_admin_token';
@@ -11,14 +11,13 @@
     return h.includes('slcrickpro.live') || h.includes('www.slcrickpro');
   }
 
-  /** Live site: same-origin /api proxies to Render on Vercel (no DATABASE_URL on Vercel needed). */
   function getBackendCandidates() {
-    if (!isLiveSite()) return [getBackendUrl()];
-    const origin = location.origin.replace(/\/$/, '');
     const saved = (sessionStorage.getItem(API_BASE_KEY) || '').trim();
+    const origin = isLiveSite() ? location.origin.replace(/\/$/, '') : '';
     const list = [];
     if (saved) list.push(saved);
-    list.push(origin, RENDER_API);
+    if (origin) list.push(origin);
+    list.push(RENDER_API);
     return [...new Set(list.filter(Boolean))];
   }
 
@@ -57,19 +56,28 @@
     };
   }
 
+  /** True only if desktop-users endpoint exists (401/200), not static /api/version. */
   async function checkDesktopUsersApi(base) {
     try {
-      const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
-      if (ver.ok) {
-        const data = await ver.json().catch(() => ({}));
-        if (data.features?.desktopUsers === true || data.version >= '1.0.4') return true;
-      }
       const probe = await fetch(base + '/api/admin/desktop-users', {
         cache: 'no-store',
         mode: 'cors',
         headers: adminHeaders(),
       });
-      return probe.status === 401 || probe.ok;
+      if (probe.status === 401 || probe.ok) return true;
+      if (probe.status === 404) return false;
+
+      const ver = await fetch(base + '/api/version', { cache: 'no-store', mode: 'cors' });
+      if (!ver.ok) return false;
+      const data = await ver.json().catch(() => ({}));
+      if (data.source === 'static-fallback') return false;
+      if (data.features?.desktopUsers !== true) return false;
+      const probe2 = await fetch(base + '/api/admin/desktop-users', {
+        cache: 'no-store',
+        mode: 'cors',
+        headers: adminHeaders(),
+      });
+      return probe2.status === 401 || probe2.ok;
     } catch (_) {
       return false;
     }
@@ -79,12 +87,10 @@
     if (res.status === 401) {
       return 'Admin session expired — logout and login again with PIN slcrickpro@2026.';
     }
-    if (res.status === 404 || res.status === 502) {
+    if (res.status === 404 || res.status === 502 || res.status === 503) {
       return (
-        'Cloud API not ready. Render → Manual Deploy (slcr main), Start Command: node server.js. ' +
-        'Then open ' +
-        apiBase +
-        '/api/version'
+        (data.error || data.message || 'Cloud API not ready') +
+        '. Vercel: add DATABASE_URL (same as Render). Render: Manual Deploy, Start Command node server.js.'
       );
     }
     return data.error || data.message || context + ' failed (HTTP ' + res.status + ')';
@@ -111,11 +117,11 @@
         const hit = results.find((r) => r.ok);
         el.innerHTML =
           'API: <code>' +
-          (hit ? hit.b : RENDER_API) +
+          (hit ? hit.b : getBackendUrl()) +
           '</code> · Desktop users: <strong style="color:' +
           (hit ? '#22c55e' : '#ff6b6b') +
           '">' +
-          (hit ? 'READY' : 'Deploy Render (see RENDER-START.md)') +
+          (hit ? 'READY' : 'Set DATABASE_URL on Vercel or deploy Render') +
           '</strong>';
       }
     );
@@ -191,7 +197,7 @@
       const users = await fetchDesktopUsers();
       if (!users.length) {
         list.innerHTML =
-          '<div class="empty-state"><div class="empty-state-title">No desktop users yet</div><p style="color:var(--c-muted);margin-top:8px">Create one below — saved in Supabase (Render database).</p></div>';
+          '<div class="empty-state"><div class="empty-state-title">No desktop users yet</div><p style="color:var(--c-muted);margin-top:8px">Create one below — saved in Supabase.</p></div>';
         return;
       }
       list.innerHTML = users
@@ -238,8 +244,7 @@
     return escapeHtml(s).replace(/'/g, '&#39;');
   }
 
-  async function createDesktopUser(ev) {
-    ev.preventDefault();
+  async function createDesktopUserAdmin() {
     const username = (document.getElementById('du-username')?.value || '').trim();
     const displayName = (document.getElementById('du-display')?.value || '').trim();
     const password = (document.getElementById('du-password')?.value || '').trim();
@@ -324,10 +329,6 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const form = document.getElementById('desktop-user-form');
-    if (form) form.addEventListener('submit', createDesktopUser);
-  });
-
   window.renderDesktopUsersAdmin = renderDesktopUsersAdmin;
+  window.createDesktopUserAdmin = createDesktopUserAdmin;
 })();

@@ -134,14 +134,38 @@ const ADMIN_SESSIONS = new Map();
 const DESKTOP_USER_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DESKTOP_USER_SESSIONS = new Map();
 
+function createSignedAdminToken() {
+    const exp = Date.now() + ADMIN_TOKEN_TTL_MS;
+    const payload = Buffer.from(JSON.stringify({ role: 'admin', exp })).toString('base64url');
+    const sig = crypto.createHmac('sha256', ADMIN_PIN).update(payload).digest('hex');
+    return `${payload}.${sig}`;
+}
+
+function validateSignedAdminToken(token) {
+    if (!token || typeof token !== 'string') return false;
+    const dot = token.indexOf('.');
+    if (dot < 1) return false;
+    const payload = token.slice(0, dot);
+    const sig = token.slice(dot + 1);
+    const expected = crypto.createHmac('sha256', ADMIN_PIN).update(payload).digest('hex');
+    if (sig !== expected) return false;
+    try {
+        const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        return data.role === 'admin' && typeof data.exp === 'number' && data.exp > Date.now();
+    } catch {
+        return false;
+    }
+}
+
 function createAdminSession() {
-    const token = crypto.randomBytes(32).toString('hex');
+    const token = createSignedAdminToken();
     ADMIN_SESSIONS.set(token, Date.now() + ADMIN_TOKEN_TTL_MS);
     return token;
 }
 
 function validateAdminSession(token) {
     if (!token) return false;
+    if (validateSignedAdminToken(token)) return true;
     const expiry = ADMIN_SESSIONS.get(token);
     if (!expiry || expiry < Date.now()) {
         ADMIN_SESSIONS.delete(token);
