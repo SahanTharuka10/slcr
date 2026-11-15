@@ -11,6 +11,12 @@
   font-weight: 900;
   font-display: swap;
 }
+@font-face {
+  font-family: 'SLC Sans';
+  src: url('../vendor/fonts/plus-jakarta-sans-latin-wght-normal.woff2') format('woff2');
+  font-weight: 200 800;
+  font-display: swap;
+}
 :root {
   --bg: #080b14;
   --bg2: #0d1220;
@@ -45,7 +51,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  font-family: 'SLC Sans', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
 }
 body {
@@ -445,7 +451,7 @@ select {
   white-space: nowrap;
 }
 .m-row strong small {
-  font-family: 'Segoe UI', sans-serif;
+  font-family: 'SLC Sans', 'Segoe UI', sans-serif;
   font-size: 12px;
   color: var(--muted);
   margin-left: 4px;
@@ -779,4 +785,11 @@ select {
   .s-nav {
     order: 3;
   }
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
