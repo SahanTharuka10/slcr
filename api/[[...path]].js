@@ -6,7 +6,15 @@
  *  • DATABASE_URL not set        → requests are proxied to the Render API (old setup).
  */
 const RENDER = (process.env.RENDER_API_URL || 'https://slcrickpro.onrender.com').replace(/\/$/, '');
+// Accept the names Vercel's Supabase / Postgres integrations use, too.
+const DB_VARS = ['DATABASE_URL', 'POSTGRES_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING', 'SUPABASE_DB_URL'];
+if (!process.env.DATABASE_URL) {
+  const alt = DB_VARS.find((k) => process.env[k]);
+  if (alt) process.env.DATABASE_URL = process.env[alt];
+}
 const LOCAL = !!process.env.DATABASE_URL;
+// Names only (never values) — helps check the Vercel env setup from outside.
+const DB_ENV_SEEN = DB_VARS.filter((k) => process.env[k]).join(',') || 'none';
 
 // ── API on Vercel ────────────────────────────────────────────────
 let app = null;
@@ -79,6 +87,7 @@ async function proxy(req, res) {
 module.exports = async (req, res) => {
   // Shows where the API ran: 'vercel' (DATABASE_URL set) or 'render-proxy'
   res.setHeader('x-slc-api', LOCAL ? 'vercel' : 'render-proxy');
+  res.setHeader('x-slc-db-env', DB_ENV_SEEN);
   if (!LOCAL) return proxy(req, res);
   try {
     const api = await localApi();
