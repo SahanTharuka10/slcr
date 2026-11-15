@@ -1,17 +1,32 @@
 /**
- * Vercel: proxy /api/* → Render (no DATABASE_URL needed on Vercel).
+ * Vercel: proxy /api/* → Render API (render-api.js). No database on Vercel.
  */
 const RENDER = (process.env.RENDER_API_URL || 'https://slcrickpro.onrender.com').replace(/\/$/, '');
 
+function targetPath(req) {
+  const url = String(req.url || '');
+  // Normal case: req.url is the original request ("/api/matches?x=1")
+  if (/^\/api(\/|$|\?)/.test(url) && !url.includes('[[...path]]')) return url;
+  // Fallback: rebuild from the catch-all segments
+  const seg = req.query && req.query.path;
+  const pathPart = Array.isArray(seg) ? seg.join('/') : seg || '';
+  const params = new URLSearchParams();
+  Object.entries(req.query || {}).forEach(([k, v]) => {
+    if (k === 'path') return;
+    (Array.isArray(v) ? v : [v]).forEach((x) => params.append(k, x));
+  });
+  const qs = params.toString();
+  return `/api/${pathPart}${qs ? `?${qs}` : ''}`;
+}
+
 module.exports = async (req, res) => {
-  const segments = req.query.path;
-  const pathPart = Array.isArray(segments) ? segments.join('/') : segments || '';
-  const qs = req.url && req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-  const target = `${RENDER}/api/${pathPart}${qs}`;
+  const target = RENDER + targetPath(req);
 
   const headers = { ...req.headers };
   delete headers.host;
   delete headers.connection;
+  delete headers['content-length'];
+  delete headers['accept-encoding'];
 
   let body;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -36,13 +51,10 @@ module.exports = async (req, res) => {
       if (k === 'transfer-encoding' || k === 'content-encoding' || k === 'content-length') return;
       res.setHeader(key, value);
     });
+    res.setHeader('Cache-Control', 'no-store');
     const buf = Buffer.from(await upstream.arrayBuffer());
     res.send(buf);
   } catch (e) {
-    res.status(502).json({
-      error: 'Render API unreachable',
-      message: e.message,
-      hint: 'Deploy Render with: node server.js — see RENDER-START.md',
-    });
+    res.status(502).json({ error: 'API unreachable', message: e.message });
   }
 };
