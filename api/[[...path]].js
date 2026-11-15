@@ -77,6 +77,8 @@ async function proxy(req, res) {
 }
 
 module.exports = async (req, res) => {
+  // Shows where the API ran: 'vercel' (DATABASE_URL set) or 'render-proxy'
+  res.setHeader('x-slc-api', LOCAL ? 'vercel' : 'render-proxy');
   if (!LOCAL) return proxy(req, res);
   try {
     const api = await localApi();
