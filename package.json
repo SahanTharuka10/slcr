@@ -4,7 +4,7 @@
   "private": true,
   "description": "SLCRICKPRO website (slcrickpro.live) + API used by the SLCRICKPRO desktop app",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "scripts": {
     "start": "node render-api.js",
