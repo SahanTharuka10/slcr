@@ -1,13 +1,34 @@
 /**
- * Vercel: proxy /api/* → Render API (render-api.js). No database on Vercel.
+ * Vercel /api/* handler.
+ *
+ *  • DATABASE_URL set in Vercel  → the API (render-api.js) runs right here, on Vercel,
+ *    against the same Postgres (Supabase). No Render, no cold-start wait.
+ *  • DATABASE_URL not set        → requests are proxied to the Render API (old setup).
  */
 const RENDER = (process.env.RENDER_API_URL || 'https://slcrickpro.onrender.com').replace(/\/$/, '');
+const LOCAL = !!process.env.DATABASE_URL;
 
+// ── API on Vercel ────────────────────────────────────────────────
+let app = null;
+let ready = null;
+function localApi() {
+  if (!app) {
+    app = require('../render-api').app;
+    const store = require('../server/store');
+    ready = store.init().catch((e) => {
+      ready = null; // retry on the next request
+      throw e;
+    });
+  } else if (!ready) {
+    ready = require('../server/store').init();
+  }
+  return ready.then(() => app);
+}
+
+// ── proxy to Render (fallback) ───────────────────────────────────
 function targetPath(req) {
   const url = String(req.url || '');
-  // Normal case: req.url is the original request ("/api/matches?x=1")
   if (/^\/api(\/|$|\?)/.test(url) && !url.includes('[[...path]]')) return url;
-  // Fallback: rebuild from the catch-all segments
   const seg = req.query && req.query.path;
   const pathPart = Array.isArray(seg) ? seg.join('/') : seg || '';
   const params = new URLSearchParams();
@@ -19,9 +40,7 @@ function targetPath(req) {
   return `/api/${pathPart}${qs ? `?${qs}` : ''}`;
 }
 
-module.exports = async (req, res) => {
-  const target = RENDER + targetPath(req);
-
+async function proxy(req, res) {
   const headers = { ...req.headers };
   delete headers.host;
   delete headers.connection;
@@ -39,12 +58,11 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const upstream = await fetch(target, {
+    const upstream = await fetch(RENDER + targetPath(req), {
       method: req.method,
       headers,
       body: body && body.length ? body : undefined,
     });
-
     res.status(upstream.status);
     upstream.headers.forEach((value, key) => {
       const k = key.toLowerCase();
@@ -52,9 +70,19 @@ module.exports = async (req, res) => {
       res.setHeader(key, value);
     });
     res.setHeader('Cache-Control', 'no-store');
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    res.send(buf);
+    res.send(Buffer.from(await upstream.arrayBuffer()));
   } catch (e) {
-    res.status(502).json({ error: 'API unreachable', message: e.message });
+    res.status(502).json({ ok: false, error: 'API unreachable', message: e.message });
+  }
+}
+
+module.exports = async (req, res) => {
+  if (!LOCAL) return proxy(req, res);
+  try {
+    const api = await localApi();
+    res.setHeader('Cache-Control', 'no-store');
+    return api(req, res);
+  } catch (e) {
+    res.status(503).json({ ok: false, error: 'Database not reachable', message: e.message });
   }
 };
