@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tournament – SLCRICKPRO</title>
+  <meta name="theme-color" content="#080b14" />
+  <link rel="icon" href="assets/icon.png" />
+  <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="css/site.css?v=3" />
+</head>
+<body>
+  <main class="s-wrap" id="tp"><div class="s-empty">Loading tournament…</div></main>
+  <script src="js/config.js"></script>
+  <script src="js/site.js?v=2"></script>
+  <script>
+    SLC.header('past');
+    const esc = SLC.esc;
+    const id = new URLSearchParams(location.search).get('id') || '';
+    const root = document.getElementById('tp');
+    // Organizer link from the desktop app: tournament.html?id=…#key=…  (kept on this device)
+    const KEY_STORE = `slc_tkey_${id}`;
+    const hashKey = new URLSearchParams(location.hash.slice(1)).get('key');
+    if (hashKey) {
+      try { localStorage.setItem(KEY_STORE, hashKey); } catch (_) {}
+      history.replaceState(null, '', `${location.pathname}?id=${encodeURIComponent(id)}`);
+    }
+    let orgKey = '';
+    try { orgKey = localStorage.getItem(KEY_STORE) || ''; } catch (_) {}
+
+    const ballsOf = (ov, bpo) => { const [o, b] = String(ov || '0.0').split('.'); return (+o || 0) * (bpo || 6) + (+b || 0); };
+
+    function table(t, matches) {
+      const rows = new Map();
+      const row = (n) => rows.get(n) || rows.set(n, { team: n, p: 0, w: 0, l: 0, nr: 0, pts: 0, rf: 0, bf: 0, ra: 0, bb: 0 }).get(n);
+      (t.teams || []).forEach(row);
+      matches.filter((m) => m.status === 'completed' && !m.stage.match(/final|quarter|round of/i)).forEach((m) => {
+        const a = row(m.team1), b = row(m.team2);
+        a.p++; b.p++;
+        if (!m.winner) { a.nr++; b.nr++; a.pts++; b.pts++; } else {
+          const W = m.winner === m.team1 ? a : b, L = W === a ? b : a;
+          W.w++; W.pts += 2; L.l++;
+        }
+        (m.innings || []).forEach((i) => {
+          const bat = rows.get(i.team), bowl = rows.get(i.team === m.team1 ? m.team2 : m.team1);
+          const balls = ballsOf(i.overs);
+          if (bat) { bat.rf += i.runs; bat.bf += balls; }
+          if (bowl) { bowl.ra += i.runs; bowl.bb += balls; }
+        });
+      });
+      const list = [...rows.values()];
+      list.forEach((r) => { r.nrr = (r.bf ? r.rf / (r.bf / 6) : 0) - (r.bb ? r.ra / (r.bb / 6) : 0); });
+      return list.sort((x, y) => y.pts - x.pts || y.nrr - x.nrr || y.w - x.w);
+    }
+
+    async function organizer(t) {
+      const box = document.getElementById('tp-org');
+      if (!box) return;
+      if (t.status === 'ended') {
+        box.innerHTML = '<b>🏁 This tournament has ended.</b><p class="s-muted">Team photos and player details were cleared. Match stats stay in Past stats.</p>';
+        return;
+      }
+      box.innerHTML = `<h2 class="s-h2" style="margin-top:0">🛠 Organizer · team registration</h2>
+        <p class="s-muted" style="margin-top:0">Send each team its link. They add player numbers, names and photos — the desktop app downloads them with <b>Get team rosters</b>.</p>
+        <div id="tp-inv">Loading links…</div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="s-btn s-btn--red" id="tp-end">🏁 End tournament & clear photos</button>
+          <button class="s-btn" id="tp-forget">Forget organizer key on this device</button>
+        </div>`;
+      document.getElementById('tp-forget').onclick = () => { localStorage.removeItem(KEY_STORE); location.reload(); };
+      document.getElementById('tp-end').onclick = async () => {
+        if (!confirm('End the tournament? All team photos, player numbers and registration links are deleted. Scorecards stay in Past stats.')) return;
+        try { await SLC.api(`/tournaments/${encodeURIComponent(id)}/end`, { method: 'POST', key: orgKey, body: {} }); SLC.toast('Tournament ended'); load(); }
+        catch (e) { SLC.toast(e.message, 'error'); }
+      };
+      try {
+        const { invites } = await SLC.api(`/tournaments/${encodeURIComponent(id)}/invites`, { method: 'POST', key: orgKey, body: {} });
+        const base = `${location.origin}${location.pathname.replace(/tournament(\.html)?$/, '')}register.html?token=`;
+        document.getElementById('tp-inv').innerHTML = invites.map((v) => {
+          const link = base + encodeURIComponent(v.token);
+          const msg = encodeURIComponent(`${t.name} — please add your team's players (number, name, photo): ${link}`);
+          return `<div class="t-invite"><div><b>${esc(v.team)}</b><small>${v.players ? `${v.players} players added` : 'Not filled yet'}</small></div>
+            <button class="s-btn" data-copy="${esc(link)}">📋 Copy</button>
+            <a class="s-btn s-btn--green" href="https://wa.me/?text=${msg}" target="_blank" rel="noopener">WhatsApp</a></div>`;
+        }).join('') || '<p class="s-muted">No teams.</p>';
+        document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); SLC.toast('Link copied'); });
+      } catch (e) {
+        document.getElementById('tp-inv').innerHTML = `<p class="s-muted">${esc(e.status === 403 ? 'This organizer key is not valid.' : e.message)}</p>`;
+      }
+    }
+
+    async function load() {
+      try {
+        const { tournament: t, matches, teams } = await SLC.api(`/tournaments/${encodeURIComponent(id)}`);
+        document.title = `${t.name} – SLCRICKPRO`;
+        const done = matches.filter((m) => m.status === 'completed').length;
+        const tbl = table(t, matches);
+        const stages = new Map();
+        matches.forEach((m) => { const k = m.stage || 'Matches'; if (!stages.has(k)) stages.set(k, []); stages.get(k).push(m); });
+        root.innerHTML = `
+          <section class="mp-hero">
+            <div class="m-head"><span>${esc(t.overs || '')} overs · ${(t.teams || []).length} teams</span>${t.status === 'ended' ? '<span class="m-tag m-tag--done">ENDED</span>' : '<span class="m-tag m-tag--live">ACTIVE</span>'}</div>
+            <h1 class="s-h1">${esc(t.name)}</h1>
+            ${t.champion ? `<div class="mp-line mp-line--result" style="text-align:left">🏆 Champions: ${esc(t.champion)}</div>` : ''}
+            <div class="s-muted">${done} of ${matches.length} matches played on the site</div>
+          </section>
+          ${tbl.some((r) => r.p) ? `<h2 class="s-h2">📊 Points table</h2><div class="t-table-wrap"><table class="t-table"><thead><tr><th>#</th><th style="text-align:left">Team</th><th>P</th><th>W</th><th>L</th><th>NR</th><th>Pts</th><th>NRR</th></tr></thead><tbody>
+            ${tbl.map((r, i) => `<tr><td>${i + 1}</td><td class="tl">${esc(r.team)}</td><td>${r.p}</td><td>${r.w}</td><td>${r.l}</td><td>${r.nr}</td><td><b>${r.pts}</b></td><td>${(r.nrr >= 0 ? '+' : '') + r.nrr.toFixed(3)}</td></tr>`).join('')}
+          </tbody></table></div>` : ''}
+          ${[...stages.entries()].map(([k, list]) => `<h2 class="s-h2">${esc(k)} <small>${list.length}</small></h2><div class="m-grid">${list.map(SLC.matchCard).join('')}</div>`).join('') || '<div class="s-empty" style="margin-top:16px"><b>No matches uploaded yet</b></div>'}
+          ${teams.length ? `<h2 class="s-h2">👥 Teams</h2><div class="m-grid">${teams.map((x) => `<div class="m-card"><b>${esc(x.displayName || x.team)}</b><span class="m-note">${x.players} players registered</span></div>`).join('')}</div>` : ''}
+          ${orgKey ? '<section class="t-org" id="tp-org"></section>' : ''}`;
+        if (orgKey) organizer(t);
+      } catch (e) {
+        root.innerHTML = `<div class="s-empty"><b>Tournament not found</b>${esc(e.message)}</div>`;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

@@ -16,3 +16,4 @@ build/
 *.7z
 /backend/
 /server/node_modules/
+.claude/

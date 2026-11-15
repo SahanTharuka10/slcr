@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ongoing matches – SLCRICKPRO</title>
+  <meta name="theme-color" content="#080b14" />
+  <link rel="icon" href="assets/icon.png" />
+  <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="css/site.css?v=3" />
+</head>
+<body>
+  <main class="s-wrap">
+    <h1 class="s-h1">Ongoing matches</h1>
+    <p class="s-sub">Live matches and results from the last 24 hours. Updates automatically.</p>
+    <div id="live-list"></div>
+  </main>
+  <script src="js/config.js"></script>
+  <script src="js/site.js?v=2"></script>
+  <script>
+    SLC.header('live');
+    const box = document.getElementById('live-list');
+    async function load() {
+      try {
+        const { matches } = await SLC.api('/matches?view=ongoing');
+        const live = matches.filter((m) => m.status !== 'completed');
+        const done = matches.filter((m) => m.status === 'completed');
+        box.innerHTML = !matches.length
+          ? '<div class="s-empty"><b>No matches right now</b>When a scorer picks “Online” in the SLCRICKPRO app, the match shows here live.</div>'
+          : `${live.length ? `<h2 class="s-h2">🔴 Live <small>${live.length}</small></h2><div class="m-grid">${live.map(SLC.matchCard).join('')}</div>` : ''}
+             ${done.length ? `<h2 class="s-h2">✅ Finished today <small>${done.length}</small></h2><div class="m-grid">${done.map(SLC.matchCard).join('')}</div>` : ''}`;
+      } catch (e) {
+        box.innerHTML = `<div class="s-empty"><b>Could not load matches</b>${SLC.esc(e.message)}</div>`;
+      }
+    }
+    load();
+    setInterval(load, 8000);
+  </script>
+</body>
+</html>

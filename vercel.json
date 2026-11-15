@@ -1,24 +1,13 @@
 {
   "buildCommand": "npm run build",
-  "installCommand": "npm install",
+  "installCommand": "npm install --omit=dev",
   "outputDirectory": ".",
   "cleanUrls": true,
   "trailingSlash": false,
-  "rewrites": [
-    {
-      "source": "/overlay/:matchId",
-      "destination": "/pages/overlay.html?match=:matchId&obs=1"
-    }
-  ],
   "headers": [
     {
-      "source": "/js/cloud-config.js",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-store"
-        }
-      ]
+      "source": "/(.*)\.(html|js|css)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]
 }

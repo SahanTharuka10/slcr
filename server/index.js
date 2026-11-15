@@ -1,3 +1,3 @@
 #!/usr/bin/env node
-/** Render Start Command may be node server/index.js — use desktop API entry. */
-require('../render-api.js');
+// Render may start "node server/index.js" — same API as render-api.js
+require('../render-api.js').startServer();

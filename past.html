@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Past match stats – SLCRICKPRO</title>
+  <meta name="theme-color" content="#080b14" />
+  <link rel="icon" href="assets/icon.png" />
+  <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="css/site.css?v=3" />
+</head>
+<body>
+  <main class="s-wrap">
+    <h1 class="s-h1">Past match stats</h1>
+    <p class="s-sub">Finished matches, grouped by tournament. Tap a match for the full scorecard.</p>
+    <input class="f-input" id="past-q" type="search" placeholder="Search team or tournament…" style="max-width:420px;margin-bottom:6px" />
+    <div id="past-list"><div class="s-empty">Loading…</div></div>
+  </main>
+  <script src="js/config.js"></script>
+  <script src="js/site.js?v=2"></script>
+  <script>
+    SLC.header('past');
+    const box = document.getElementById('past-list');
+    let all = [];
+    function render() {
+      const q = document.getElementById('past-q').value.trim().toLowerCase();
+      const list = all.filter((m) => !q || [m.team1, m.team2, m.tournamentName].join(' ').toLowerCase().includes(q));
+      if (!list.length) {
+        box.innerHTML = `<div class="s-empty"><b>${all.length ? 'No match found' : 'No past matches yet'}</b>${all.length ? 'Try another name.' : 'Finished matches move here 24 hours after the result.'}</div>`;
+        return;
+      }
+      const groups = new Map();
+      list.forEach((m) => {
+        const k = m.tournamentId || 'single';
+        if (!groups.has(k)) groups.set(k, { name: m.tournamentName || 'Single matches', id: m.tournamentId, items: [] });
+        groups.get(k).items.push(m);
+      });
+      box.innerHTML = [...groups.values()].map((g) => `
+        <h2 class="s-h2">🏆 ${SLC.esc(g.name)} <small>${g.items.length}</small>
+          ${g.id ? `<a class="s-btn" style="min-height:32px;margin-left:auto;font-size:12px" href="tournament.html?id=${encodeURIComponent(g.id)}">Table & fixtures →</a>` : ''}</h2>
+        <div class="m-grid">${g.items.map(SLC.matchCard).join('')}</div>`).join('');
+    }
+    document.getElementById('past-q').addEventListener('input', render);
+    SLC.api('/matches?view=past')
+      .then(({ matches }) => { all = matches; render(); })
+      .catch((e) => { box.innerHTML = `<div class="s-empty"><b>Could not load</b>${SLC.esc(e.message)}</div>`; });
+  </script>
+</body>
+</html>

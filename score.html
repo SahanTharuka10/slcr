@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Score a match – SLCRICKPRO</title>
+  <meta name="theme-color" content="#080b14" />
+  <link rel="icon" href="assets/icon.png" />
+  <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="css/site.css?v=3" />
+  <style>
+    .ws-board { padding: 16px; border-radius: 18px; background: var(--hero); box-shadow: 0 0 0 1px var(--line); }
+    .ws-score { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+    .ws-score span { font-weight: 800; color: var(--text2); }
+    .ws-score b { font-family: var(--cond); font-size: 52px; line-height: 1; }
+    .ws-score small { color: var(--muted); }
+    .ws-chase { color: var(--amber); font-size: 14px; }
+    .ws-bats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .ws-bat { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-height: 48px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--chip); text-align: left; cursor: pointer; }
+    .ws-bat.is-on { background: rgba(47,107,255,.2); box-shadow: inset 0 0 0 1px rgba(47,107,255,.6); }
+    .ws-bat span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
+    .ws-bat b small { color: var(--muted); font-weight: 600; margin-left: 3px; }
+    .ws-bowl { margin-top: 8px; font-weight: 700; }
+    .ws-bowl small { color: var(--muted); }
+    .ws-pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+    .ws-pad.is-locked { opacity: .35; pointer-events: none; }
+    .ws-key { min-height: 70px; border: 0; border-radius: 16px; background: var(--card2); box-shadow: inset 0 0 0 1px var(--line), 0 2px 0 var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; }
+    .ws-key:active { transform: scale(.95); }
+    .ws-key b { font-family: var(--cond); font-size: 30px; line-height: 1; }
+    .ws-key small { font-size: 11px; color: var(--muted); }
+    .ws-key.k4 { color: #fff; background: linear-gradient(180deg, #2f6bff, #1f4fd1); }
+    .ws-key.k6 { color: #fff; background: linear-gradient(180deg, #8b5cf6, #6d3fe0); }
+    .ws-key.kw { color: #fff; background: linear-gradient(180deg, #ff3355, #d61839); }
+    .ws-key.k4 small, .ws-key.k6 small, .ws-key.kw small { color: rgba(255,255,255,.85); }
+    .ws-key.kx b { color: #d97706; font-size: 24px; }
+    .ws-sheet { position: fixed; inset: 0; z-index: 90; visibility: hidden; }
+    .ws-sheet.is-open { visibility: visible; }
+    .ws-sheet-bg { position: absolute; inset: 0; background: rgba(2,4,10,.6); }
+    .ws-sheet-card { position: absolute; left: 0; right: 0; bottom: 0; max-width: 640px; margin: 0 auto; max-height: 88vh; overflow: auto; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; background: var(--card); box-shadow: 0 -10px 40px rgba(0,0,0,.5); transform: translateY(100%); transition: transform .22s ease; }
+    .ws-sheet.is-open .ws-sheet-card { transform: none; }
+    .ws-sheet-card h2 { margin: 0 0 12px; font-size: 20px; }
+    .ws-sheet small { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="s-wrap" style="max-width:760px" id="ws"></main>
+  <script src="js/config.js"></script>
+  <script src="js/site.js?v=2"></script>
+  <script src="vendor/pdf/html2pdf.bundle.min.js" defer></script>
+  <script>SLC.header('score');</script>
+  <script src="js/web-scorer.js?v=1"></script>
+</body>
+</html>
