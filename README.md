@@ -17,10 +17,14 @@ Light / dark mode: button in the header (remembers the choice).
 
 ## Hosting
 
-- **Vercel** serves the static site; `api/[[...path]].js` proxies `/api/*` to Render.
-- **Render** runs `render-api.js` (Express + Postgres). Set `DATABASE_URL`
-  (Supabase connection string). Tables `slc_matches`, `slc_tournaments`,
-  `slc_rosters` are created on start; older tables are not touched.
+- **Vercel** serves the static site and `/api/*` (`api/[[...path]].js`).
+  - With `DATABASE_URL` set in Vercel (Supabase *transaction pooler* string,
+    port 6543) the API runs on Vercel itself — no Render needed.
+  - Without it, `/api/*` is proxied to Render (`RENDER_API_URL`, default
+    https://slcrickpro.onrender.com).
+- **Render** (optional) runs `render-api.js` with the same `DATABASE_URL`.
+- Tables `slc_matches`, `slc_tournaments`, `slc_rosters` are created on first
+  use; older tables are not touched.
 - Desktop download link: `js/config.js` → `desktopDownloadUrl`.
 
 Local: `npm install` then `npm run dev` → http://localhost:3000 (in-memory data
