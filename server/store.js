@@ -5,8 +5,20 @@
  */
 const { Pool } = require('pg');
 
-const url = process.env.DATABASE_URL || '';
-const usePg = /^postgres/.test(url);
+const rawUrl = process.env.DATABASE_URL || '';
+const usePg = /^postgres/.test(rawUrl);
+// Supabase / Vercel strings carry "?sslmode=require" (+ "supa=…"). node-postgres reads that
+// as full certificate checking and the pooler's chain then fails ("self-signed certificate").
+// TLS stays on through the ssl option below.
+const url = (() => {
+  try {
+    const u = new URL(rawUrl);
+    ['sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'supa', 'pgbouncer'].forEach((k) => u.searchParams.delete(k));
+    return u.toString();
+  } catch (_) {
+    return rawUrl;
+  }
+})();
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS slc_matches (
