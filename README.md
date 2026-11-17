@@ -17,7 +17,7 @@ Light / dark mode: button in the header (remembers the choice).
 
 ## Hosting
 
-- **Vercel** serves the static site and `/api/*` (`api/[[...path]].js`).
+- **Vercel** serves the static site and `/api/*` (`api/handler.js`, via the rewrite in `vercel.json`).
   - With `DATABASE_URL` set in Vercel (Supabase *transaction pooler* string,
     port 6543) the API runs on Vercel itself — no Render needed.
   - Without it, `/api/*` is proxied to Render (`RENDER_API_URL`, default

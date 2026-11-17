@@ -34,9 +34,11 @@ function localApi() {
 }
 
 // ── proxy to Render (fallback) ───────────────────────────────────
+/** The real API path. vercel.json rewrites /api/<anything> → /api/handler?path=<anything>. */
 function targetPath(req) {
   const url = String(req.url || '');
-  if (/^\/api(\/|$|\?)/.test(url) && !url.includes('[[...path]]')) return url;
+  const hasPathParam = req.query && req.query.path != null && req.query.path !== '';
+  if (!hasPathParam && /^\/api(\/|$|\?)/.test(url) && !/^\/api\/handler(\/|$|\?)/.test(url)) return url;
   const seg = req.query && req.query.path;
   const pathPart = Array.isArray(seg) ? seg.join('/') : seg || '';
   const params = new URLSearchParams();
@@ -89,6 +91,7 @@ module.exports = async (req, res) => {
   res.setHeader('x-slc-api', LOCAL ? 'vercel' : 'render-proxy');
   res.setHeader('x-slc-db-env', DB_ENV_SEEN);
   if (!LOCAL) return proxy(req, res);
+  req.url = targetPath(req); // Express routes on the real path, e.g. /api/matches/ID
   try {
     const api = await localApi();
     res.setHeader('Cache-Control', 'no-store');
