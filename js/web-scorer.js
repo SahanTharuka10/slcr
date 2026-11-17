@@ -228,11 +228,11 @@
       <h1 class="s-h1">Score a match</h1>
       <p class="s-sub">Free scorer for your phone. At the end, download the match summary PDF.</p>
       <div class="h-options" style="margin-top:0">
-        <a class="h-opt h-opt--score" href="#new" data-ico="🏏"><b>Single match</b><span>Two teams, set the overs, score ball by ball.</span><i>Start →</i></a>
-        <a class="h-opt h-opt--past" href="#tourney-new" data-ico="🏆"><b>Small tournament</b><span>Up to 8 teams, round robin with a points table.</span><i>Create →</i></a>
+        <a class="h-opt h-opt--score" href="#new"><span class="h-ico">${SLC.icon('score')}</span><b>Single match</b><span>Two teams, set the overs, score ball by ball.</span><i>Start</i></a>
+        <a class="h-opt h-opt--past" href="#tourney-new"><span class="h-ico">${SLC.icon('past')}</span><b>Small tournament</b><span>Up to 8 teams, round robin with a points table.</span><i>Create</i></a>
       </div>
-      ${tours.length ? `<h2 class="s-h2">🏆 Your tournaments</h2><div class="m-grid">${tours.map((t) => `<a class="m-card" href="#tourney=${t.id}"><b>${esc(t.name)}</b><span class="m-note">${t.teams.length} teams · ${t.overs} overs · ${t.fixtures.filter((f) => db.matches[f.matchId] && db.matches[f.matchId].status === 'completed').length}/${t.fixtures.length} played</span></a>`).join('')}</div>` : ''}
-      ${list.length ? `<h2 class="s-h2">🕘 Recent on this phone</h2><div class="m-grid">${list.map((m) => `
+      ${tours.length ? `<h2 class="s-h2">Your tournaments</h2><div class="m-grid">${tours.map((t) => `<a class="m-card" href="#tourney=${t.id}"><b>${esc(t.name)}</b><span class="m-note">${t.teams.length} teams · ${t.overs} overs · ${t.fixtures.filter((f) => db.matches[f.matchId] && db.matches[f.matchId].status === 'completed').length}/${t.fixtures.length} played</span></a>`).join('')}</div>` : ''}
+      ${list.length ? `<h2 class="s-h2">Recent on this phone</h2><div class="m-grid">${list.map((m) => `
         <button class="m-card" style="text-align:left;border:0;cursor:pointer;font:inherit;color:inherit" data-open="${m.id}">
           <div class="m-head"><span>${esc(m.tournamentName || 'Single match')}</span>${SLC.statusTag(m.status)}</div>
           <div class="m-row"><b>${esc(m.team1)} v ${esc(m.team2)}</b></div>
@@ -256,8 +256,8 @@
         </div>
         <label class="f-field"><span>Venue (optional)</span><input id="s-venue" maxlength="60"></label>
         <div class="f-field"><span>Toss won by</span><div class="f-seg" id="s-toss"><button type="button" data-v="1">Team 1</button><button type="button" data-v="2">Team 2</button></div></div>
-        <div class="f-field"><span>Elected to</span>${seg('dec', ['bat', 'bowl'], 'bat', (v) => (v === 'bat' ? '🏏 Bat' : '⚾ Bowl'))}</div>
-        <div class="f-field"><span>Show on slcrickpro.live</span>${seg('online', ['no', 'yes'], 'no', (v) => (v === 'yes' ? '🌐 Online (live on site)' : '📱 This phone only'))}</div>
+        <div class="f-field"><span>Elected to</span>${seg('dec', ['bat', 'bowl'], 'bat', (v) => (v === 'bat' ? 'Bat' : 'Bowl'))}</div>
+        <div class="f-field"><span>Show on slcrickpro.live</span>${seg('online', ['no', 'yes'], 'no', (v) => (v === 'yes' ? 'Online (live on site)' : 'This phone only'))}</div>
         <button class="s-btn s-btn--primary s-btn--lg s-btn--block" id="s-go">Start match →</button>
       </div>`;
     wireSeg(app);
@@ -335,11 +335,11 @@
     const bw = bowlerOf(i);
     app.innerHTML = `
       <section class="ws-board">
-        <div class="m-head"><span>${esc(m.team1)} v ${esc(m.team2)}${m.online ? ' · 🌐 live on site' : ''}</span><span class="m-tag m-tag--live">LIVE</span></div>
+        <div class="m-head"><span>${esc(m.team1)} v ${esc(m.team2)}${m.online ? ' · live on site' : ''}</span><span class="m-tag m-tag--live">LIVE</span></div>
         <div class="ws-score"><span>${esc(i.battingTeam)}</span><b>${i.runs}/${i.wickets}</b><small>${SLC.overs(i.balls, m.ballsPerOver)} / ${m.overs} ov · CRR ${crr}</small></div>
         ${t ? `<div class="ws-chase">Need <b>${Math.max(0, t - i.runs)}</b> from <b>${left}</b> balls</div>` : ''}
         <div class="ws-bats">${bt(0)}${bt(1)}</div>
-        <div class="ws-bowl">⚾ ${bw ? `${esc(bw.name)} <b>${bw.wickets}-${bw.runs}</b> <small>(${SLC.overs(bw.balls, m.ballsPerOver)})</small>` : '<span class="s-muted">Bowler needed</span>'}</div>
+        <div class="ws-bowl">${bw ? `${esc(bw.name)} <b>${bw.wickets}-${bw.runs}</b> <small>(${SLC.overs(bw.balls, m.ballsPerOver)})</small>` : '<span class="s-muted">Bowler needed</span>'}</div>
         <div class="sc-balls" style="margin-top:8px">${SLC.ballsHtml(i.currentOver)}</div>
       </section>
       <div class="ws-pad ${needNames ? 'is-locked' : ''}">
@@ -353,9 +353,9 @@
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <button class="s-btn" data-swap>⇄ Swap strike</button>
-        <button class="s-btn" data-card>📋 Scorecard</button>
+        <button class="s-btn" data-card>Scorecard</button>
         <button class="s-btn" data-end>⏹ End innings</button>
-        ${m.online && db.keys[m.id] ? `<a class="s-btn" href="match.html?id=${encodeURIComponent(m.id)}" target="_blank">🌐 Site view</a>` : ''}
+        ${m.online && db.keys[m.id] ? `<a class="s-btn" href="match.html?id=${encodeURIComponent(m.id)}" target="_blank">Site view</a>` : ''}
       </div>
       <div id="ws-card"></div>`;
     $$('[data-strike]').forEach((b) => b.onclick = () => { snapshot(m); i.strikerIdx = +b.dataset.strike; commit(m); });
@@ -415,13 +415,13 @@
     app.innerHTML = `
       <section class="mp-hero" style="text-align:center">
         <div class="s-muted">${esc(m.tournamentName || 'Single match')}</div>
-        <div class="mp-line mp-line--result" style="font-size:24px;margin:8px 0">🏆 ${esc(m.result)}</div>
+        <div class="mp-line mp-line--result" style="font-size:24px;margin:8px 0">${esc(m.result)}</div>
         <div class="s-muted">${m.innings.filter(Boolean).map((x) => `${esc(x.battingTeam)} ${x.runs}/${x.wickets} (${SLC.overs(x.balls, m.ballsPerOver)})`).join(' · ')}</div>
       </section>
       <div style="display:grid;gap:8px;margin-top:14px">
-        <button class="s-btn s-btn--primary s-btn--lg" id="r-pdf">⬇ Download summary PDF</button>
-        <button class="s-btn s-btn--green s-btn--lg" id="r-up">${m.uploaded ? '✅ On slcrickpro.live — update' : '⬆ Upload to site'}</button>
-        ${t ? `<a class="s-btn" href="#tourney=${t.id}">🏆 Back to ${esc(t.name)}</a>` : ''}
+        <button class="s-btn s-btn--primary s-btn--lg" id="r-pdf">Download summary PDF</button>
+        <button class="s-btn s-btn--green s-btn--lg" id="r-up">${m.uploaded ? 'On slcrickpro.live — update' : 'Upload to site'}</button>
+        ${t ? `<a class="s-btn" href="#tourney=${t.id}">Back to ${esc(t.name)}</a>` : ''}
         <button class="s-btn" id="r-new">＋ New match</button>
         <button class="s-btn" data-u>↶ Undo last ball</button>
       </div>

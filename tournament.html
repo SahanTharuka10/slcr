@@ -8,12 +8,12 @@
   <link rel="icon" href="assets/icon.png" />
   <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="css/site.css?v=4" />
+  <link rel="stylesheet" href="css/site.css?v=6" />
 </head>
 <body>
   <main class="s-wrap" id="tp"><div class="s-empty">Loading tournament…</div></main>
   <script src="js/config.js"></script>
-  <script src="js/site.js?v=2"></script>
+  <script src="js/site.js?v=3"></script>
   <script>
     SLC.header('past');
     const esc = SLC.esc;
@@ -58,14 +58,14 @@
       const box = document.getElementById('tp-org');
       if (!box) return;
       if (t.status === 'ended') {
-        box.innerHTML = '<b>🏁 This tournament has ended.</b><p class="s-muted">Team photos and player details were cleared. Match stats stay in Past stats.</p>';
+        box.innerHTML = '<b>This tournament has ended.</b><p class="s-muted">Team photos and player details were cleared. Match stats stay in Past stats.</p>';
         return;
       }
-      box.innerHTML = `<h2 class="s-h2" style="margin-top:0">🛠 Organizer · team registration</h2>
+      box.innerHTML = `<h2 class="s-h2" style="margin-top:0">Organizer · team registration</h2>
         <p class="s-muted" style="margin-top:0">Send each team its link. They add player numbers, names and photos — the desktop app downloads them with <b>Get team rosters</b>.</p>
         <div id="tp-inv">Loading links…</div>
         <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="s-btn s-btn--red" id="tp-end">🏁 End tournament & clear photos</button>
+          <button class="s-btn s-btn--red" id="tp-end">End tournament & clear photos</button>
           <button class="s-btn" id="tp-forget">Forget organizer key on this device</button>
         </div>`;
       document.getElementById('tp-forget').onclick = () => { localStorage.removeItem(KEY_STORE); location.reload(); };
@@ -81,7 +81,7 @@
           const link = base + encodeURIComponent(v.token);
           const msg = encodeURIComponent(`${t.name} — please add your team's players (number, name, photo): ${link}`);
           return `<div class="t-invite"><div><b>${esc(v.team)}</b><small>${v.players ? `${v.players} players added` : 'Not filled yet'}</small></div>
-            <button class="s-btn" data-copy="${esc(link)}">📋 Copy</button>
+            <button class="s-btn" data-copy="${esc(link)}">Copy</button>
             <a class="s-btn s-btn--green" href="https://wa.me/?text=${msg}" target="_blank" rel="noopener">WhatsApp</a></div>`;
         }).join('') || '<p class="s-muted">No teams.</p>';
         document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); SLC.toast('Link copied'); });
@@ -102,14 +102,14 @@
           <section class="mp-hero">
             <div class="m-head"><span>${esc(t.overs || '')} overs · ${(t.teams || []).length} teams</span>${t.status === 'ended' ? '<span class="m-tag m-tag--done">ENDED</span>' : '<span class="m-tag m-tag--live">ACTIVE</span>'}</div>
             <h1 class="s-h1">${esc(t.name)}</h1>
-            ${t.champion ? `<div class="mp-line mp-line--result" style="text-align:left">🏆 Champions: ${esc(t.champion)}</div>` : ''}
+            ${t.champion ? `<div class="mp-line mp-line--result" style="text-align:left">Champions: ${esc(t.champion)}</div>` : ''}
             <div class="s-muted">${done} of ${matches.length} matches played on the site</div>
           </section>
-          ${tbl.some((r) => r.p) ? `<h2 class="s-h2">📊 Points table</h2><div class="t-table-wrap"><table class="t-table"><thead><tr><th>#</th><th style="text-align:left">Team</th><th>P</th><th>W</th><th>L</th><th>NR</th><th>Pts</th><th>NRR</th></tr></thead><tbody>
+          ${tbl.some((r) => r.p) ? `<h2 class="s-h2">Points table</h2><div class="t-table-wrap"><table class="t-table"><thead><tr><th>#</th><th style="text-align:left">Team</th><th>P</th><th>W</th><th>L</th><th>NR</th><th>Pts</th><th>NRR</th></tr></thead><tbody>
             ${tbl.map((r, i) => `<tr><td>${i + 1}</td><td class="tl">${esc(r.team)}</td><td>${r.p}</td><td>${r.w}</td><td>${r.l}</td><td>${r.nr}</td><td><b>${r.pts}</b></td><td>${(r.nrr >= 0 ? '+' : '') + r.nrr.toFixed(3)}</td></tr>`).join('')}
           </tbody></table></div>` : ''}
           ${[...stages.entries()].map(([k, list]) => `<h2 class="s-h2">${esc(k)} <small>${list.length}</small></h2><div class="m-grid">${list.map(SLC.matchCard).join('')}</div>`).join('') || '<div class="s-empty" style="margin-top:16px"><b>No matches uploaded yet</b></div>'}
-          ${teams.length ? `<h2 class="s-h2">👥 Teams</h2><div class="m-grid">${teams.map((x) => `<div class="m-card"><b>${esc(x.displayName || x.team)}</b><span class="m-note">${x.players} players registered</span></div>`).join('')}</div>` : ''}
+          ${teams.length ? `<h2 class="s-h2">Teams</h2><div class="m-grid">${teams.map((x) => `<div class="m-card"><b>${esc(x.displayName || x.team)}</b><span class="m-note">${x.players} players registered</span></div>`).join('')}</div>` : ''}
           ${orgKey ? '<section class="t-org" id="tp-org"></section>' : ''}`;
         if (orgKey) organizer(t);
       } catch (e) {

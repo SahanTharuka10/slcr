@@ -8,7 +8,7 @@
   <link rel="icon" href="assets/icon.png" />
   <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="css/site.css?v=4" />
+  <link rel="stylesheet" href="css/site.css?v=6" />
 </head>
 <body>
   <main class="s-wrap">
@@ -18,7 +18,7 @@
     <div id="past-list"><div class="s-empty">Loading…</div></div>
   </main>
   <script src="js/config.js"></script>
-  <script src="js/site.js?v=2"></script>
+  <script src="js/site.js?v=3"></script>
   <script>
     SLC.header('past');
     const box = document.getElementById('past-list');
@@ -37,7 +37,7 @@
         groups.get(k).items.push(m);
       });
       box.innerHTML = [...groups.values()].map((g) => `
-        <h2 class="s-h2">🏆 ${SLC.esc(g.name)} <small>${g.items.length}</small>
+        <h2 class="s-h2">${SLC.esc(g.name)} <small>${g.items.length}</small>
           ${g.id ? `<a class="s-btn" style="min-height:32px;margin-left:auto;font-size:12px" href="tournament.html?id=${encodeURIComponent(g.id)}">Table & fixtures →</a>` : ''}</h2>
         <div class="m-grid">${g.items.map(SLC.matchCard).join('')}</div>`).join('');
     }

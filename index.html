@@ -5,62 +5,69 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SLCRICKPRO – Live cricket scores & scoring</title>
   <meta name="description" content="Live softball cricket scores, free online match scoring with PDF summary, past match stats and the SLCRICKPRO desktop scoring app." />
-  <meta name="theme-color" content="#080b14" />
+  <meta name="theme-color" content="#07080d" />
   <link rel="icon" href="assets/icon.png" />
   <link rel="manifest" href="manifest.json" />
   <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="css/site.css?v=4" />
+  <link rel="stylesheet" href="css/site.css?v=6" />
 </head>
 <body>
   <main class="s-wrap">
     <section class="h-hero">
-      <h1 class="s-h1">Cricket, <em>live.</em></h1>
-      <p class="s-sub">Follow matches ball by ball, score your own match for free, and look back at every result.</p>
+      <span class="h-eyebrow"><span class="s-dot"></span>Ball-by-ball scores · Free scorer · Match stats</span>
+      <h1 class="s-h1">Every ball.<br><em>Live.</em></h1>
+      <p class="s-sub">Follow matches as they happen, score your own game for free, and look back at every result — all in one place.</p>
       <div class="h-options">
-        <a class="h-opt h-opt--live" href="live.html" data-ico="🔴">
+        <a class="h-opt h-opt--live" href="live.html">
           <span class="h-badge" id="h-live-count" hidden></span>
+          <span class="h-ico"><svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg></span>
           <b>Ongoing matches</b>
           <span>Live scores from grounds using the SLCRICKPRO app — updated every ball.</span>
-          <i>Watch live →</i>
+          <i>Watch live</i>
         </a>
-        <a class="h-opt h-opt--score" href="score.html" data-ico="🏏">
+        <a class="h-opt h-opt--score" href="score.html">
+          <span class="h-ico"><svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l9.5-9.5M13.5 10.5l3-3a2.1 2.1 0 0 1 3 3l-3 3M11 13l2 2"/><circle cx="6.5" cy="6.5" r="2.5"/></svg></span>
           <b>Score new match</b>
           <span>Score a single match or a small tournament on your phone. Download the summary PDF at the end.</span>
-          <i>Start scoring →</i>
+          <i>Start scoring</i>
         </a>
-        <a class="h-opt h-opt--past" href="past.html" data-ico="📊">
+        <a class="h-opt h-opt--past" href="past.html">
+          <span class="h-ico"><svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
           <b>Past match stats</b>
           <span>Every finished match with full scorecards, grouped by tournament.</span>
-          <i>Browse results →</i>
+          <i>Browse results</i>
         </a>
-        <a class="h-opt h-opt--app" href="#app" id="h-app" data-ico="💻">
+        <a class="h-opt h-opt--app" href="#app" id="h-app">
+          <span class="h-ico"><svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span>
           <b>Get desktop app</b>
           <span>Pro scoring for tournaments: OBS broadcast graphics, phone scorer, knockout draws.</span>
-          <i id="h-app-cta">Download →</i>
+          <i id="h-app-cta">Download</i>
         </a>
       </div>
     </section>
 
-    <h2 class="s-h2"><span>🔴 Live now</span><small id="h-live-n">…</small></h2>
+    <h2 class="s-h2"><span class="s-dot"></span><span>Live now</span><small id="h-live-n">…</small></h2>
     <div class="m-grid" id="h-live"></div>
 
-    <section id="app" class="f-card" style="margin-top:34px">
-      <h2 class="s-h1" style="font-size:34px">SLCRICKPRO Desktop</h2>
-      <p class="s-sub" style="margin-bottom:12px">Works offline on your laptop. Choose <b>Online</b> when you create a match and it appears here live. After the match, press <b>Upload to site</b> to save the stats.</p>
-      <ul class="s-muted" style="line-height:1.8;margin:0 0 16px;padding-left:18px">
-        <li>Tournaments — round robin, groups, knockout draw you can share</li>
-        <li>OBS score bars and graphics (FOUR, SIX, WICKET, player cards)</li>
+    <section id="app" class="h-app">
+      <div>
+        <h2 class="s-h1" style="font-size:clamp(30px,4.4vw,44px)">SLCRICKPRO <em>Desktop</em></h2>
+        <p class="s-sub" style="margin-bottom:22px">Works offline on your laptop. Choose <b>Online</b> when you create a match and it appears here live. After the match, press <b>Upload to site</b> to save the stats.</p>
+        <a class="s-btn s-btn--primary s-btn--lg" id="app-download" href="#" target="_blank" rel="noopener">Download for Windows</a>
+        <p class="s-muted" id="app-soon" hidden style="margin:0">Download link coming soon.</p>
+      </div>
+      <ul>
+        <li>Tournaments — round robin, groups and a knockout draw you can share</li>
+        <li>OBS score bars and graphics — FOUR, SIX, WICKET and player cards</li>
         <li>Score from your phone on the same Wi-Fi</li>
         <li>Team registration links — teams add their own players and photos</li>
       </ul>
-      <a class="s-btn s-btn--primary s-btn--lg" id="app-download" href="#" target="_blank" rel="noopener">⬇ Download for Windows</a>
-      <p class="s-muted" id="app-soon" hidden style="margin:10px 0 0">Download link coming soon.</p>
     </section>
   </main>
 
   <script src="js/config.js"></script>
-  <script src="js/site.js?v=2"></script>
+  <script src="js/site.js?v=3"></script>
   <script>
     SLC.header('home');
     const url = (SLC.cfg.desktopDownloadUrl || '').trim();

@@ -32,18 +32,29 @@
   }
 
   // ── header / footer ─────────────────────────────────────────
+  // Simple line icons (24px grid, currentColor)
+  const ICON_PATHS = {
+    live: '<circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>',
+    score: '<path d="M4 20l9.5-9.5M13.5 10.5l3-3a2.1 2.1 0 0 1 3 3l-3 3M11 13l2 2"/><circle cx="6.5" cy="6.5" r="2.5"/>',
+    past: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    app: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  };
+  const icon = (k) => `<svg class="s-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[k] || ''}</svg>`;
+
   function header(active) {
     const nav = [
-      ['live', 'live.html', '🔴 Ongoing'],
-      ['score', 'score.html', '🏏 Score match'],
-      ['past', 'past.html', '📊 Past stats'],
-      ['app', 'index.html#app', '💻 Desktop app'],
+      ['live', 'live.html', 'Live', ''],
+      ['score', 'score.html', 'Score', ' match'],
+      ['past', 'past.html', 'Past', ' stats'],
+      ['app', 'index.html#app', 'Desktop', ' app'],
     ];
     const el = document.createElement('header');
     el.className = 's-top';
     el.innerHTML = `<div class="s-top-in">
-      <a class="s-logo" href="index.html"><img src="assets/icon.png" alt="">SLCRICK<span>PRO</span></a>
-      <nav class="s-nav">${nav.map(([k, href, l]) => `<a href="${href}" class="${k === active ? 'is-on' : ''}">${l}</a>`).join('')}</nav>
+      <a class="s-logo" href="index.html"><img src="assets/icon.png" alt=""><span>SLCRICK<b>PRO</b></span></a>
+      <nav class="s-nav" aria-label="Main">${nav.map(([k, href, l, more]) => `<a href="${href}" data-k="${k}" class="${k === active ? 'is-on' : ''}"${k === active ? ' aria-current="page"' : ''}>${icon(k)}<span>${l}<span class="s-lbl-long">${more}</span></span></a>`).join('')}</nav>
       <button class="s-theme" type="button" id="s-theme" aria-label="Switch light / dark"></button>
     </div>`;
     document.body.prepend(el);
@@ -53,7 +64,7 @@
       return t ? t === 'light' : window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
     };
     const paint = () => {
-      btn.textContent = isLight() ? '🌙' : '☀️';
+      btn.innerHTML = icon(isLight() ? 'moon' : 'sun');
       btn.title = isLight() ? 'Dark mode' : 'Light mode';
     };
     btn.onclick = () => {
@@ -230,5 +241,5 @@
     await global.html2pdf().set({ margin: 8, filename: name, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, backgroundColor: '#ffffff' }, jsPDF: { unit: 'mm', format: 'a4' } }).from(el).save();
   }
 
-  global.SLC = { api, header, toast, esc, overs, ago, matchCard, statusTag, scorecardHtml, ballsHtml, teamScore, downloadSummaryPdf, cfg: CFG };
+  global.SLC = { api, header, icon, toast, esc, overs, ago, matchCard, statusTag, scorecardHtml, ballsHtml, teamScore, downloadSummaryPdf, cfg: CFG };
 })(window);

@@ -8,12 +8,12 @@
   <link rel="icon" href="assets/icon.png" />
   <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="css/site.css?v=4" />
+  <link rel="stylesheet" href="css/site.css?v=6" />
 </head>
 <body>
   <main class="s-wrap" id="mp"><div class="s-empty">Loading match…</div></main>
   <script src="js/config.js"></script>
-  <script src="js/site.js?v=2"></script>
+  <script src="js/site.js?v=3"></script>
   <script src="vendor/pdf/html2pdf.bundle.min.js" defer></script>
   <script>
     SLC.header('live');
@@ -44,27 +44,27 @@
           : '';
         now = `<div class="mp-now">
           ${chase}
-          <div class="m-row"><b>🏏 ${bats.map((b, k) => `${esc(b.name)}${cbi[inn.strikerIdx] === cbi[k] ? '*' : ''} ${b.runs}(${b.balls})`).join(' · ')}</b></div>
-          ${bowler ? `<div class="m-row"><b>⚾ ${esc(bowler.name)} ${bowler.wickets}-${bowler.runs} (${SLC.overs(bowler.balls, m.ballsPerOver)})</b></div>` : ''}
+          <div class="m-row"><b>${bats.map((b, k) => `${esc(b.name)}${cbi[inn.strikerIdx] === cbi[k] ? '*' : ''} ${b.runs}(${b.balls})`).join(' · ')}</b></div>
+          ${bowler ? `<div class="m-row"><b>${esc(bowler.name)} ${bowler.wickets}-${bowler.runs} (${SLC.overs(bowler.balls, m.ballsPerOver)})</b></div>` : ''}
           <div class="sc-balls"><span class="s-muted" style="font-size:12px;margin-right:4px">This over</span>${SLC.ballsHtml(inn.currentOver)}</div>
         </div>`;
       }
       document.title = `${m.team1} vs ${m.team2} – SLCRICKPRO`;
       root.innerHTML = `
-        <div class="m-head" style="margin-bottom:10px"><span>${m.tournamentId ? `<a href="tournament.html?id=${encodeURIComponent(m.tournamentId)}">🏆 ${esc(m.tournamentName || 'Tournament')}</a>` : 'Single match'}${m.venue ? ` · 📍 ${esc(m.venue)}` : ''} · ${esc(m.overs)} overs</span>${SLC.statusTag(m.status)}</div>
+        <div class="m-head" style="margin-bottom:10px"><span>${m.tournamentId ? `<a href="tournament.html?id=${encodeURIComponent(m.tournamentId)}">${esc(m.tournamentName || 'Tournament')}</a>` : 'Single match'}${m.venue ? ` · 📍 ${esc(m.venue)}` : ''} · ${esc(m.overs)} overs</span>${SLC.statusTag(m.status)}</div>
         <section class="mp-hero">
           <div class="mp-teams">
             <div class="mp-team"><b>${esc(m.team1)}</b><strong>${s1.text || '—'}</strong><small>${esc(s1.sub)}</small></div>
             <div class="mp-vs">vs</div>
             <div class="mp-team"><b>${esc(m.team2)}</b><strong>${s2.text || '—'}</strong><small>${esc(s2.sub)}</small></div>
           </div>
-          ${m.result ? `<div class="mp-line mp-line--result">🏆 ${esc(m.result)}</div>` : ''}
+          ${m.result ? `<div class="mp-line mp-line--result">${esc(m.result)}</div>` : ''}
           ${m.tossWinner ? `<div class="mp-line s-muted" style="font-weight:600">${esc(m.tossWinner)} won the toss and chose to ${m.tossDecision === 'bowl' ? 'bowl' : 'bat'}</div>` : ''}
           ${now}
         </section>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
-          <button class="s-btn" id="mp-pdf">⬇ Summary PDF</button>
-          <button class="s-btn" id="mp-share">🔗 Share</button>
+          <button class="s-btn" id="mp-pdf">Summary PDF</button>
+          <button class="s-btn" id="mp-share">Share</button>
           ${live ? '<span class="s-muted" style="align-self:center;font-size:13px">Auto-updating…</span>' : ''}
         </div>
         ${SLC.scorecardHtml(m)}`;

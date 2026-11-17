@@ -8,7 +8,7 @@
   <link rel="icon" href="assets/icon.png" />
   <script>try{var t=localStorage.getItem('slc_theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="css/site.css?v=4" />
+  <link rel="stylesheet" href="css/site.css?v=6" />
   <style>
     .rg-player { display: grid; grid-template-columns: 64px 70px minmax(0, 1fr) 120px 36px; gap: 8px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
     .rg-photo { width: 64px; height: 64px; border-radius: 14px; background: var(--input) center/cover no-repeat; box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; cursor: pointer; font-size: 22px; color: var(--muted); }
@@ -22,7 +22,7 @@
     <div id="rg"><div class="s-empty">Loading…</div></div>
   </main>
   <script src="js/config.js"></script>
-  <script src="js/site.js?v=2"></script>
+  <script src="js/site.js?v=3"></script>
   <script>
     SLC.header('');
     const esc = SLC.esc;
@@ -56,7 +56,7 @@
 
     function playerRow(p, i) {
       return `<div class="rg-player" data-i="${i}">
-        <label class="rg-photo" style="${p.photo ? `background-image:url('${p.photo}')` : ''}" title="Add photo">${p.photo ? '' : '📷'}<input type="file" accept="image/*" hidden data-photo></label>
+        <label class="rg-photo" style="${p.photo ? `background-image:url('${p.photo}')` : ''}" title="Add photo">${p.photo ? '' : '+'}<input type="file" accept="image/*" hidden data-photo></label>
         <input data-k="no" inputmode="numeric" maxlength="4" placeholder="No." value="${esc(p.no)}">
         <input data-k="name" maxlength="40" placeholder="Player name" value="${esc(p.name)}">
         <select data-k="role">${['Batter', 'Bowler', 'All-rounder', 'Wicket-keeper', 'Captain'].map((r) => `<option ${p.role === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
@@ -67,7 +67,7 @@
     function render() {
       const s = state;
       root.innerHTML = `
-        <div class="m-head"><span>🏆 ${esc(s.tournament.name)} · ${esc(s.tournament.overs)} overs</span></div>
+        <div class="m-head"><span>${esc(s.tournament.name)} · ${esc(s.tournament.overs)} overs</span></div>
         <h1 class="s-h1">Team registration</h1>
         <p class="s-sub">Add your players — number, name and a clear photo (face + shoulders). Photos are deleted when the tournament ends.</p>
         <div class="f-card">
@@ -107,7 +107,7 @@
         btn.disabled = true; btn.textContent = 'Saving…';
         try {
           await SLC.api(`/roster/${encodeURIComponent(token)}`, { method: 'PUT', body: { displayName: document.getElementById('rg-team').value, players } });
-          SLC.toast(`✅ Saved ${players.length} players`);
+          SLC.toast(`Saved ${players.length} players`);
         } catch (e) { SLC.toast(e.message, 'error'); }
         btn.disabled = false; btn.textContent = 'Save team';
       };
