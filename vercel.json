@@ -6,5 +6,8 @@
   "trailingSlash": false,
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/handler?path=:path*" }
+  ],
+  "crons": [
+    { "path": "/api/keepalive", "schedule": "0 3 * * *" }
   ]
 }

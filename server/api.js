@@ -177,6 +177,12 @@ app.get(['/api/ping', '/api/status'], (req, res) =>
   res.json({ ok: true, status: 'alive', build: BUILD, db: store.kind, time: new Date().toISOString() })
 );
 app.get('/api/version', (req, res) => res.json({ app: 'SLCRICKPRO', version: BUILD, db: store.kind }));
+// Daily Vercel cron (vercel.json) — touches the database so the free Supabase plan stays awake
+app.get('/api/keepalive', wrap(async (req, res) => {
+  const info = await store.ping();
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, db: store.kind, ...info, time: new Date().toISOString() });
+}));
 
 // ── matches ─────────────────────────────────────────────────────
 app.get('/api/matches', wrap(async (req, res) => {
@@ -205,7 +211,11 @@ async function saveMatch(req, res, existing) {
   m.id = id;
   const now = Date.now();
   const status = ['live', 'paused', 'completed', 'scheduled'].includes(m.status) ? m.status : 'live';
-  const completedAt = status === 'completed' ? (existing && existing.completed_at) || now : null;
+  // When the match really finished (scorer's clock), so "24h after the match" is honest even when
+  // the result is uploaded later. Ignore impossible values (future / older than a year).
+  const sent = Number((req.body.match || {}).completedAt) || 0;
+  const sentOk = sent > now - 365 * DAY && sent <= now + 5 * 60 * 1000 ? Math.min(sent, now) : 0;
+  const completedAt = status === 'completed' ? (existing && existing.completed_at) || sentOk || now : null;
   let key = null;
   let keyHash = existing && existing.key_hash;
   if (!existing) {

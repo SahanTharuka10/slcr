@@ -65,6 +65,11 @@ function pgStore() {
   const tournRow = (r) => r && { ...r, created_at: num(r.created_at), updated_at: num(r.updated_at), ended_at: num(r.ended_at) };
   return {
     kind: 'postgres',
+    /** Tiny query — keeps a free Supabase project from pausing (daily Vercel cron). */
+    async ping() {
+      const r = await q('SELECT COUNT(*)::int AS n FROM slc_matches');
+      return { matches: r[0] ? r[0].n : 0 };
+    },
     async init() {
       await q(SCHEMA);
     },
@@ -126,6 +131,9 @@ function memoryStore() {
   const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
   return {
     kind: 'memory',
+    async ping() {
+      return { matches: matches.size };
+    },
     async init() {
       console.warn('[SLCRICKPRO] DATABASE_URL not set — using in-memory store (data is lost on restart)');
     },
