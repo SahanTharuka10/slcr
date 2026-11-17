@@ -1,3 +1,3 @@
 #!/usr/bin/env node
-// Render may start "node server/index.js" — same API as render-api.js
-require('../render-api.js').startServer();
+// Render may start "node server/index.js" (or "node index.js" with Root Directory = server)
+require('./api').startServer();
